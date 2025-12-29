@@ -4,19 +4,47 @@
 <!-- RELEVANT FILES: projects/XIV-Mini-Util/Plugin.cs, projects/XIV-Mini-Util/Configuration.cs, projects/XIV-Mini-Util/Windows/MainWindow.cs -->
 <Project Sdk="Dalamud.NET.Sdk/14.0.1">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources>
     <DalamudPluginInternalName>XivMiniUtil</DalamudPluginInternalName>
     <DalamudPluginName>XIV Mini Util</DalamudPluginName>
     <DalamudPluginAuthor>Unknown</DalamudPluginAuthor>
     <DalamudPluginDescription>マテリア精製とアイテム分解を支援するミニユーティリティ。Dalamud API 14 対応。</DalamudPluginDescription>
+    <Name>XIV Mini Util</Name>
+    <Author>Unknown</Author>
+    <Description>マテリア精製とアイテム分解をワンクリックで進めるためのミニユーティリティです。対象アイテムの自動選択、確認ダイアログ操作、ジョブ条件チェック、高レベル警告を提供します。</Description>
+    <Punchline>Materia精製と分解を手早く支援します。</Punchline>
+    <InternalName>XivMiniUtil</InternalName>
+    <AssemblyName>XivMiniUtil</AssemblyName>
+    <AssemblyVersion>0.1.0</AssemblyVersion>
+    <ApplicableVersion>any</ApplicableVersion>
+    <DalamudApiLevel>14</DalamudApiLevel>
+    <Tags>utility;materia;desynth;automation</Tags>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="FFXIVClientStructs" Version="0.1.0" />
-    <PackageReference Include="Lumina" Version="3.6.0" />
+    <Reference Include="Dalamud.Bindings.ImGui">
+      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
+
+  <PropertyGroup>
+    <DevPluginOutputDir>$(APPDATA)\XIVLauncher\devPlugins\XivMiniUtil\</DevPluginOutputDir>
+  </PropertyGroup>
+
+  <Target Name="CopyDevPluginOutput" AfterTargets="Build">
+    <MakeDir Directories="$(DevPluginOutputDir)" Condition="!Exists('$(DevPluginOutputDir)')" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DevPluginOutputDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetDir)$(AssemblyName).json"
+          DestinationFiles="$(DevPluginOutputDir)manifest.json"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetDir)$(AssemblyName).json"
+          DestinationFiles="$(DevPluginOutputDir)$(AssemblyName).json"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

@@ -13,11 +13,18 @@ public enum JobCondition
     BattleOnly = 2,
 }
 
+public enum DesynthTargetMode
+{
+    All = 0,
+    Count = 1,
+}
+
 public sealed record InventoryItemInfo(
     uint ItemId,
     string Name,
     int ItemLevel,
     ushort Spiritbond,
+    int Quantity,
     InventoryType Container,
     int Slot,
     bool CanExtractMateria,
@@ -31,7 +38,9 @@ public sealed record DesynthWarningInfo(
 public sealed record DesynthOptions(
     int MinLevel,
     int MaxLevel,
-    bool SkipHighLevelWarning);
+    bool SkipHighLevelWarning,
+    DesynthTargetMode TargetMode,
+    int TargetCount);
 
 public sealed record DesynthResult(
     int ProcessedCount,

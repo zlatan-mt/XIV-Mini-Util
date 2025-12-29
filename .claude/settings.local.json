@@ -7,7 +7,8 @@
       "Bash(git init:*)",
       "Bash(git branch:*)",
       "Bash(git add:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nInitial commit: XIV Mini Util プロジェクト初期化\n\n- Dalamud API v14対応ユーティリティプラグインの仕様策定\n- マテリア精製・アイテム分解の自動化機能\n- Kiro spec-driven development設定\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nInitial commit: XIV Mini Util プロジェクト初期化\n\n- Dalamud API v14対応ユーティリティプラグインの仕様策定\n- マテリア精製・アイテム分解の自動化機能\n- Kiro spec-driven development設定\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit:*)"
     ]
   }
 }

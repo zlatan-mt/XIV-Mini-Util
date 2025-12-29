@@ -2,9 +2,10 @@
 // Description: 詳細設定を編集するための設定UIを提供する
 // Reason: メインウィンドウをシンプルに保ちながら設定を管理するため
 // RELEVANT FILES: projects/XIV-Mini-Util/Configuration.cs, projects/XIV-Mini-Util/Windows/MainWindow.cs, projects/XIV-Mini-Util/Plugin.cs
+using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
-using ImGuiNET;
 using System.Numerics;
+using ImGui = Dalamud.Bindings.ImGui.ImGui;
 using XivMiniUtil;
 
 namespace XivMiniUtil.Windows;
@@ -71,10 +72,45 @@ public sealed class ConfigWindow : Window, IDisposable
             }
             ImGui.EndCombo();
         }
+
+        var targetMode = _configuration.DesynthTargetMode;
+        if (ImGui.BeginCombo("分解対象", GetTargetModeLabel(targetMode)))
+        {
+            foreach (DesynthTargetMode mode in Enum.GetValues(typeof(DesynthTargetMode)))
+            {
+                var selected = mode == targetMode;
+                if (ImGui.Selectable(GetTargetModeLabel(mode), selected))
+                {
+                    _configuration.DesynthTargetMode = mode;
+                    _configuration.Save();
+                }
+            }
+            ImGui.EndCombo();
+        }
+
+        if (_configuration.DesynthTargetMode == DesynthTargetMode.Count)
+        {
+            var targetCount = _configuration.DesynthTargetCount;
+            if (ImGui.InputInt("分解する個数", ref targetCount))
+            {
+                _configuration.DesynthTargetCount = Math.Clamp(targetCount, 1, 999);
+                _configuration.Save();
+            }
+        }
     }
 
     public void Dispose()
     {
         // WindowSystemからの破棄時に備えた明示的なフック
+    }
+
+    private static string GetTargetModeLabel(DesynthTargetMode mode)
+    {
+        return mode switch
+        {
+            DesynthTargetMode.All => "すべて分解",
+            DesynthTargetMode.Count => "個数を指定して分解",
+            _ => mode.ToString(),
+        };
     }
 }

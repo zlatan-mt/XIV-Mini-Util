@@ -2,10 +2,12 @@
 // Description: DalamudのGameGuiを通じてアドオン操作を行う
 // Reason: UI操作の責務をサービスに分離して保守性を高めるため
 // RELEVANT FILES: projects/XIV-Mini-Util/Services/GameUiConstants.cs, projects/XIV-Mini-Util/Services/MateriaExtractService.cs, projects/XIV-Mini-Util/Services/DesynthService.cs
-using Dalamud.Game.Gui;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
 
 namespace XivMiniUtil.Services;
 
@@ -22,8 +24,8 @@ public sealed class GameUiService
 
     public unsafe bool IsAddonVisible(string addonName)
     {
-        var addonPtr = _gameGui.GetAddonByName(addonName, 1);
-        if (addonPtr == IntPtr.Zero)
+        nint addonPtr = _gameGui.GetAddonByName(addonName, 1);
+        if (addonPtr == nint.Zero)
         {
             return false;
         }
@@ -45,8 +47,8 @@ public sealed class GameUiService
 
     public unsafe bool TryConfirmMaterializeDialog()
     {
-        var addonPtr = _gameGui.GetAddonByName(GameUiConstants.MaterializeDialogAddonName, 1);
-        if (addonPtr == IntPtr.Zero)
+        nint addonPtr = _gameGui.GetAddonByName(GameUiConstants.MaterializeDialogAddonName, 1);
+        if (addonPtr == nint.Zero)
         {
             _pluginLog.Warning($"アドオンが見つかりません: {GameUiConstants.MaterializeDialogAddonName}");
             return false;
@@ -72,14 +74,124 @@ public sealed class GameUiService
             GameUiConstants.SalvageDialogConfirmValue1);
     }
 
+    public unsafe bool IsSalvageResultOpen()
+    {
+        if (!TryGetAgent(AgentId.Salvage, out var agent))
+        {
+            return false;
+        }
+
+        var salvageAgent = (AgentSalvage*)agent;
+        return salvageAgent->IsSalvageResultAddonOpen;
+    }
+
+    public bool TryCloseSalvageResult()
+    {
+        var closed = false;
+        if (IsAddonVisible(GameUiConstants.SalvageResultAddonName))
+        {
+            closed |= TryCloseAddon(GameUiConstants.SalvageResultAddonName);
+        }
+
+        if (IsAddonVisible(GameUiConstants.SalvageAutoDialogAddonName))
+        {
+            closed |= TryCloseAddon(GameUiConstants.SalvageAutoDialogAddonName);
+        }
+
+        return closed;
+    }
+
+    public unsafe bool TryRefreshSalvageItemList()
+    {
+        if (!TryGetAgent(AgentId.Salvage, out var agent))
+        {
+            return false;
+        }
+
+        var salvageAgent = (AgentSalvage*)agent;
+        salvageAgent->ItemListRefresh(salvageAgent->IsSalvageResultAddonOpen);
+        return true;
+    }
+
+    public unsafe bool TryOpenSalvageItemSelector()
+    {
+        if (!TryGetAgent(AgentId.Salvage, out var agent))
+        {
+            return false;
+        }
+
+        if (agent->IsAddonShown())
+        {
+            return true;
+        }
+
+        if (!agent->IsActivatable())
+        {
+            _pluginLog.Warning("分解ウィンドウが開けない状態です。");
+            return false;
+        }
+
+        // Agentを明示的に起動してからアドオン表示を試みる
+        agent->Show();
+        agent->ShowAddon();
+        return agent->IsAddonShown();
+    }
+
     public bool TrySelectSalvageItem(InventoryItemInfo item)
     {
+        if (TrySelectSalvageItemWithAgent(item))
+        {
+            return true;
+        }
+
         return TryFireCallback(
             GameUiConstants.SalvageItemSelectorAddonName,
             true,
             GameUiConstants.SalvageItemSelectValue0,
             (uint)item.Container,
             (uint)item.Slot);
+    }
+
+    private unsafe bool TrySelectSalvageItemWithAgent(InventoryItemInfo item)
+    {
+        if (!TryGetAgent(AgentId.Salvage, out var agent))
+        {
+            return false;
+        }
+
+        if (!agent->IsAddonShown())
+        {
+            if (!TryOpenSalvageItemSelector())
+            {
+                return false;
+            }
+        }
+
+        var manager = InventoryManager.Instance();
+        if (manager == null)
+        {
+            _pluginLog.Warning("InventoryManagerが取得できません。");
+            return false;
+        }
+
+        var container = manager->GetInventoryContainer(item.Container);
+        if (container == null)
+        {
+            _pluginLog.Warning($"インベントリコンテナが見つかりません: {item.Container}");
+            return false;
+        }
+
+        var slot = container->GetInventorySlot(item.Slot);
+        if (slot == null)
+        {
+            _pluginLog.Warning($"インベントリスロットが見つかりません: {item.Container}:{item.Slot}");
+            return false;
+        }
+
+        // Agent経由で分解対象を指定し、確認ダイアログ表示を促す
+        var salvageAgent = (AgentSalvage*)agent;
+        salvageAgent->SalvageItem(slot, (int)agent->AddonId, 0);
+        return true;
     }
 
     private unsafe bool TryFireCallback(string addonName, bool updateState, params object[] values)
@@ -106,6 +218,26 @@ public sealed class GameUiService
         }
 
         return addon->FireCallback((uint)values.Length, atkValues, updateState);
+    }
+
+    private unsafe bool TryGetAgent(AgentId agentId, out AgentInterface* agent)
+    {
+        var agentModule = AgentModule.Instance();
+        if (agentModule == null)
+        {
+            _pluginLog.Warning("AgentModuleが取得できません。");
+            agent = null;
+            return false;
+        }
+
+        agent = agentModule->GetAgentByInternalId(agentId);
+        if (agent == null)
+        {
+            _pluginLog.Warning($"Agentが取得できません: {agentId}");
+            return false;
+        }
+
+        return true;
     }
 
     private unsafe bool TryFireCallbackWithFallback(
@@ -146,8 +278,8 @@ public sealed class GameUiService
 
     private unsafe bool TryGetAddon(string addonName, out AtkUnitBase* addon)
     {
-        var addonPtr = _gameGui.GetAddonByName(addonName, 1);
-        if (addonPtr == IntPtr.Zero)
+        nint addonPtr = _gameGui.GetAddonByName(addonName, 1);
+        if (addonPtr == nint.Zero)
         {
             _pluginLog.Warning($"アドオンが見つかりません: {addonName}");
             addon = null;
@@ -162,6 +294,16 @@ public sealed class GameUiService
         }
 
         return true;
+    }
+
+    private unsafe bool TryCloseAddon(string addonName)
+    {
+        if (!TryGetAddon(addonName, out var addon))
+        {
+            return false;
+        }
+
+        return addon->Close(true);
     }
 
     private static bool TryBuildAtkValue(object value, out AtkValue atkValue)

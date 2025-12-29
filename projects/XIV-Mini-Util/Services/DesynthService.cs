@@ -17,10 +17,12 @@ public sealed class DesynthService : IDisposable
     private readonly Configuration _configuration;
 
     private readonly TimeSpan _cooldownInterval = TimeSpan.FromSeconds(1);
+    private readonly TimeSpan _confirmCooldownInterval = TimeSpan.FromSeconds(2);
 
     private DateTime _nextActionAt = DateTime.UtcNow;
     private Queue<InventoryItemInfo> _pendingItems = new();
     private InventoryItemInfo? _currentItem;
+    private int _currentItemRemaining;
     private InventoryItemInfo? _pendingWarningItem;
     private DesynthOptions? _options;
     private TaskCompletionSource<DesynthResult>? _completionSource;
@@ -28,6 +30,7 @@ public sealed class DesynthService : IDisposable
     private int _processedCount;
     private int _skippedCount;
     private int _maxItemLevel;
+    private int _remainingTargetCount;
     private DesynthState _state = DesynthState.Idle;
 
     public DesynthService(
@@ -74,6 +77,9 @@ public sealed class DesynthService : IDisposable
         _skippedCount = 0;
         _errors = new List<string>();
         _maxItemLevel = _inventoryService.GetMaxItemLevel();
+        _remainingTargetCount = options.TargetMode == DesynthTargetMode.Count
+            ? Math.Clamp(options.TargetCount, 1, 999)
+            : int.MaxValue;
 
         var items = _inventoryService.GetDesynthableItems(options.MinLevel, options.MaxLevel).ToList();
         _pendingItems = new Queue<InventoryItemInfo>(items);
@@ -82,6 +88,7 @@ public sealed class DesynthService : IDisposable
         IsProcessing = true;
         _state = DesynthState.Selecting;
         _currentItem = null;
+        _currentItemRemaining = 0;
         _nextActionAt = DateTime.UtcNow;
 
         if (_pendingItems.Count == 0)
@@ -106,6 +113,7 @@ public sealed class DesynthService : IDisposable
         {
             _skippedCount++;
             _currentItem = null;
+            _currentItemRemaining = 0;
             _pluginLog.Information($"警告により分解をスキップ: {item.Name}");
             return;
         }
@@ -152,6 +160,9 @@ public sealed class DesynthService : IDisposable
             case DesynthState.Confirming:
                 ProcessConfirming();
                 break;
+            case DesynthState.WaitingForResult:
+                ProcessWaitingForResult();
+                break;
             case DesynthState.Idle:
                 FinishProcessing();
                 break;
@@ -160,6 +171,18 @@ public sealed class DesynthService : IDisposable
 
     private void ProcessSelecting()
     {
+        if (_remainingTargetCount <= 0)
+        {
+            _state = DesynthState.Idle;
+            return;
+        }
+
+        if (_currentItem != null && _currentItemRemaining > 0)
+        {
+            SelectItemForDesynth(_currentItem);
+            return;
+        }
+
         if (_pendingItems.Count == 0)
         {
             _state = DesynthState.Idle;
@@ -168,12 +191,28 @@ public sealed class DesynthService : IDisposable
 
         if (!_gameUiService.IsAddonVisible(GameUiConstants.SalvageItemSelectorAddonName))
         {
+            if (_gameUiService.TryOpenSalvageItemSelector())
+            {
+                _pluginLog.Information("分解アイテム選択ウィンドウを開きました。");
+                _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
+                return;
+            }
+
             _pluginLog.Warning("分解アイテム選択ウィンドウが開いていません。");
-            _state = DesynthState.Idle;
+            _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
             return;
         }
 
         var item = _pendingItems.Dequeue();
+        if (item.Quantity <= 0)
+        {
+            _skippedCount++;
+            _errors.Add($"数量0のためスキップ: {item.Name}");
+            _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
+            return;
+        }
+
+        _currentItemRemaining = item.Quantity;
         if (ShouldWarn(item))
         {
             _pendingWarningItem = item;
@@ -199,6 +238,8 @@ public sealed class DesynthService : IDisposable
             _pluginLog.Warning($"分解アイテムの選択に失敗: {item.Name}");
             _skippedCount++;
             _errors.Add($"選択失敗: {item.Name}");
+            _currentItem = null;
+            _currentItemRemaining = 0;
             _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
         }
     }
@@ -228,7 +269,12 @@ public sealed class DesynthService : IDisposable
         if (_gameUiService.TryConfirmDesynth())
         {
             _processedCount++;
+            _remainingTargetCount--;
+            _currentItemRemaining = Math.Max(0, _currentItemRemaining - 1);
             _pluginLog.Information($"分解を実行: {_currentItem?.Name ?? "不明"}");
+            _state = DesynthState.WaitingForResult;
+            _nextActionAt = DateTime.UtcNow.Add(_confirmCooldownInterval);
+            return;
         }
         else
         {
@@ -237,7 +283,47 @@ public sealed class DesynthService : IDisposable
             _pluginLog.Warning($"分解の実行に失敗: {_currentItem?.Name ?? "不明"}");
         }
 
-        _currentItem = null;
+        if (_remainingTargetCount <= 0)
+        {
+            _state = DesynthState.Idle;
+            return;
+        }
+
+        if (_currentItemRemaining <= 0)
+        {
+            _currentItem = null;
+        }
+
+        _state = DesynthState.Selecting;
+        _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
+    }
+
+    private void ProcessWaitingForResult()
+    {
+        if (_gameUiService.IsSalvageResultOpen())
+        {
+            _gameUiService.TryCloseSalvageResult();
+            _gameUiService.TryRefreshSalvageItemList();
+            _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
+            return;
+        }
+
+        if (DateTime.UtcNow < _nextActionAt)
+        {
+            return;
+        }
+
+        if (_remainingTargetCount <= 0)
+        {
+            _state = DesynthState.Idle;
+            return;
+        }
+
+        if (_currentItemRemaining <= 0)
+        {
+            _currentItem = null;
+        }
+
         _state = DesynthState.Selecting;
         _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
     }
@@ -263,6 +349,7 @@ public sealed class DesynthService : IDisposable
         IsProcessing = false;
         _state = DesynthState.Idle;
         _currentItem = null;
+        _currentItemRemaining = 0;
         _pendingWarningItem = null;
         _pendingItems.Clear();
 
@@ -276,5 +363,6 @@ public sealed class DesynthService : IDisposable
         Selecting,
         WaitingForDialog,
         Confirming,
+        WaitingForResult,
     }
 }

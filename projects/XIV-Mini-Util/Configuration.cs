@@ -21,6 +21,8 @@ public sealed class Configuration : IPluginConfiguration
     public JobCondition DesynthJobCondition { get; set; } = JobCondition.Any;
     public bool DesynthWarningEnabled { get; set; } = true;
     public int DesynthWarningThreshold { get; set; } = 100;
+    public DesynthTargetMode DesynthTargetMode { get; set; } = DesynthTargetMode.All;
+    public int DesynthTargetCount { get; set; } = 1;
 
     private IDalamudPluginInterface? _pluginInterface;
 

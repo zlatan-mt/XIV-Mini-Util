@@ -2,8 +2,6 @@
 // Description: 現在のジョブ情報を取得し条件判定を提供する
 // Reason: 分解の実行条件を一箇所で判断できるようにするため
 // RELEVANT FILES: projects/XIV-Mini-Util/Models/DomainModels.cs, projects/XIV-Mini-Util/Services/DesynthService.cs, projects/XIV-Mini-Util/Windows/MainWindow.cs
-using Dalamud.Game.ClientState.Objects;
-using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Plugin.Services;
 using XivMiniUtil;
 
@@ -16,12 +14,12 @@ public sealed class JobService
         8, 9, 10, 11, 12, 13, 14, 15,
     };
 
-    private readonly IObjectTable _objectTable;
+    private readonly IPlayerState _playerState;
     private readonly IPluginLog _pluginLog;
 
-    public JobService(IObjectTable objectTable, IPluginLog pluginLog)
+    public JobService(IPlayerState playerState, IPluginLog pluginLog)
     {
-        _objectTable = objectTable;
+        _playerState = playerState;
         _pluginLog = pluginLog;
     }
 
@@ -29,8 +27,13 @@ public sealed class JobService
     {
         get
         {
-            var player = _objectTable.LocalPlayer as PlayerCharacter;
-            return player?.ClassJob?.Id;
+            if (!_playerState.IsLoaded)
+            {
+                return null;
+            }
+
+            var classJob = _playerState.ClassJob;
+            return classJob.RowId == 0 ? null : classJob.RowId;
         }
     }
 

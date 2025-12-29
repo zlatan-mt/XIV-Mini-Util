@@ -1,7 +1,12 @@
+# Path: .gitignore
+# Description: ビルド成果物やローカル環境ファイルを除外する
+# Reason: リポジトリをクリーンに保つため
+# RELEVANT FILES: projects/XIV-Mini-Util/XivMiniUtil.csproj, .kiro/specs/dalamud-utility-plugin/tasks.md, README.md
 # Build results
 [Bb]in/
 [Oo]bj/
 [Oo]ut/
+artifacts/
 
 # NuGet
 *.nupkg
@@ -31,10 +36,15 @@ packages/
 # Build logs
 *.log
 msbuild*.binlog
+*.binlog
+*.pidb
+*.cache
+*.tmp
 
 # Test results
 [Tt]est[Rr]esult*/
 *.trx
+coverage/
 
 # Dalamud plugin output
 *.zip
@@ -49,3 +59,11 @@ desktop.ini
 *~
 *.bak
 *.swp
+
+# Local caches
+.cache/
+.tmp/
+
+# ReSharper
+_ReSharper*/
+*.DotSettings.user

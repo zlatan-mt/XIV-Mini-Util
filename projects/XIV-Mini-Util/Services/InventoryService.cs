@@ -5,7 +5,7 @@
 using Dalamud.Game.ClientState;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
-using Lumina.Excel.GeneratedSheets;
+using Lumina.Excel.Sheets;
 using XivMiniUtil;
 
 namespace XivMiniUtil.Services;
@@ -29,10 +29,10 @@ public sealed class InventoryService
         InventoryType.ArmoryHands,
         InventoryType.ArmoryWaist,
         InventoryType.ArmoryLegs,
-        InventoryType.ArmoryFeet,
-        InventoryType.ArmoryEars,
+        InventoryType.ArmoryFeets,
+        InventoryType.ArmoryEar,
         InventoryType.ArmoryNeck,
-        InventoryType.ArmoryWrists,
+        InventoryType.ArmoryWrist,
         InventoryType.ArmoryRings,
     ];
 
@@ -72,7 +72,8 @@ public sealed class InventoryService
             return Array.Empty<InventoryItemInfo>();
         }
 
-        return GetItems(InventoryContainers.Concat(ArmoryContainers))
+        // 分解対象は所持品のみとする（アーマリーチェスト/装備中は除外）
+        return GetItems(InventoryContainers)
             .Where(item => item.CanDesynth && item.ItemLevel >= minLevel && item.ItemLevel <= maxLevel);
     }
 
@@ -95,16 +96,23 @@ public sealed class InventoryService
         return maxLevel;
     }
 
-    private unsafe IEnumerable<InventoryItemInfo> GetItems(IEnumerable<InventoryType> containerTypes)
+    private unsafe List<InventoryItemInfo> GetItems(IEnumerable<InventoryType> containerTypes)
     {
+        var results = new List<InventoryItemInfo>();
         var manager = InventoryManager.Instance();
         if (manager == null)
         {
             _pluginLog.Error("InventoryManagerが取得できません。");
-            yield break;
+            return results;
         }
 
         var itemSheet = _dataManager.GetExcelSheet<Item>();
+        if (itemSheet == null)
+        {
+            _pluginLog.Error("Itemシートが取得できません。");
+            return results;
+        }
+
         foreach (var containerType in containerTypes)
         {
             var container = manager->GetInventoryContainer(containerType);
@@ -121,28 +129,30 @@ public sealed class InventoryService
                     continue;
                 }
 
-                var itemRow = itemSheet?.GetRow(item->ItemId);
-                if (itemRow == null)
+                var row = itemSheet.GetRow(item->ItemId);
+                if (row.RowId == 0)
                 {
                     continue;
                 }
-
                 // itemRow.Desynthは分解可否の簡易判定として利用する
-                var canDesynth = itemRow.Desynth > 0;
-                var itemLevel = (int)itemRow.LevelItem;
-                var canExtractMateria = itemRow.MateriaSlotCount > 0;
-                var name = itemRow.Name?.ToString() ?? $"Item:{item->ItemId}";
+                var canDesynth = row.Desynth > 0;
+                var itemLevel = (int)(row.LevelItem.ValueNullable?.RowId ?? 0);
+                var canExtractMateria = row.MateriaSlotCount > 0;
+                var name = row.Name.ToString();
 
-                yield return new InventoryItemInfo(
+                results.Add(new InventoryItemInfo(
                     item->ItemId,
                     name,
                     itemLevel,
-                    item->Spiritbond,
+                    item->GetSpiritbondOrCollectability(),
+                    item->Quantity,
                     containerType,
                     slot,
                     canExtractMateria,
-                    canDesynth);
+                    canDesynth));
             }
         }
+
+        return results;
     }
 }

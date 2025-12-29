@@ -33,7 +33,7 @@ public sealed class Plugin : IDalamudPlugin
         ICommandManager commandManager,
         IFramework framework,
         IClientState clientState,
-        IObjectTable objectTable,
+        IPlayerState playerState,
         IGameGui gameGui,
         ICondition condition,
         IPluginLog pluginLog,
@@ -48,7 +48,7 @@ public sealed class Plugin : IDalamudPlugin
         _configuration.Initialize(pluginInterface);
 
         var inventoryService = new InventoryService(clientState, dataManager, pluginLog);
-        var jobService = new JobService(objectTable, pluginLog);
+        var jobService = new JobService(playerState, pluginLog);
         var gameUiService = new GameUiService(gameGui, pluginLog);
 
         _materiaService = new MateriaExtractService(
@@ -75,6 +75,7 @@ public sealed class Plugin : IDalamudPlugin
         _windowSystem.AddWindow(_configWindow);
 
         _pluginInterface.UiBuilder.Draw += _windowSystem.Draw;
+        _pluginInterface.UiBuilder.OpenMainUi += OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi += OpenConfigWindow;
 
         _commandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
@@ -87,6 +88,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         _commandManager.RemoveHandler(CommandName);
         _pluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
+        _pluginInterface.UiBuilder.OpenMainUi -= OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi -= OpenConfigWindow;
 
         _mainWindow.Dispose();
@@ -121,6 +123,11 @@ public sealed class Plugin : IDalamudPlugin
     private void OpenConfigWindow()
     {
         _configWindow.IsOpen = true;
+    }
+
+    private void OpenMainWindow()
+    {
+        _mainWindow.IsOpen = true;
     }
 
     private void PrintHelp()

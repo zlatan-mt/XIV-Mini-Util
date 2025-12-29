@@ -10,6 +10,8 @@ public static class GameUiConstants
     public const string MaterializeAddonName = "Materialize";
     public const string MaterializeDialogAddonName = "MaterializeDialog";
     public const string SalvageDialogAddonName = "SalvageDialog";
+    public const string SalvageAutoDialogAddonName = "SalvageAutoDialog";
+    public const string SalvageResultAddonName = "SalvageResult";
     public const string SalvageItemSelectorAddonName = "SalvageItemSelector";
 
     // Materialize: 既存プラグインの参照値（パッチで変化する可能性あり）

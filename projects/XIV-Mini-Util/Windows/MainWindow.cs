@@ -2,9 +2,11 @@
 // Description: メイン操作UIを提供しサービスの状態を制御する
 // Reason: ユーザーがゲーム内で機能を操作できるようにするため
 // RELEVANT FILES: projects/XIV-Mini-Util/Services/MateriaExtractService.cs, projects/XIV-Mini-Util/Services/DesynthService.cs, projects/XIV-Mini-Util/Windows/ConfigWindow.cs
+using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
-using ImGuiNET;
 using System.Numerics;
+using ImGui = Dalamud.Bindings.ImGui.ImGui;
+using ImGuiWindowFlags = Dalamud.Bindings.ImGui.ImGuiWindowFlags;
 using XivMiniUtil;
 using XivMiniUtil.Services;
 
@@ -39,7 +41,7 @@ public sealed class MainWindow : Window, IDisposable
         _desynthService.OnWarningRequired += ShowWarningDialog;
     }
 
-    public void Toggle()
+    public new void Toggle()
     {
         IsOpen = !IsOpen;
     }
@@ -117,6 +119,31 @@ public sealed class MainWindow : Window, IDisposable
             ImGui.EndCombo();
         }
 
+        var targetMode = _configuration.DesynthTargetMode;
+        if (ImGui.BeginCombo("分解対象", GetTargetModeLabel(targetMode)))
+        {
+            foreach (DesynthTargetMode mode in Enum.GetValues(typeof(DesynthTargetMode)))
+            {
+                var selected = mode == targetMode;
+                if (ImGui.Selectable(GetTargetModeLabel(mode), selected))
+                {
+                    _configuration.DesynthTargetMode = mode;
+                    _configuration.Save();
+                }
+            }
+            ImGui.EndCombo();
+        }
+
+        if (_configuration.DesynthTargetMode == DesynthTargetMode.Count)
+        {
+            var targetCount = _configuration.DesynthTargetCount;
+            if (ImGui.InputInt("分解する個数", ref targetCount))
+            {
+                _configuration.DesynthTargetCount = Math.Clamp(targetCount, 1, 999);
+                _configuration.Save();
+            }
+        }
+
         var warningEnabled = _configuration.DesynthWarningEnabled;
         if (ImGui.Checkbox("高レベル警告を有効", ref warningEnabled))
         {
@@ -131,19 +158,38 @@ public sealed class MainWindow : Window, IDisposable
             _configuration.Save();
         }
 
-        if (_desynthService.IsProcessing)
+        var isProcessing = _desynthService.IsProcessing;
+
+        if (isProcessing)
         {
-            if (ImGui.Button("分解停止"))
-            {
-                _desynthService.Stop();
-            }
+            ImGui.BeginDisabled();
         }
-        else
+
+        if (ImGui.Button("分解開始"))
         {
-            if (ImGui.Button("分解開始"))
-            {
-                _ = StartDesynthAsync();
-            }
+            _ = StartDesynthAsync();
+        }
+
+        if (isProcessing)
+        {
+            ImGui.EndDisabled();
+        }
+
+        ImGui.SameLine();
+
+        if (!isProcessing)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        if (ImGui.Button("分解停止"))
+        {
+            _desynthService.Stop();
+        }
+
+        if (!isProcessing)
+        {
+            ImGui.EndDisabled();
         }
     }
 
@@ -155,7 +201,8 @@ public sealed class MainWindow : Window, IDisposable
             _showWarningDialog = false;
         }
 
-        if (ImGui.BeginPopupModal("分解警告", ImGuiWindowFlags.AlwaysAutoResize))
+        var dialogOpen = true;
+        if (ImGui.BeginPopupModal("分解警告", ref dialogOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
             if (_warningInfo != null)
             {
@@ -196,7 +243,9 @@ public sealed class MainWindow : Window, IDisposable
         var options = new DesynthOptions(
             _configuration.DesynthMinLevel,
             _configuration.DesynthMaxLevel,
-            !_configuration.DesynthWarningEnabled);
+            !_configuration.DesynthWarningEnabled,
+            _configuration.DesynthTargetMode,
+            _configuration.DesynthTargetCount);
 
         var result = await _desynthService.StartDesynthAsync(options);
         _lastResultMessage = $"分解結果: 成功 {result.ProcessedCount} / スキップ {result.SkippedCount}";
@@ -204,5 +253,15 @@ public sealed class MainWindow : Window, IDisposable
         {
             _lastResultMessage += $" / エラー {result.Errors.Count}";
         }
+    }
+
+    private static string GetTargetModeLabel(DesynthTargetMode mode)
+    {
+        return mode switch
+        {
+            DesynthTargetMode.All => "すべて分解",
+            DesynthTargetMode.Count => "個数を指定して分解",
+            _ => mode.ToString(),
+        };
     }
 }
