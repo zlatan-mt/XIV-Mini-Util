@@ -7,10 +7,21 @@ namespace XivMiniUtil.Services;
 public static class GameUiConstants
 {
     // TODO: パッチごとの実値で更新する
-    public const string MateriaExtractAddonName = "MateriaExtract";
-    public const string DesynthAddonName = "SalvageDialog";
+    public const string MaterializeAddonName = "Materialize";
+    public const string MaterializeDialogAddonName = "MaterializeDialog";
+    public const string SalvageDialogAddonName = "SalvageDialog";
+    public const string SalvageItemSelectorAddonName = "SalvageItemSelector";
 
-    // 未確定のため -1 を使い、実行前に検証する
-    public const int MateriaExtractConfirmCallbackId = -1;
-    public const int DesynthConfirmCallbackId = -1;
+    // Materialize: 既存プラグインの参照値（パッチで変化する可能性あり）
+    public const int MaterializeSelectCallbackValue0 = 2;
+    public const uint MaterializeSelectCallbackValue1 = 0;
+    public const int MaterializeSelectCallbackPrimaryCount = 2;
+    public const int MaterializeSelectCallbackFallbackCount = 1;
+
+    // SalvageDialog: 確認ダイアログのYes操作
+    public const int SalvageDialogConfirmValue0 = 0;
+    public const bool SalvageDialogConfirmValue1 = false;
+
+    // SalvageItemSelector: アイテム選択コールバック（実装は次ステップ）
+    public const int SalvageItemSelectValue0 = 12;
 }

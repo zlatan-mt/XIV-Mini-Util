@@ -4,6 +4,7 @@
 // RELEVANT FILES: projects/XIV-Mini-Util/Services/GameUiConstants.cs, projects/XIV-Mini-Util/Services/MateriaExtractService.cs, projects/XIV-Mini-Util/Services/DesynthService.cs
 using Dalamud.Game.Gui;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace XivMiniUtil.Services;
@@ -31,65 +32,165 @@ public sealed class GameUiService
         return addon->IsVisible;
     }
 
-    public bool TryConfirmMateriaExtract()
+    public bool TrySelectMaterializeFirstItem()
     {
-        if (!IsCallbackReady(GameUiConstants.MateriaExtractConfirmCallbackId, GameUiConstants.MateriaExtractAddonName))
+        return TryFireCallbackWithFallback(
+            GameUiConstants.MaterializeAddonName,
+            GameUiConstants.MaterializeSelectCallbackPrimaryCount,
+            GameUiConstants.MaterializeSelectCallbackFallbackCount,
+            true,
+            GameUiConstants.MaterializeSelectCallbackValue0,
+            GameUiConstants.MaterializeSelectCallbackValue1);
+    }
+
+    public unsafe bool TryConfirmMaterializeDialog()
+    {
+        var addonPtr = _gameGui.GetAddonByName(GameUiConstants.MaterializeDialogAddonName, 1);
+        if (addonPtr == IntPtr.Zero)
         {
+            _pluginLog.Warning($"アドオンが見つかりません: {GameUiConstants.MaterializeDialogAddonName}");
             return false;
         }
 
-        return TryFireCallback(GameUiConstants.MateriaExtractAddonName, GameUiConstants.MateriaExtractConfirmCallbackId);
+        var addon = (AddonMaterializeDialog*)addonPtr;
+        if (addon->YesButton == null)
+        {
+            _pluginLog.Warning("マテリア精製のYesボタンが取得できません。");
+            return false;
+        }
+
+        ClickAddonButton(addon->YesButton, (AtkUnitBase*)addon);
+        return true;
     }
 
     public bool TryConfirmDesynth()
     {
-        if (!IsCallbackReady(GameUiConstants.DesynthConfirmCallbackId, GameUiConstants.DesynthAddonName))
+        return TryFireCallback(
+            GameUiConstants.SalvageDialogAddonName,
+            true,
+            GameUiConstants.SalvageDialogConfirmValue0,
+            GameUiConstants.SalvageDialogConfirmValue1);
+    }
+
+    public bool TrySelectSalvageItem(InventoryItemInfo item)
+    {
+        return TryFireCallback(
+            GameUiConstants.SalvageItemSelectorAddonName,
+            true,
+            GameUiConstants.SalvageItemSelectValue0,
+            (uint)item.Container,
+            (uint)item.Slot);
+    }
+
+    private unsafe bool TryFireCallback(string addonName, bool updateState, params object[] values)
+    {
+        if (!TryGetAddon(addonName, out var addon))
         {
             return false;
         }
 
-        return TryFireCallback(GameUiConstants.DesynthAddonName, GameUiConstants.DesynthConfirmCallbackId);
+        if (values.Length == 0)
+        {
+            _pluginLog.Warning($"Callback値が空のためスキップします: {addonName}");
+            return false;
+        }
+
+        var atkValues = stackalloc AtkValue[values.Length];
+        for (var i = 0; i < values.Length; i++)
+        {
+            if (!TryBuildAtkValue(values[i], out atkValues[i]))
+            {
+                _pluginLog.Warning($"未対応の型のためコールバックを中止します: {addonName}");
+                return false;
+            }
+        }
+
+        return addon->FireCallback((uint)values.Length, atkValues, updateState);
     }
 
-    private bool IsCallbackReady(int callbackId, string addonName)
+    private unsafe bool TryFireCallbackWithFallback(
+        string addonName,
+        int primaryCount,
+        int fallbackCount,
+        bool updateState,
+        params object[] values)
     {
-        if (callbackId >= 0)
+        if (!TryGetAddon(addonName, out var addon))
+        {
+            return false;
+        }
+
+        if (values.Length == 0)
+        {
+            _pluginLog.Warning($"Callback値が空のためスキップします: {addonName}");
+            return false;
+        }
+
+        var atkValues = stackalloc AtkValue[values.Length];
+        for (var i = 0; i < values.Length; i++)
+        {
+            if (!TryBuildAtkValue(values[i], out atkValues[i]))
+            {
+                _pluginLog.Warning($"未対応の型のためコールバックを中止します: {addonName}");
+                return false;
+            }
+        }
+
+        if (addon->FireCallback((uint)primaryCount, atkValues, updateState))
         {
             return true;
         }
 
-        _pluginLog.Warning($"Callback ID未設定のため操作をスキップします: {addonName}");
-        return false;
+        return addon->FireCallback((uint)fallbackCount, atkValues, updateState);
     }
 
-    private unsafe bool TryFireCallback(string addonName, int callbackId)
+    private unsafe bool TryGetAddon(string addonName, out AtkUnitBase* addon)
     {
         var addonPtr = _gameGui.GetAddonByName(addonName, 1);
         if (addonPtr == IntPtr.Zero)
         {
             _pluginLog.Warning($"アドオンが見つかりません: {addonName}");
+            addon = null;
             return false;
         }
 
-        var addon = (AtkUnitBase*)addonPtr;
+        addon = (AtkUnitBase*)addonPtr;
         if (!addon->IsVisible)
         {
             _pluginLog.Warning($"アドオンが非表示です: {addonName}");
             return false;
         }
 
-        // コールバックはパッチ依存のため、失敗時はログに残して次の処理へ進む
-        var value = CreateIntValue(callbackId);
-        addon->FireCallback(1, &value);
         return true;
     }
 
-    private static AtkValue CreateIntValue(int value)
+    private static bool TryBuildAtkValue(object value, out AtkValue atkValue)
     {
-        return new AtkValue
+        atkValue = new AtkValue();
+        switch (value)
         {
-            Type = ValueType.Int,
-            Int = value,
-        };
+            case int intValue:
+                atkValue.Type = ValueType.Int;
+                atkValue.Int = intValue;
+                return true;
+            case uint uintValue:
+                atkValue.Type = ValueType.UInt;
+                atkValue.UInt = uintValue;
+                return true;
+            case bool boolValue:
+                atkValue.Type = ValueType.Bool;
+                atkValue.Byte = (byte)(boolValue ? 1 : 0);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static unsafe void ClickAddonButton(AtkComponentButton* button, AtkUnitBase* addon)
+    {
+        var buttonNode = button->AtkComponentBase.OwnerNode;
+        var resNode = buttonNode->AtkResNode;
+        var evt = (AtkEvent*)resNode.AtkEventManager.Event;
+        addon->ReceiveEvent(evt->State.EventType, (int)evt->Param, resNode.AtkEventManager.Event);
     }
 }

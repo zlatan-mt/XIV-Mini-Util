@@ -20,6 +20,7 @@ public sealed class DesynthService : IDisposable
 
     private DateTime _nextActionAt = DateTime.UtcNow;
     private Queue<InventoryItemInfo> _pendingItems = new();
+    private InventoryItemInfo? _currentItem;
     private InventoryItemInfo? _pendingWarningItem;
     private DesynthOptions? _options;
     private TaskCompletionSource<DesynthResult>? _completionSource;
@@ -27,6 +28,7 @@ public sealed class DesynthService : IDisposable
     private int _processedCount;
     private int _skippedCount;
     private int _maxItemLevel;
+    private DesynthState _state = DesynthState.Idle;
 
     public DesynthService(
         IFramework framework,
@@ -78,6 +80,8 @@ public sealed class DesynthService : IDisposable
 
         _completionSource = new TaskCompletionSource<DesynthResult>();
         IsProcessing = true;
+        _state = DesynthState.Selecting;
+        _currentItem = null;
         _nextActionAt = DateTime.UtcNow;
 
         if (_pendingItems.Count == 0)
@@ -101,11 +105,12 @@ public sealed class DesynthService : IDisposable
         if (!proceed)
         {
             _skippedCount++;
+            _currentItem = null;
             _pluginLog.Information($"警告により分解をスキップ: {item.Name}");
             return;
         }
 
-        ExecuteDesynth(item);
+        SelectItemForDesynth(item);
     }
 
     public void Stop()
@@ -136,9 +141,35 @@ public sealed class DesynthService : IDisposable
             return;
         }
 
+        switch (_state)
+        {
+            case DesynthState.Selecting:
+                ProcessSelecting();
+                break;
+            case DesynthState.WaitingForDialog:
+                ProcessWaitingForDialog();
+                break;
+            case DesynthState.Confirming:
+                ProcessConfirming();
+                break;
+            case DesynthState.Idle:
+                FinishProcessing();
+                break;
+        }
+    }
+
+    private void ProcessSelecting()
+    {
         if (_pendingItems.Count == 0)
         {
-            FinishProcessing();
+            _state = DesynthState.Idle;
+            return;
+        }
+
+        if (!_gameUiService.IsAddonVisible(GameUiConstants.SalvageItemSelectorAddonName))
+        {
+            _pluginLog.Warning("分解アイテム選択ウィンドウが開いていません。");
+            _state = DesynthState.Idle;
             return;
         }
 
@@ -146,11 +177,69 @@ public sealed class DesynthService : IDisposable
         if (ShouldWarn(item))
         {
             _pendingWarningItem = item;
+            _currentItem = item;
             OnWarningRequired?.Invoke(new DesynthWarningInfo(item.Name, item.ItemLevel, _maxItemLevel));
             return;
         }
 
-        ExecuteDesynth(item);
+        SelectItemForDesynth(item);
+    }
+
+    private void SelectItemForDesynth(InventoryItemInfo item)
+    {
+        if (_gameUiService.TrySelectSalvageItem(item))
+        {
+            _pluginLog.Information($"分解アイテムを選択: {item.Name}");
+            _currentItem = item;
+            _state = DesynthState.WaitingForDialog;
+            _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
+        }
+        else
+        {
+            _pluginLog.Warning($"分解アイテムの選択に失敗: {item.Name}");
+            _skippedCount++;
+            _errors.Add($"選択失敗: {item.Name}");
+            _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
+        }
+    }
+
+    private void ProcessWaitingForDialog()
+    {
+        if (_gameUiService.IsAddonVisible(GameUiConstants.SalvageDialogAddonName))
+        {
+            _state = DesynthState.Confirming;
+            return;
+        }
+
+        // ダイアログが開くまで待機（タイムアウトは設けない）
+        _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
+    }
+
+    private void ProcessConfirming()
+    {
+        if (!_gameUiService.IsAddonVisible(GameUiConstants.SalvageDialogAddonName))
+        {
+            // ダイアログが閉じた = 完了または中断
+            _state = DesynthState.Selecting;
+            _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
+            return;
+        }
+
+        if (_gameUiService.TryConfirmDesynth())
+        {
+            _processedCount++;
+            _pluginLog.Information($"分解を実行: {_currentItem?.Name ?? "不明"}");
+        }
+        else
+        {
+            _skippedCount++;
+            _errors.Add($"分解失敗: {_currentItem?.Name ?? "不明"}");
+            _pluginLog.Warning($"分解の実行に失敗: {_currentItem?.Name ?? "不明"}");
+        }
+
+        _currentItem = null;
+        _state = DesynthState.Selecting;
+        _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
     }
 
     private bool ShouldWarn(InventoryItemInfo item)
@@ -169,40 +258,23 @@ public sealed class DesynthService : IDisposable
         return item.ItemLevel >= threshold;
     }
 
-    private void ExecuteDesynth(InventoryItemInfo item)
-    {
-        if (!_gameUiService.IsAddonVisible(GameUiConstants.DesynthAddonName))
-        {
-            _pluginLog.Warning("分解ダイアログが開いていません。");
-            _skippedCount++;
-            _errors.Add($"分解スキップ: {item.Name}");
-            _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
-            return;
-        }
-
-        // UI操作はパッチ依存のため、失敗時も処理を継続できるようにする
-        if (_gameUiService.TryConfirmDesynth())
-        {
-            _processedCount++;
-            _pluginLog.Information($"分解を実行: {item.Name}");
-        }
-        else
-        {
-            _skippedCount++;
-            _errors.Add($"分解失敗: {item.Name}");
-            _pluginLog.Warning($"分解の実行に失敗: {item.Name}");
-        }
-
-        _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
-    }
-
     private void FinishProcessing()
     {
         IsProcessing = false;
+        _state = DesynthState.Idle;
+        _currentItem = null;
         _pendingWarningItem = null;
         _pendingItems.Clear();
 
         _completionSource?.TrySetResult(new DesynthResult(_processedCount, _skippedCount, _errors));
         _completionSource = null;
+    }
+
+    private enum DesynthState
+    {
+        Idle,
+        Selecting,
+        WaitingForDialog,
+        Confirming,
     }
 }

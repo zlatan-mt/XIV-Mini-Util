@@ -132,22 +132,35 @@ public sealed class MateriaExtractService : IDisposable
             return;
         }
 
-        if (!_gameUiService.IsAddonVisible(GameUiConstants.MateriaExtractAddonName))
+        if (_gameUiService.IsAddonVisible(GameUiConstants.MaterializeDialogAddonName))
         {
-            _pluginLog.Warning("マテリア精製ダイアログが開いていません。");
-            _state = ExtractState.Waiting;
-            _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
-            return;
+            // UI操作はパッチ依存のため、失敗時もループが止まらないようにする
+            if (_gameUiService.TryConfirmMaterializeDialog())
+            {
+                _pluginLog.Information($"マテリア精製を実行: {_currentItem.Name}");
+            }
+            else
+            {
+                _pluginLog.Warning($"マテリア精製の実行に失敗: {_currentItem.Name}");
+            }
         }
-
-        // UI操作はパッチ依存のため、失敗時もループが止まらないようにする
-        if (_gameUiService.TryConfirmMateriaExtract())
+        else if (_gameUiService.IsAddonVisible(GameUiConstants.MaterializeAddonName))
         {
-            _pluginLog.Information($"マテリア精製を実行: {_currentItem.Name}");
+            if (_gameUiService.TrySelectMaterializeFirstItem())
+            {
+                _pluginLog.Information($"マテリア精製の選択を実行: {_currentItem.Name}");
+            }
+            else
+            {
+                _pluginLog.Warning($"マテリア精製の選択に失敗: {_currentItem.Name}");
+            }
         }
         else
         {
-            _pluginLog.Warning($"マテリア精製の実行に失敗: {_currentItem.Name}");
+            _pluginLog.Warning("マテリア精製ウィンドウが開いていません。");
+            _state = ExtractState.Waiting;
+            _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
+            return;
         }
 
         _currentItem = null;
