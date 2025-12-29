@@ -68,7 +68,7 @@
 **Objective:** As a プレイヤー, I want 高レベルアイテムの誤分解を防ぎたい, so that 重要なアイテムを失わない
 
 #### Acceptance Criteria
-1. The Plugin shall 所持アイテムの最高アイテムレベルを取得する
+1. The Plugin shall 所持アイテム（所持品、アーマリーチェスト、装備中アイテム）の最高アイテムレベルを取得する
 2. When 分解対象アイテムのレベルが（最高レベル - 100）以上の場合, the Plugin shall 警告ダイアログを表示する
 3. If 警告ダイアログで「はい」が選択された場合, then the Plugin shall 分解を実行する
 4. If 警告ダイアログで「いいえ」が選択された場合, then the Plugin shall 分解をキャンセルする

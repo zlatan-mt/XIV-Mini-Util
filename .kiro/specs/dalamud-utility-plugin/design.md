@@ -421,6 +421,11 @@ public class MateriaExtractService : IMateriaExtractService
 - Postconditions: 精製可能アイテムが順次処理される
 - Invariants: 同時に1アイテムのみ処理
 
+**Implementation Notes**
+- Integration: ステートマシン方式（Idle→Scanning→Extracting→Waiting）で実装し、毎フレームのインベントリスキャンを回避
+- Validation: アドオンのIsVisibleチェックを実行前に必須
+- Maintenance: アドオン名・コールバック引数は定数クラスで一元管理（パッチ対応を容易化）
+
 #### DesynthService
 
 | Field | Detail |
@@ -485,6 +490,10 @@ public record DesynthResult(
 - Postconditions: 対象アイテムが分解される
 - Invariants: 警告待ち状態では処理を一時停止
 
+**Implementation Notes**
+- Validation: アドオンのIsVisibleチェックを実行前に必須
+- Maintenance: アドオン名・コールバック引数は定数クラスで一元管理（パッチ対応を容易化）
+
 #### InventoryService
 
 | Field | Detail |
@@ -493,9 +502,9 @@ public record DesynthResult(
 | Requirements | 9.1, 9.2, 9.3, 9.4, 9.5 |
 
 **Responsibilities & Constraints**
-- 所持品・アーマリーチェストのスキャン
+- 所持品・アーマリーチェスト・装備中アイテムのスキャン
 - アイテム情報（スピリットボンド、レベル、分解可否）の取得
-- 最高アイテムレベルの算出
+- 最高アイテムレベルの算出（装備中アイテムを含む、警告閾値の正確な計算のため）
 
 **Dependencies**
 - Inbound: MateriaExtractService, DesynthService — データ取得 (P0)
@@ -510,7 +519,7 @@ public interface IInventoryService
 {
     IEnumerable<InventoryItemInfo> GetExtractableItems();
     IEnumerable<InventoryItemInfo> GetDesynthableItems(int minLevel, int maxLevel);
-    int GetMaxItemLevel();
+    int GetMaxItemLevel();  // 所持品・アーマリーチェスト・装備中アイテムから算出
     bool IsPlayerLoggedIn { get; }
 }
 
@@ -531,7 +540,7 @@ public record InventoryItemInfo(
     string Name,
     int ItemLevel,
     ushort Spiritbond,
-    InventoryType Container,
+    InventoryType Container,  // Inventory, ArmoryXxx, EquippedItems
     int Slot,
     bool CanExtractMateria,
     bool CanDesynth);
@@ -539,6 +548,9 @@ public record InventoryItemInfo(
 - Preconditions: ゲームクライアントが起動済み
 - Postconditions: 最新のインベントリ状態を返す
 - Invariants: データは読み取り専用
+
+**Implementation Notes**
+- Integration: GetMaxItemLevel()はEquippedItemsを含めてスキャンし、正確な警告閾値を算出
 
 #### JobService
 
