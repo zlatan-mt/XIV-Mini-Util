@@ -1,0 +1,22 @@
+<!-- Path: projects/XIV-Mini-Util/XivMiniUtil.csproj -->
+<!-- Description: Dalamudプラグインのビルド設定を定義する -->
+<!-- Reason: .NET 10とDalamud.NET.Sdkでプラグインを生成するため -->
+<!-- RELEVANT FILES: projects/XIV-Mini-Util/Plugin.cs, projects/XIV-Mini-Util/Configuration.cs, projects/XIV-Mini-Util/Windows/MainWindow.cs -->
+<Project Sdk="Dalamud.NET.Sdk/14.0.1">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DalamudPluginInternalName>XivMiniUtil</DalamudPluginInternalName>
+    <DalamudPluginName>XIV Mini Util</DalamudPluginName>
+    <DalamudPluginAuthor>Unknown</DalamudPluginAuthor>
+    <DalamudPluginDescription>マテリア精製とアイテム分解を支援するミニユーティリティ。Dalamud API 14 対応。</DalamudPluginDescription>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FFXIVClientStructs" Version="0.1.0" />
+    <PackageReference Include="Lumina" Version="3.6.0" />
+  </ItemGroup>
+</Project>
