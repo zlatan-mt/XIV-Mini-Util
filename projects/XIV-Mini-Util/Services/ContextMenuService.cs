@@ -47,6 +47,12 @@ public sealed class ContextMenuService : IDisposable
         var hasData = _shopDataCache.HasShopData(itemId);
         var label = BuildMenuLabel(isReady, hasData);
 
+        // 販売データがない場合は診断ログを出力
+        if (isReady && !hasData)
+        {
+            _shopDataCache.LogMissingItemDiagnostics(itemId);
+        }
+
         // MenuItemはNameとOnClickedを明示的に設定する
         var menuItem = new MenuItem
         {
@@ -75,7 +81,7 @@ public sealed class ContextMenuService : IDisposable
         _shopSearchService.Search(itemId);
     }
 
-    private static bool TryGetItemId(object target, out uint itemId)
+    private bool TryGetItemId(object target, out uint itemId)
     {
         // インベントリアイテム
         if (target is MenuTargetInventory inventoryTarget && inventoryTarget.TargetItem is { } inventoryItem)
@@ -87,6 +93,24 @@ public sealed class ContextMenuService : IDisposable
         // チャットリンク等の一般的なコンテキストメニュー
         if (target is MenuTargetDefault defaultTarget)
         {
+            // デバッグ: MenuTargetDefaultのプロパティを出力
+            var props = defaultTarget.GetType().GetProperties()
+                .Where(p => p.GetIndexParameters().Length == 0)
+                .Select(p =>
+                {
+                    try
+                    {
+                        var val = p.GetValue(defaultTarget);
+                        return $"{p.Name}={val}";
+                    }
+                    catch
+                    {
+                        return $"{p.Name}=<error>";
+                    }
+                })
+                .ToArray();
+            _pluginLog.Information($"MenuTargetDefault: {string.Join(", ", props)}");
+
             // TargetItemIdから直接取得
             if (TryGetProperty(defaultTarget, "TargetItemId", out var targetItemId) && targetItemId is uint chatItemId && chatItemId != 0)
             {

@@ -46,9 +46,12 @@ public sealed class ChatService
             var payload = _mapService.CreateMapLink(location);
             if (payload != null)
             {
+                // マップリンクを正しく表示するにはUiForegroundで囲む必要がある
+                builder.AddUiForeground(0x01F4); // マップリンク用の色 (500)
                 builder.Add(payload);
                 builder.AddText($"({location.MapX:0.0}, {location.MapY:0.0})");
                 builder.Add(RawPayload.LinkTerminator);
+                builder.AddUiForegroundOff();
             }
 
             _chatGui.Print(new XivChatEntry
@@ -76,6 +79,6 @@ public sealed class ChatService
             ? location.AreaName
             : $"{location.AreaName} {location.SubAreaName}";
 
-        return $"{areaLabel} / {location.NpcName} (X:{location.MapX:0.0}, Y:{location.MapY:0.0})";
+        return $"{areaLabel} / {location.NpcName} ";
     }
 }
