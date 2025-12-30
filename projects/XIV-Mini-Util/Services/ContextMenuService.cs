@@ -5,6 +5,7 @@
 using Dalamud.Game.Gui.ContextMenu;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 
 namespace XivMiniUtil.Services;
 
@@ -13,17 +14,20 @@ public sealed class ContextMenuService : IDisposable
     private const string SearchLabel = "販売場所を検索";
 
     private readonly IContextMenu _contextMenu;
+    private readonly IGameGui _gameGui;
     private readonly ShopSearchService _shopSearchService;
     private readonly ShopDataCache _shopDataCache;
     private readonly IPluginLog _pluginLog;
 
     public ContextMenuService(
         IContextMenu contextMenu,
+        IGameGui gameGui,
         ShopSearchService shopSearchService,
         ShopDataCache shopDataCache,
         IPluginLog pluginLog)
     {
         _contextMenu = contextMenu;
+        _gameGui = gameGui;
         _shopSearchService = shopSearchService;
         _shopDataCache = shopDataCache;
         _pluginLog = pluginLog;
@@ -38,7 +42,8 @@ public sealed class ContextMenuService : IDisposable
 
     private void OnMenuOpened(IMenuOpenedArgs args)
     {
-        if (!TryGetItemId(args.Target, out var itemId))
+        var addonName = args.AddonName ?? string.Empty;
+        if (!TryGetItemId(args.Target, addonName, out var itemId))
         {
             return;
         }
@@ -66,7 +71,8 @@ public sealed class ContextMenuService : IDisposable
 
     private void OnSearchClicked(IMenuItemClickedArgs args)
     {
-        if (!TryGetItemId(args.Target, out var itemId))
+        var addonName = args.AddonName ?? string.Empty;
+        if (!TryGetItemId(args.Target, addonName, out var itemId))
         {
             _pluginLog.Warning("販売場所検索の対象アイテムが取得できませんでした。");
             return;
@@ -81,7 +87,7 @@ public sealed class ContextMenuService : IDisposable
         _shopSearchService.Search(itemId);
     }
 
-    private bool TryGetItemId(object target, out uint itemId)
+    private bool TryGetItemId(object target, string addonName, out uint itemId)
     {
         // インベントリアイテム
         if (target is MenuTargetInventory inventoryTarget && inventoryTarget.TargetItem is { } inventoryItem)
@@ -90,7 +96,29 @@ public sealed class ContextMenuService : IDisposable
             return itemId != 0;
         }
 
-        // チャットリンク等の一般的なコンテキストメニュー
+        // Agent経由でItemIdを取得（チャットログ、レシピノートなど）
+        var agentItemId = GetItemIdFromAgent(addonName);
+        if (agentItemId != 0)
+        {
+            itemId = agentItemId;
+            _pluginLog.Information($"Agent経由でItemId取得: {itemId} (Addon: {addonName})");
+            return true;
+        }
+
+        // フォールバック: HoveredItemから取得
+        var hoveredItem = _gameGui.HoveredItem;
+        if (hoveredItem > 0)
+        {
+            var hoveredItemId = (uint)(hoveredItem % 500000);
+            if (hoveredItemId != 0)
+            {
+                itemId = hoveredItemId;
+                _pluginLog.Information($"HoveredItem経由でItemId取得: {itemId}");
+                return true;
+            }
+        }
+
+        // チャットリンク等の一般的なコンテキストメニュー（デバッグ用）
         if (target is MenuTargetDefault defaultTarget)
         {
             // デバッグ: MenuTargetDefaultのプロパティを出力
@@ -155,6 +183,49 @@ public sealed class ContextMenuService : IDisposable
 
         itemId = 0;
         return false;
+    }
+
+    private unsafe uint GetItemIdFromAgent(string addonName)
+    {
+        try
+        {
+            uint itemId = 0;
+
+            switch (addonName)
+            {
+                case "ChatLog":
+                    var agentChatLog = AgentChatLog.Instance();
+                    if (agentChatLog != null)
+                    {
+                        itemId = agentChatLog->ContextItemId;
+                    }
+                    break;
+
+                case "RecipeNote":
+                    var agentRecipeNote = AgentRecipeNote.Instance();
+                    if (agentRecipeNote != null)
+                    {
+                        itemId = agentRecipeNote->ContextMenuResultItemId;
+                    }
+                    break;
+
+                case "ItemSearch":
+                    var agentContext = AgentContext.Instance();
+                    if (agentContext != null)
+                    {
+                        itemId = (uint)agentContext->UpdateCheckerParam;
+                    }
+                    break;
+            }
+
+            // HQ品のIDを通常品に正規化
+            return itemId % 500000;
+        }
+        catch (Exception ex)
+        {
+            _pluginLog.Warning(ex, $"Agent経由のItemId取得に失敗: {addonName}");
+            return 0;
+        }
     }
 
     private static string BuildMenuLabel(bool isReady, bool hasData)

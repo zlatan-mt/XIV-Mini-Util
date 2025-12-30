@@ -78,7 +78,7 @@ public sealed class Plugin : IDalamudPlugin
         _mapService = new MapService(gameGui, pluginLog);
         _chatService = new ChatService(chatGui, _mapService);
         _shopSearchService = new ShopSearchService(_shopDataCache, _mapService, _chatService, _configuration, pluginLog);
-        _contextMenuService = new ContextMenuService(contextMenu, _shopSearchService, _shopDataCache, pluginLog);
+        _contextMenuService = new ContextMenuService(contextMenu, gameGui, _shopSearchService, _shopDataCache, pluginLog);
 
         _mainWindow = new MainWindow(_configuration, _materiaService, _desynthService, _shopDataCache);
         _shopSearchResultWindow = new ShopSearchResultWindow(_mapService);

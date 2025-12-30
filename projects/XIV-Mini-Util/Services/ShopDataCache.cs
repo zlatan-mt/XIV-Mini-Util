@@ -189,6 +189,16 @@ public sealed class ShopDataCache
                     var npcInfoCount = _gilShopNpcInfos.TryGetValue(shopId, out var list) ? list.Count : 0;
                     var validLocationCount = list?.Count(IsValidLocation) ?? 0;
                     _pluginLog.Warning($"GilShopItemヒット: ShopId={shopId} NpcCount={npcInfoCount} ValidLocation={validLocationCount}");
+
+                    // NPC詳細情報を出力
+                    if (list != null)
+                    {
+                        foreach (var npc in list)
+                        {
+                            _pluginLog.Warning($"  NPC: {npc.NpcName} (ID:{npc.NpcId}) @ {npc.AreaName} (Territory:{npc.TerritoryTypeId}, Map:{npc.MapId}, X:{npc.MapX}, Y:{npc.MapY})");
+                        }
+                    }
+
                     logged++;
                 }
             }
