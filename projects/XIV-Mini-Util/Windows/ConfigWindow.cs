@@ -97,6 +97,9 @@ public sealed class ConfigWindow : Window, IDisposable
                 _configuration.Save();
             }
         }
+
+        ImGui.Separator();
+        DrawShopSearchPriority();
     }
 
     public void Dispose()
@@ -112,5 +115,60 @@ public sealed class ConfigWindow : Window, IDisposable
             DesynthTargetMode.Count => "個数を指定して分解",
             _ => mode.ToString(),
         };
+    }
+
+    private void DrawShopSearchPriority()
+    {
+        ImGui.Text("販売場所検索");
+        ImGui.Text("エリア優先度");
+
+        var priorities = _configuration.ShopSearchAreaPriority;
+        if (priorities.Count == 0)
+        {
+            ImGui.Text("優先度リストが空です。");
+        }
+
+        // リストの並び替えと編集を1パスで行う
+        for (var i = 0; i < priorities.Count; i++)
+        {
+            ImGui.PushID(i);
+            var value = (int)priorities[i];
+            if (ImGui.InputInt("##PriorityId", ref value))
+            {
+                priorities[i] = (uint)Math.Max(0, value);
+                _configuration.Save();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("↑") && i > 0)
+            {
+                (priorities[i - 1], priorities[i]) = (priorities[i], priorities[i - 1]);
+                _configuration.Save();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("↓") && i < priorities.Count - 1)
+            {
+                (priorities[i + 1], priorities[i]) = (priorities[i], priorities[i + 1]);
+                _configuration.Save();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("削除"))
+            {
+                priorities.RemoveAt(i);
+                _configuration.Save();
+                ImGui.PopID();
+                break;
+            }
+
+            ImGui.PopID();
+        }
+
+        if (ImGui.Button("エリア追加"))
+        {
+            priorities.Add(0);
+            _configuration.Save();
+        }
     }
 }

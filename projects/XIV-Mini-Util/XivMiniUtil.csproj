@@ -41,10 +41,12 @@
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DevPluginOutputDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(TargetDir)$(AssemblyName).json"
           DestinationFiles="$(DevPluginOutputDir)manifest.json"
-          SkipUnchangedFiles="true" />
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(TargetDir)$(AssemblyName).json')" />
     <Copy SourceFiles="$(TargetDir)$(AssemblyName).json"
           DestinationFiles="$(DevPluginOutputDir)$(AssemblyName).json"
-          SkipUnchangedFiles="true" />
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(TargetDir)$(AssemblyName).json')" />
   </Target>
 
 </Project>

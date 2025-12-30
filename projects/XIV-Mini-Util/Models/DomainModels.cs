@@ -46,3 +46,23 @@ public sealed record DesynthResult(
     int ProcessedCount,
     int SkippedCount,
     List<string> Errors);
+
+public sealed record ShopLocationInfo(
+    uint ShopId,
+    string ShopName,
+    string NpcName,
+    uint TerritoryTypeId,
+    string AreaName,
+    string SubAreaName,
+    uint MapId,
+    float MapX,
+    float MapY,
+    int Price,
+    string ConditionNote);
+
+public sealed record SearchResult(
+    uint ItemId,
+    string ItemName,
+    IReadOnlyList<ShopLocationInfo> Locations,
+    bool Success,
+    string? ErrorMessage);

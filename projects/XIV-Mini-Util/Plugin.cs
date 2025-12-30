@@ -23,8 +23,14 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Configuration _configuration;
     private readonly MateriaExtractService _materiaService;
     private readonly DesynthService _desynthService;
+    private readonly ShopDataCache _shopDataCache;
+    private readonly MapService _mapService;
+    private readonly ChatService _chatService;
+    private readonly ShopSearchService _shopSearchService;
+    private readonly ContextMenuService _contextMenuService;
     private readonly MainWindow _mainWindow;
     private readonly ConfigWindow _configWindow;
+    private readonly ShopSearchResultWindow _shopSearchResultWindow;
 
     public string Name => "XIV Mini Util";
 
@@ -38,7 +44,8 @@ public sealed class Plugin : IDalamudPlugin
         ICondition condition,
         IPluginLog pluginLog,
         IDataManager dataManager,
-        IChatGui chatGui)
+        IChatGui chatGui,
+        IContextMenu contextMenu)
     {
         _pluginInterface = pluginInterface;
         _commandManager = commandManager;
@@ -67,12 +74,20 @@ public sealed class Plugin : IDalamudPlugin
             gameUiService,
             _configuration);
 
+        _shopDataCache = new ShopDataCache(dataManager, pluginLog);
+        _mapService = new MapService(gameGui, pluginLog);
+        _chatService = new ChatService(chatGui, _mapService);
+        _shopSearchService = new ShopSearchService(_shopDataCache, _mapService, _chatService, _configuration, pluginLog);
+        _contextMenuService = new ContextMenuService(contextMenu, _shopSearchService, _shopDataCache, pluginLog);
+
         _mainWindow = new MainWindow(_configuration, _materiaService, _desynthService);
         _configWindow = new ConfigWindow(_configuration);
+        _shopSearchResultWindow = new ShopSearchResultWindow(_mapService);
 
         _windowSystem = new WindowSystem("XIV Mini Util");
         _windowSystem.AddWindow(_mainWindow);
         _windowSystem.AddWindow(_configWindow);
+        _windowSystem.AddWindow(_shopSearchResultWindow);
 
         _pluginInterface.UiBuilder.Draw += _windowSystem.Draw;
         _pluginInterface.UiBuilder.OpenMainUi += OpenMainWindow;
@@ -82,6 +97,9 @@ public sealed class Plugin : IDalamudPlugin
         {
             HelpMessage = "メインウィンドウを開きます。サブコマンド: config / help",
         });
+
+        _shopSearchService.OnSearchCompleted += OnShopSearchCompleted;
+        _ = _shopDataCache.InitializeAsync();
     }
 
     public void Dispose()
@@ -93,8 +111,11 @@ public sealed class Plugin : IDalamudPlugin
 
         _mainWindow.Dispose();
         _configWindow.Dispose();
+        _shopSearchResultWindow.Dispose();
         _materiaService.Dispose();
         _desynthService.Dispose();
+        _contextMenuService.Dispose();
+        _shopSearchService.OnSearchCompleted -= OnShopSearchCompleted;
     }
 
     private void OnCommand(string command, string args)
@@ -134,5 +155,15 @@ public sealed class Plugin : IDalamudPlugin
     {
         _chatGui.Print("/xivminiutil : メインウィンドウを開きます。");
         _chatGui.Print("/xivminiutil config : 設定ウィンドウを開きます。");
+    }
+
+    private void OnShopSearchCompleted(SearchResult result)
+    {
+        _shopSearchResultWindow.SetResult(result);
+
+        if (result.Success && result.Locations.Count >= 4)
+        {
+            _shopSearchResultWindow.IsOpen = true;
+        }
     }
 }

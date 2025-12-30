@@ -24,6 +24,18 @@ public sealed class Configuration : IPluginConfiguration
     public DesynthTargetMode DesynthTargetMode { get; set; } = DesynthTargetMode.All;
     public int DesynthTargetCount { get; set; } = 1;
 
+    // 販売場所検索設定
+    public List<uint> ShopSearchAreaPriority { get; set; } = new()
+    {
+        // デフォルト: 三大都市優先
+        128,  // リムサ・ロミンサ：下甲板層
+        129,  // リムサ・ロミンサ：上甲板層
+        130,  // ウルダハ：ナル回廊
+        131,  // ウルダハ：ザル回廊
+        132,  // グリダニア：新市街
+        133,  // グリダニア：旧市街
+    };
+
     private IDalamudPluginInterface? _pluginInterface;
 
     public void Initialize(IDalamudPluginInterface pluginInterface)
