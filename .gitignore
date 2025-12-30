@@ -67,3 +67,19 @@ desktop.ini
 # ReSharper
 _ReSharper*/
 *.DotSettings.user
+
+# AI tools
+.claude/
+.codex/
+.cursor/
+AGENTS.md
+GEMINI.md
+
+# Local environment
+.dotnet_home/
+
+# External dependencies (managed separately)
+projects/FFXIVClientStructs/
+
+# Temporary planning files
+plans/
