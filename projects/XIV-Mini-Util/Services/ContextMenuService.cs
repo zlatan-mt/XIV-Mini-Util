@@ -77,10 +77,34 @@ public sealed class ContextMenuService : IDisposable
 
     private static bool TryGetItemId(object target, out uint itemId)
     {
+        // インベントリアイテム
         if (target is MenuTargetInventory inventoryTarget && inventoryTarget.TargetItem is { } inventoryItem)
         {
             itemId = inventoryItem.ItemId;
             return itemId != 0;
+        }
+
+        // チャットリンク等の一般的なコンテキストメニュー
+        if (target is MenuTargetDefault defaultTarget)
+        {
+            // TargetItemIdから直接取得
+            if (TryGetProperty(defaultTarget, "TargetItemId", out var targetItemId) && targetItemId is uint chatItemId && chatItemId != 0)
+            {
+                itemId = chatItemId;
+                return true;
+            }
+
+            // ContentIdOrItemIdから取得（アイテムリンクの場合）
+            if (TryGetProperty(defaultTarget, "ContentIdOrItemId", out var contentId) && contentId is ulong contentIdVal && contentIdVal != 0)
+            {
+                // アイテムIDは下位32ビット
+                var extractedId = (uint)(contentIdVal & 0xFFFFFFFF);
+                if (extractedId != 0 && extractedId < 100000) // 妥当なアイテムID範囲
+                {
+                    itemId = extractedId;
+                    return true;
+                }
+            }
         }
 
         if (TryGetProperty(target, "ItemId", out var rawItemId) && rawItemId is uint directItemId)

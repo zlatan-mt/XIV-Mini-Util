@@ -338,6 +338,14 @@ public sealed class MainWindow : Window, IDisposable
             ImGui.Text("ショップデータを準備中です。");
         }
 
+        var echoEnabled = _configuration.ShopSearchEchoEnabled;
+        if (ImGui.Checkbox("チャットに検索結果を表示", ref echoEnabled))
+        {
+            _configuration.ShopSearchEchoEnabled = echoEnabled;
+            _configuration.Save();
+        }
+
+        ImGui.Separator();
         DrawShopSearchPriorityList();
         ImGui.Separator();
         if (!cacheReady)

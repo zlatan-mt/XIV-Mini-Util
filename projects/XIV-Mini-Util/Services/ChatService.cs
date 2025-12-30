@@ -4,6 +4,7 @@
 // RELEVANT FILES: projects/XIV-Mini-Util/Services/ShopSearchService.cs, projects/XIV-Mini-Util/Services/MapService.cs, projects/XIV-Mini-Util/Models/DomainModels.cs
 using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
+using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Plugin.Services;
 using XivMiniUtil;
 
@@ -46,6 +47,8 @@ public sealed class ChatService
             if (payload != null)
             {
                 builder.Add(payload);
+                builder.AddText($"({location.MapX:0.0}, {location.MapY:0.0})");
+                builder.Add(RawPayload.LinkTerminator);
             }
 
             _chatGui.Print(new XivChatEntry

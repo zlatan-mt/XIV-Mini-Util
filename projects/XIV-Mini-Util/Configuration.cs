@@ -29,6 +29,7 @@ public sealed class Configuration : IPluginConfiguration
     public int DesynthTargetCount { get; set; } = 1;
 
     // 販売場所検索設定
+    public bool ShopSearchEchoEnabled { get; set; } = true;
     public List<uint> ShopSearchAreaPriority { get; set; } = DefaultShopSearchAreaPriority.ToList();
 
     private IDalamudPluginInterface? _pluginInterface;
@@ -132,6 +133,7 @@ public sealed class Configuration : IPluginConfiguration
         DesynthWarningThreshold = Math.Clamp(source.DesynthWarningThreshold, 1, 999);
         DesynthTargetMode = source.DesynthTargetMode;
         DesynthTargetCount = Math.Clamp(source.DesynthTargetCount, 1, 999);
+        ShopSearchEchoEnabled = source.ShopSearchEchoEnabled;
         ShopSearchAreaPriority = source.ShopSearchAreaPriority?.ToList() ?? DefaultShopSearchAreaPriority.ToList();
     }
 

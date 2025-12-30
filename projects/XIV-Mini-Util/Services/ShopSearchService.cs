@@ -57,7 +57,10 @@ public sealed class ShopSearchService
         try
         {
             _mapService.SetMapMarker(sorted[0]);
-            _chatService.PostSearchResult(itemName, sorted, 3);
+            if (_configuration.ShopSearchEchoEnabled)
+            {
+                _chatService.PostSearchResult(itemName, sorted, 3);
+            }
         }
         catch (Exception ex)
         {
