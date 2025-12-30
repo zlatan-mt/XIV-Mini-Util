@@ -15,6 +15,7 @@ public sealed class ShopDataCache
     private readonly IPluginLog _pluginLog;
     private readonly Dictionary<uint, List<ShopLocationInfo>> _itemToLocations = new();
     private readonly Dictionary<uint, string> _itemNames = new();
+    private readonly Dictionary<uint, string> _territoryNames = new();
     private readonly HashSet<uint> _loggedMissingItems = new();
 
     private Dictionary<uint, List<NpcShopInfo>> _gilShopNpcInfos = new();
@@ -79,6 +80,57 @@ public sealed class ShopDataCache
         }
 
         return _itemNames.TryGetValue(itemId, out var name) ? name : string.Empty;
+    }
+
+    public string GetTerritoryName(uint territoryTypeId)
+    {
+        if (territoryTypeId == 0)
+        {
+            return string.Empty;
+        }
+
+        if (_territoryNames.TryGetValue(territoryTypeId, out var cached))
+        {
+            return cached;
+        }
+
+        var territorySheet = _dataManager.GetExcelSheet<TerritoryType>();
+        if (territorySheet == null)
+        {
+            return string.Empty;
+        }
+
+        var row = territorySheet.GetRow(territoryTypeId);
+        if (row.RowId == 0)
+        {
+            return string.Empty;
+        }
+
+        var name = row.PlaceName.ValueNullable?.Name.ToString() ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            _territoryNames[territoryTypeId] = name;
+        }
+
+        return name;
+    }
+
+    public IReadOnlyList<ShopTerritoryInfo> GetAllShopTerritories()
+    {
+        if (!_isInitialized)
+        {
+            return Array.Empty<ShopTerritoryInfo>();
+        }
+
+        var ids = new HashSet<uint>();
+        CollectTerritoryIds(_gilShopNpcInfos, ids);
+        CollectTerritoryIds(_specialShopNpcInfos, ids);
+
+        return ids
+            .Select(id => new ShopTerritoryInfo(id, GetTerritoryName(id)))
+            .Where(info => !string.IsNullOrWhiteSpace(info.TerritoryName))
+            .OrderBy(info => info.TerritoryName, StringComparer.Ordinal)
+            .ToList();
     }
 
     public void LogMissingItemDiagnostics(uint itemId)
@@ -249,6 +301,8 @@ public sealed class ShopDataCache
         _specialShopNpcInfos = npcSpecialShopInfos;
 
         _pluginLog.Information($"NPC-Shop マッピング構築完了: GilShop={npcShopInfos.Count}件, SpecialShop={npcSpecialShopInfos.Count}件");
+
+        CacheTerritoryNames(territorySheet);
 
         // Step 2: GilShopItem → Item の関係を構築し、逆引きインデックスを作成
         var processedItems = 0;
@@ -1078,6 +1132,49 @@ public sealed class ShopDataCache
         }
 
         return true;
+    }
+
+    private void CacheTerritoryNames(ExcelSheet<TerritoryType> territorySheet)
+    {
+        if (_territoryNames.Count > 0)
+        {
+            return;
+        }
+
+        foreach (var territory in territorySheet)
+        {
+            if (territory.RowId == 0)
+            {
+                continue;
+            }
+
+            var name = territory.PlaceName.ValueNullable?.Name.ToString() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            _territoryNames[territory.RowId] = name;
+        }
+    }
+
+    private static void CollectTerritoryIds(
+        Dictionary<uint, List<NpcShopInfo>> source,
+        HashSet<uint> ids)
+    {
+        // キャッシュ済みNPC情報からユニークなエリアIDだけを抽出する
+        foreach (var list in source.Values)
+        {
+            foreach (var info in list)
+            {
+                if (info.TerritoryTypeId == 0)
+                {
+                    continue;
+                }
+
+                ids.Add(info.TerritoryTypeId);
+            }
+        }
     }
 
 }

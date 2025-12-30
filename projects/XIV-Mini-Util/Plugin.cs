@@ -14,6 +14,7 @@ namespace XivMiniUtil;
 public sealed class Plugin : IDalamudPlugin
 {
     private const string CommandName = "/xivminiutil";
+    private const string CommandAlias = "/xmu";
 
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
@@ -29,7 +30,6 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ShopSearchService _shopSearchService;
     private readonly ContextMenuService _contextMenuService;
     private readonly MainWindow _mainWindow;
-    private readonly ConfigWindow _configWindow;
     private readonly ShopSearchResultWindow _shopSearchResultWindow;
 
     public string Name => "XIV Mini Util";
@@ -80,20 +80,22 @@ public sealed class Plugin : IDalamudPlugin
         _shopSearchService = new ShopSearchService(_shopDataCache, _mapService, _chatService, _configuration, pluginLog);
         _contextMenuService = new ContextMenuService(contextMenu, _shopSearchService, _shopDataCache, pluginLog);
 
-        _mainWindow = new MainWindow(_configuration, _materiaService, _desynthService);
-        _configWindow = new ConfigWindow(_configuration);
+        _mainWindow = new MainWindow(_configuration, _materiaService, _desynthService, _shopDataCache);
         _shopSearchResultWindow = new ShopSearchResultWindow(_mapService);
 
         _windowSystem = new WindowSystem("XIV Mini Util");
         _windowSystem.AddWindow(_mainWindow);
-        _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_shopSearchResultWindow);
 
         _pluginInterface.UiBuilder.Draw += _windowSystem.Draw;
         _pluginInterface.UiBuilder.OpenMainUi += OpenMainWindow;
-        _pluginInterface.UiBuilder.OpenConfigUi += OpenConfigWindow;
+        _pluginInterface.UiBuilder.OpenConfigUi += OpenSettingsWindow;
 
         _commandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
+        {
+            HelpMessage = "メインウィンドウを開きます。サブコマンド: config / help",
+        });
+        _commandManager.AddHandler(CommandAlias, new CommandInfo(OnCommand)
         {
             HelpMessage = "メインウィンドウを開きます。サブコマンド: config / help",
         });
@@ -105,12 +107,12 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         _commandManager.RemoveHandler(CommandName);
+        _commandManager.RemoveHandler(CommandAlias);
         _pluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         _pluginInterface.UiBuilder.OpenMainUi -= OpenMainWindow;
-        _pluginInterface.UiBuilder.OpenConfigUi -= OpenConfigWindow;
+        _pluginInterface.UiBuilder.OpenConfigUi -= OpenSettingsWindow;
 
         _mainWindow.Dispose();
-        _configWindow.Dispose();
         _shopSearchResultWindow.Dispose();
         _materiaService.Dispose();
         _desynthService.Dispose();
@@ -130,7 +132,7 @@ public sealed class Plugin : IDalamudPlugin
         switch (trimmed)
         {
             case "config":
-                OpenConfigWindow();
+                OpenSettingsWindow();
                 break;
             case "help":
                 PrintHelp();
@@ -141,9 +143,9 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private void OpenConfigWindow()
+    private void OpenSettingsWindow()
     {
-        _configWindow.IsOpen = true;
+        _mainWindow.OpenSettingsTab();
     }
 
     private void OpenMainWindow()
@@ -154,7 +156,9 @@ public sealed class Plugin : IDalamudPlugin
     private void PrintHelp()
     {
         _chatGui.Print("/xivminiutil : メインウィンドウを開きます。");
-        _chatGui.Print("/xivminiutil config : 設定ウィンドウを開きます。");
+        _chatGui.Print("/xivminiutil config : 設定タブを開きます。");
+        _chatGui.Print("/xmu : メインウィンドウを開きます。");
+        _chatGui.Print("/xmu config : 設定タブを開きます。");
     }
 
     private void OnShopSearchCompleted(SearchResult result)

@@ -1,15 +1,19 @@
 // Path: projects/XIV-Mini-Util/Configuration.cs
 // Description: プラグイン設定の保存と読み込みを管理する
 // Reason: 再起動後もユーザー設定を維持するため
-// RELEVANT FILES: projects/XIV-Mini-Util/Plugin.cs, projects/XIV-Mini-Util/Windows/MainWindow.cs, projects/XIV-Mini-Util/Windows/ConfigWindow.cs
+// RELEVANT FILES: projects/XIV-Mini-Util/Plugin.cs, projects/XIV-Mini-Util/Windows/MainWindow.cs, projects/XIV-Mini-Util/Services/ShopDataCache.cs
 using Dalamud.Configuration;
 using Dalamud.Plugin;
+using System.Text;
+using System.Text.Json;
 
 namespace XivMiniUtil;
 
 [Serializable]
 public sealed class Configuration : IPluginConfiguration
 {
+    public const int ExportVersion = 1;
+
     public int Version { get; set; } = 1;
 
     // マテリア精製設定
@@ -25,7 +29,16 @@ public sealed class Configuration : IPluginConfiguration
     public int DesynthTargetCount { get; set; } = 1;
 
     // 販売場所検索設定
-    public List<uint> ShopSearchAreaPriority { get; set; } = new()
+    public List<uint> ShopSearchAreaPriority { get; set; } = DefaultShopSearchAreaPriority.ToList();
+
+    private IDalamudPluginInterface? _pluginInterface;
+
+    public void Initialize(IDalamudPluginInterface pluginInterface)
+    {
+        _pluginInterface = pluginInterface;
+    }
+
+    public static IReadOnlyList<uint> DefaultShopSearchAreaPriority => new List<uint>
     {
         // デフォルト: 三大都市優先
         128,  // リムサ・ロミンサ：下甲板層
@@ -36,16 +49,98 @@ public sealed class Configuration : IPluginConfiguration
         133,  // グリダニア：旧市街
     };
 
-    private IDalamudPluginInterface? _pluginInterface;
-
-    public void Initialize(IDalamudPluginInterface pluginInterface)
-    {
-        _pluginInterface = pluginInterface;
-    }
-
     public void Save()
     {
         // 設定変更時は即時保存する
         _pluginInterface?.SavePluginConfig(this);
     }
+
+    public void ResetShopSearchAreaPriority()
+    {
+        ShopSearchAreaPriority = DefaultShopSearchAreaPriority.ToList();
+        Save();
+    }
+
+    public string ExportToBase64()
+    {
+        var envelope = new ConfigurationEnvelope(ExportVersion, BuildExportSnapshot());
+        var json = JsonSerializer.Serialize(envelope);
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+    }
+
+    public bool TryParseImport(string base64, out Configuration imported, out string errorMessage)
+    {
+        imported = new Configuration();
+        errorMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(base64))
+        {
+            errorMessage = "インポート文字列が空です。";
+            return false;
+        }
+
+        try
+        {
+            var json = Encoding.UTF8.GetString(Convert.FromBase64String(base64.Trim()));
+            var envelope = JsonSerializer.Deserialize<ConfigurationEnvelope>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+            });
+
+            if (envelope == null || envelope.Config == null)
+            {
+                errorMessage = "設定データを読み取れませんでした。";
+                return false;
+            }
+
+            if (envelope.Version != ExportVersion)
+            {
+                errorMessage = $"バージョンが一致しません。(期待: {ExportVersion} / 取得: {envelope.Version})";
+                return false;
+            }
+
+            imported = envelope.Config;
+            imported.ShopSearchAreaPriority ??= DefaultShopSearchAreaPriority.ToList();
+            return true;
+        }
+        catch (FormatException)
+        {
+            errorMessage = "Base64形式が正しくありません。";
+            return false;
+        }
+        catch (JsonException)
+        {
+            errorMessage = "JSON形式が正しくありません。";
+            return false;
+        }
+        catch (Exception)
+        {
+            errorMessage = "読み込み中にエラーが発生しました。";
+            return false;
+        }
+    }
+
+    public void ApplyFrom(Configuration source)
+    {
+        // 外部入力の設定値はここで安全な範囲に収める
+        Version = source.Version;
+        MateriaExtractEnabled = source.MateriaExtractEnabled;
+        DesynthMinLevel = Math.Clamp(source.DesynthMinLevel, 1, 999);
+        DesynthMaxLevel = Math.Clamp(source.DesynthMaxLevel, 1, 999);
+        DesynthJobCondition = source.DesynthJobCondition;
+        DesynthWarningEnabled = source.DesynthWarningEnabled;
+        DesynthWarningThreshold = Math.Clamp(source.DesynthWarningThreshold, 1, 999);
+        DesynthTargetMode = source.DesynthTargetMode;
+        DesynthTargetCount = Math.Clamp(source.DesynthTargetCount, 1, 999);
+        ShopSearchAreaPriority = source.ShopSearchAreaPriority?.ToList() ?? DefaultShopSearchAreaPriority.ToList();
+    }
+
+    private Configuration BuildExportSnapshot()
+    {
+        var snapshot = new Configuration();
+        snapshot.ApplyFrom(this);
+        return snapshot;
+    }
+
+    private sealed record ConfigurationEnvelope(int Version, Configuration Config);
 }

@@ -60,6 +60,10 @@ public sealed record ShopLocationInfo(
     int Price,
     string ConditionNote);
 
+public sealed record ShopTerritoryInfo(
+    uint TerritoryTypeId,
+    string TerritoryName);
+
 public sealed record SearchResult(
     uint ItemId,
     string ItemName,
