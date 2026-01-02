@@ -28,6 +28,17 @@ dotnet build projects/XIV-Mini-Util/XivMiniUtil.csproj -c Release
 
 ビルド後、`%APPDATA%\XIVLauncher\devPlugins\XivMiniUtil\` に出力されます。
 
+## カスタムプラグイン配布
+
+1. `pluginmaster.json` をRawで公開します。  
+   例: `https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/pluginmaster.json`
+
+2. Dalamud の「Custom Plugin Repositories」にURLを追加します。
+
+3. `XivMiniUtil.zip` をGitHub Releasesに添付して配布します。
+
+配布手順の詳細は `docs/custom-plugin-distribution.md` を参照してください。
+
 ## 注意事項
 
 - Dalamud API 14 / .NET 10 向けです。

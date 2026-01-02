@@ -1,0 +1,22 @@
+[
+  {
+    "Author": "zlatan-mt",
+    "Name": "XIV Mini Util",
+    "Punchline": "Materia精製と分解を手早く支援します。",
+    "Description": "マテリア精製とアイテム分解、NPC販売場所検索を支援するミニユーティリティです。",
+    "InternalName": "XivMiniUtil",
+    "AssemblyVersion": "0.1.0",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 14,
+    "Tags": [
+      "utility",
+      "materia",
+      "desynth",
+      "shop"
+    ],
+    "RepoUrl": "https://github.com/zlatan-mt/XIV-Mini-Util",
+    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.0/XivMiniUtil.zip",
+    "Changelog": "初期公開版。マテリア精製・分解支援、ショップ検索、テレポ支援を含む。",
+    "LastUpdate": "2026-01-02T00:00:00Z"
+  }
+]
