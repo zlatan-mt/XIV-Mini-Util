@@ -143,6 +143,26 @@ public sealed class ShopDataCache
     }
 
     /// <summary>
+    /// 名前でアイテムを検索する（販売場所が判明しているアイテムのみ）
+    /// </summary>
+    /// <param name="query">検索クエリ（部分一致）</param>
+    /// <param name="limit">最大件数</param>
+    /// <returns>アイテムIDと名前のリスト</returns>
+    public IEnumerable<(uint Id, string Name)> SearchItemsByName(string query, int limit = 50)
+    {
+        if (!_isInitialized || string.IsNullOrWhiteSpace(query))
+        {
+            return Enumerable.Empty<(uint Id, string Name)>();
+        }
+
+        var trimmedQuery = query.Trim();
+        return _itemNames
+            .Where(kvp => kvp.Value.Contains(trimmedQuery, StringComparison.OrdinalIgnoreCase))
+            .Take(limit)
+            .Select(kvp => (kvp.Key, kvp.Value));
+    }
+
+    /// <summary>
     /// 診断レポートを生成してファイルに出力
     /// </summary>
     public string GenerateDiagnosticsReport(string outputPath)

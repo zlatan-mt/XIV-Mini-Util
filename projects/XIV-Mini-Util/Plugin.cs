@@ -101,6 +101,7 @@ public sealed class Plugin : IDalamudPlugin
             _materiaService,
             _desynthService,
             _shopDataCache,
+            _shopSearchService,
             MateriaFeatureEnabled,
             DesynthFeatureEnabled);
         _shopSearchResultWindow = new ShopSearchResultWindow(_mapService, _teleportService, _configuration);

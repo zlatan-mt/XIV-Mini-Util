@@ -6,6 +6,8 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
+using System.Threading.Tasks;
 using ImGui = Dalamud.Bindings.ImGui.ImGui;
 using ImGuiTabItemFlags = Dalamud.Bindings.ImGui.ImGuiTabItemFlags;
 using ImGuiTableColumnFlags = Dalamud.Bindings.ImGui.ImGuiTableColumnFlags;
@@ -22,6 +24,7 @@ public sealed class MainWindow : Window, IDisposable
     private readonly MateriaExtractService _materiaService;
     private readonly DesynthService _desynthService;
     private readonly ShopDataCache _shopDataCache;
+    private readonly ShopSearchService _shopSearchService;
     private readonly bool _materiaFeatureEnabled;
     private readonly bool _desynthFeatureEnabled;
 
@@ -37,11 +40,20 @@ public sealed class MainWindow : Window, IDisposable
     private string? _configIoMessage;
     private Vector4 _configIoMessageColor = new(0.9f, 0.9f, 0.9f, 1f);
 
+    // Search Tab State
+    private string _searchQuery = string.Empty;
+    private List<(uint Id, string Name)> _searchResults = new();
+    private bool _isSearching;
+    private string? _searchStatusMessage;
+    private CancellationTokenSource? _searchCts;
+    private readonly object _searchLock = new();
+
     public MainWindow(
         Configuration configuration,
         MateriaExtractService materiaService,
         DesynthService desynthService,
         ShopDataCache shopDataCache,
+        ShopSearchService shopSearchService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
         : base("XIV Mini Util")
@@ -50,6 +62,7 @@ public sealed class MainWindow : Window, IDisposable
         _materiaService = materiaService;
         _desynthService = desynthService;
         _shopDataCache = shopDataCache;
+        _shopSearchService = shopSearchService;
         _materiaFeatureEnabled = materiaFeatureEnabled;
         _desynthFeatureEnabled = desynthFeatureEnabled;
 
@@ -83,6 +96,12 @@ public sealed class MainWindow : Window, IDisposable
                 ImGui.EndTabItem();
             }
 
+            if (ImGui.BeginTabItem("Search"))
+            {
+                DrawSearchTab();
+                ImGui.EndTabItem();
+            }
+
             var settingsFlags = _selectSettingsTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
             if (ImGui.BeginTabItem("Settings", settingsFlags))
             {
@@ -101,6 +120,8 @@ public sealed class MainWindow : Window, IDisposable
     public void Dispose()
     {
         _desynthService.OnWarningRequired -= ShowWarningDialog;
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
     }
 
     public void ShowWarningDialog(DesynthWarningInfo info)
@@ -694,5 +715,101 @@ public sealed class MainWindow : Window, IDisposable
             DesynthTargetMode.Count => "個数を指定して分解",
             _ => mode.ToString(),
         };
+    }
+
+    private void DrawSearchTab()
+    {
+        ImGui.Text("アイテム名で販売場所を検索");
+        ImGui.Separator();
+
+        if (!_shopDataCache.IsInitialized)
+        {
+            ImGui.TextColored(new Vector4(1, 1, 0, 1), "ショップデータを準備中です...");
+            return;
+        }
+
+        var enterPressed = ImGui.InputTextWithHint("##ItemNameSearch", "アイテム名を入力...", ref _searchQuery, 100, ImGuiInputTextFlags.EnterReturnsTrue);
+        ImGui.SameLine();
+
+        if ((ImGui.Button("検索") || enterPressed) && !string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            _ = ExecuteSearchAsync(_searchQuery);
+        }
+
+        if (_isSearching)
+        {
+            ImGui.Text("検索中...");
+        }
+        else if (_searchStatusMessage != null)
+        {
+            ImGui.TextWrapped(_searchStatusMessage);
+        }
+
+        ImGui.Separator();
+
+        ImGui.BeginChild("SearchResults", new Vector2(0, -1), true);
+
+        lock (_searchLock)
+        {
+            if (_searchResults.Count > 0)
+            {
+                ImGui.Text($"検索結果: {_searchResults.Count}件");
+                foreach (var (id, name) in _searchResults)
+                {
+                    if (ImGui.Selectable($"{name}##{id}"))
+                    {
+                        _shopSearchService.Search(id);
+                    }
+                }
+            }
+            else if (!_isSearching && !string.IsNullOrEmpty(_searchStatusMessage) && _searchStatusMessage.Contains("0件"))
+            {
+                ImGui.TextDisabled("該当なし");
+            }
+        }
+
+        ImGui.EndChild();
+    }
+
+    private async Task ExecuteSearchAsync(string query)
+    {
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = new CancellationTokenSource();
+        var token = _searchCts.Token;
+
+        _isSearching = true;
+        _searchStatusMessage = null;
+
+        try
+        {
+            // UIスレッドをブロックしないようにバックグラウンドで実行
+            var results = await Task.Run(() => _shopDataCache.SearchItemsByName(query, 50).ToList(), token);
+
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
+            lock (_searchLock)
+            {
+                _searchResults = results;
+                _searchStatusMessage = results.Count == 0 ? "該当するアイテムがありません（0件）" : null;
+            }
+        }
+        catch (Exception ex)
+        {
+            if (ex is not TaskCanceledException)
+            {
+                _searchStatusMessage = $"検索エラー: {ex.Message}";
+            }
+        }
+        finally
+        {
+            if (!token.IsCancellationRequested)
+            {
+                _isSearching = false;
+            }
+        }
     }
 }

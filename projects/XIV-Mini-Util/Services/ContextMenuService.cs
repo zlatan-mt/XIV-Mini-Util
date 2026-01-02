@@ -42,8 +42,17 @@ public sealed class ContextMenuService : IDisposable
 
     private void OnMenuOpened(IMenuOpenedArgs args)
     {
+        // 調査用：染色画面のコンテキスト情報を確認する
+        var currentAddon = args.AddonName ?? string.Empty;
+        if (currentAddon.Contains("Dye", StringComparison.OrdinalIgnoreCase) || currentAddon.Contains("Colorant", StringComparison.OrdinalIgnoreCase))
+        {
+            var targetType = args.Target?.GetType().Name ?? "null";
+            var hovered = _gameGui.HoveredItem;
+            _pluginLog.Information($"[ContextMenuDebug] Addon={currentAddon}, Target={targetType}, HoveredItem={hovered}");
+        }
+
         var addonName = args.AddonName ?? string.Empty;
-        if (!TryGetItemId(args.Target, addonName, out var itemId))
+        if (args.Target == null || !TryGetItemId(args.Target, addonName, out var itemId))
         {
             return;
         }
@@ -74,7 +83,7 @@ public sealed class ContextMenuService : IDisposable
     private void OnSearchClicked(IMenuItemClickedArgs args)
     {
         var addonName = args.AddonName ?? string.Empty;
-        if (!TryGetItemId(args.Target, addonName, out var itemId))
+        if (args.Target == null || !TryGetItemId(args.Target, addonName, out var itemId))
         {
             _pluginLog.Warning("販売場所検索の対象アイテムが取得できませんでした。");
             return;
