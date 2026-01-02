@@ -75,6 +75,9 @@ _ReSharper*/
 .cursor/
 AGENTS.md
 GEMINI.md
+CLAUDE.md
+.kiro/
+.skillportrc
 
 # Local environment
 .dotnet_home/
@@ -84,3 +87,6 @@ projects/FFXIVClientStructs/
 
 # Temporary planning files
 plans/
+
+# Archived docs
+docs/archive/
