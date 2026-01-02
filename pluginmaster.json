@@ -14,10 +14,16 @@
       "desynth",
       "shop"
     ],
+    "IsHide": false,
+    "IsTestingExclusive": false,
+    "DownloadCount": 0,
     "RepoUrl": "https://github.com/zlatan-mt/XIV-Mini-Util",
-    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.0/XivMiniUtil.zip",
     "IconUrl": "https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/images/icon.png",
+    "ImageUrls": [],
+    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.0/XivMiniUtil.zip",
+    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.0/XivMiniUtil.zip",
+    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.0/XivMiniUtil.zip",
     "Changelog": "初期公開版。マテリア精製・分解支援、ショップ検索、テレポ支援を含む。",
-    "LastUpdate": 1767352121
+    "LastUpdate": 1767353574
   }
 ]
