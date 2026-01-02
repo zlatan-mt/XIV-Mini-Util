@@ -5,8 +5,8 @@
     "Punchline": "Materia精製と分解を手早く支援します。",
     "Description": "マテリア精製とアイテム分解、NPC販売場所検索を支援するミニユーティリティです。",
     "InternalName": "XivMiniUtil",
-    "AssemblyVersion": "0.1.0",
-    "TestingAssemblyVersion": "0.1.0",
+    "AssemblyVersion": "0.1.1",
+    "TestingAssemblyVersion": "0.1.1",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 14,
     "TestingDalamudApiLevel": 14,
@@ -22,11 +22,11 @@
     "RepoUrl": "https://github.com/zlatan-mt/XIV-Mini-Util",
     "IconUrl": "https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/images/icon.png",
     "ImageUrls": [],
-    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.0/XivMiniUtil.zip",
-    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.0/XivMiniUtil.zip",
-    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.0/XivMiniUtil.zip",
-    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.0/XivMiniUtil.zip",
-    "Changelog": "初期公開版。マテリア精製・分解支援、ショップ検索、テレポ支援を含む。",
-    "LastUpdate": 1767353860
+    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.1/XivMiniUtil.zip",
+    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.1/XivMiniUtil.zip",
+    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.1/XivMiniUtil.zip",
+    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.1.1/XivMiniUtil.zip",
+    "Changelog": "マテリア精製・分解機能を一時的に無効化（公開版向け安定性対応）",
+    "LastUpdate": 1767398530
   }
 ]
