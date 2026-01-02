@@ -1,3 +1,7 @@
+<!-- Path: docs/item-shop-search-implementation.md -->
+<!-- Description: アイテムショップ検索の実装と設計を整理する -->
+<!-- Reason: 機能の全体像と変更履歴を共有するため -->
+<!-- RELEVANT FILES: projects/XIV-Mini-Util/Services/ShopSearchService.cs, projects/XIV-Mini-Util/Windows/ShopSearchResultWindow.cs, projects/XIV-Mini-Util/Services/TeleportService.cs -->
 # アイテムショップ検索機能 - 実装ドキュメント
 
 ## 概要
@@ -11,6 +15,9 @@ FFXIVのアイテムを右クリックして、そのアイテムを販売して
 3. **マップリンク生成** - 検索結果をチャットにマップリンク付きで表示
 4. **検索結果ウィンドウ** - 複数件ある場合にImGuiウィンドウでリスト表示
 5. **エリア優先度設定** - 三大都市などを優先して表示
+6. **表示件数制限** - 検索結果は上位10件のみ表示
+7. **テレポ支援** - 上位10件にテレポボタンを表示
+8. **自動テレポ** - 検索時/マップピン時に最寄りエーテライトへ自動テレポ（任意）
 
 ## アーキテクチャ
 
@@ -23,6 +30,7 @@ Plugin.cs
 ├── ContextMenuService     # 右クリックメニュー統合
 ├── MapService             # マップピン設定
 ├── ChatService            # Echo投稿
+├── TeleportService        # 最寄りエーテライト検索とテレポ実行
 └── ShopSearchResultWindow # 検索結果UI
 ```
 
@@ -36,6 +44,7 @@ Plugin.cs
 [ShopSearchService] → ShopDataCacheから販売場所検索
     ↓
 [MapService] → マップピン設定
+[TeleportService] → 設定ON時に最寄りエーテライトへテレポ
 [ChatService] → チャット投稿
 [ShopSearchResultWindow] → 4件以上で表示
 ```
@@ -128,6 +137,8 @@ public List<uint> ShopSearchAreaPriority { get; set; } = new()
     130,  // ウルダハ
     132,  // グリダニア
 };
+
+public bool ShopSearchAutoTeleportEnabled { get; set; } = false;
 ```
 
 ## ログ出力例
@@ -261,6 +272,20 @@ if (payload != null)
 
 **重要**: `RawPayload.LinkTerminator`を追加しないとリンクがクリックできない。
 
+## 検索結果UIとパフォーマンス
+
+### 表示件数とテレポボタン
+
+- 検索結果は上位10件のみ表示する
+- テレポボタンも上位10件のみ表示する
+- 10件未満の場合はその範囲で全て表示する
+
+### 描画負荷の抑制
+
+- 表示対象10件の最寄りエーテライト情報を `SetResult` で事前キャッシュする
+- 解放済みエーテライト情報を `TeleportService` でキャッシュする
+- SelectableのID重複を避け、`AllowItemOverlap` を使ってボタン操作を阻害しない
+
 ## 設定項目
 
 ### ShopSearchEchoEnabled
@@ -318,6 +343,9 @@ projects/XIV-Mini-Util/
 - 2026-01-02: 検索結果ウィンドウ表示設定を追加（ShopSearchWindowEnabled）
 - 2026-01-02: テレポ機能を追加（TeleportService）
 - 2026-01-02: 検索結果ウィンドウUIを改善（アイテム情報上部表示、テレポボタン各行配置）
+- 2026-01-02: 上位10件表示とテレポボタン数の上限設定を追加
+- 2026-01-02: テレポ関連のキャッシュ導入で描画負荷を軽減
+- 2026-01-02: 検索時/マップピン時の自動テレポ設定を追加
 
 ## 手動NPC位置データ
 
