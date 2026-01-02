@@ -59,10 +59,12 @@ public sealed class ContextMenuService : IDisposable
         }
 
         // MenuItemはNameとOnClickedを明示的に設定する
+        // PrefixCharを設定して警告を回避（大文字でボックスレターアイコンになる）
         var menuItem = new MenuItem
         {
             Name = new SeStringBuilder().AddText(label).Build(),
             OnClicked = OnSearchClicked,
+            PrefixChar = 'M', // M for Mini-Util
         };
 
         SetMenuItemEnabled(menuItem, isReady && hasData);

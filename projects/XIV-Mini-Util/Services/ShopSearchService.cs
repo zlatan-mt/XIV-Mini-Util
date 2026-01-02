@@ -43,6 +43,9 @@ public sealed class ShopSearchService
             return NotifyResult(new SearchResult(itemId, _shopDataCache.GetItemName(itemId), Array.Empty<ShopLocationInfo>(), false, "ショップデータを準備中です。"));
         }
 
+        // 検索診断ログを出力（デバッグ用）
+        _shopDataCache.LogSearchDiagnostics(itemId);
+
         var locations = _shopDataCache.GetShopLocations(itemId);
         if (locations.Count == 0)
         {
@@ -91,10 +94,12 @@ public sealed class ShopSearchService
         }
 
         // 優先度指定の有無でグループ化し、指定済みは順序、それ以外は名称順にする
+        // 同じエリア内では手動登録NPCを最後に表示
         return locations
             .OrderBy(location => priorityIndex.ContainsKey(location.TerritoryTypeId) ? 0 : 1)
             .ThenBy(location => priorityIndex.TryGetValue(location.TerritoryTypeId, out var index) ? index : int.MaxValue)
             .ThenBy(location => location.AreaName, StringComparer.Ordinal)
+            .ThenBy(location => location.IsManuallyAdded ? 1 : 0) // 手動登録は同エリア内で最後
             .ThenBy(location => location.NpcName, StringComparer.Ordinal)
             .ToList();
     }

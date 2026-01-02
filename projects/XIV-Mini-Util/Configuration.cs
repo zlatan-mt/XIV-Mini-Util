@@ -30,6 +30,7 @@ public sealed class Configuration : IPluginConfiguration
 
     // 販売場所検索設定
     public bool ShopSearchEchoEnabled { get; set; } = true;
+    public bool ShopSearchWindowEnabled { get; set; } = true;
     public List<uint> ShopSearchAreaPriority { get; set; } = DefaultShopSearchAreaPriority.ToList();
 
     private IDalamudPluginInterface? _pluginInterface;
@@ -134,6 +135,7 @@ public sealed class Configuration : IPluginConfiguration
         DesynthTargetMode = source.DesynthTargetMode;
         DesynthTargetCount = Math.Clamp(source.DesynthTargetCount, 1, 999);
         ShopSearchEchoEnabled = source.ShopSearchEchoEnabled;
+        ShopSearchWindowEnabled = source.ShopSearchWindowEnabled;
         ShopSearchAreaPriority = source.ShopSearchAreaPriority?.ToList() ?? DefaultShopSearchAreaPriority.ToList();
     }
 

@@ -2,7 +2,10 @@
 // Description: ショップ販売データを起動時に読み込みキャッシュする
 // Reason: 検索を高速化しゲーム中の再読み込みを避けるため
 // RELEVANT FILES: projects/XIV-Mini-Util/Services/ShopSearchService.cs, projects/XIV-Mini-Util/Services/ContextMenuService.cs, projects/XIV-Mini-Util/Models/DomainModels.cs
+using System.Numerics;
 using Dalamud.Plugin.Services;
+using Lumina.Data.Files;
+using Lumina.Data.Parsing.Layer;
 using Lumina.Excel;
 using Lumina.Excel.Sheets;
 using XivMiniUtil;
@@ -21,6 +24,11 @@ public sealed class ShopDataCache
     private Dictionary<uint, List<NpcShopInfo>> _gilShopNpcInfos = new();
     private Dictionary<uint, List<NpcShopInfo>> _specialShopNpcInfos = new();
 
+    // 診断用：位置情報なしで除外されたNPC
+    private readonly List<(uint NpcId, string NpcName, uint ShopId, string ShopName)> _excludedNpcs = new();
+    // 診断用：NPCマッチがなかったショップ
+    private readonly Dictionary<uint, List<uint>> _unmatchedShopItems = new(); // ShopId -> ItemIds
+
     private Task? _initializeTask;
     private bool _isInitialized;
 
@@ -34,7 +42,8 @@ public sealed class ShopDataCache
         string SubAreaName,
         uint MapId,
         float MapX,
-        float MapY);
+        float MapY,
+        bool IsManuallyAdded = false);
 
     public ShopDataCache(IDataManager dataManager, IPluginLog pluginLog)
     {
@@ -131,6 +140,159 @@ public sealed class ShopDataCache
             .Where(info => !string.IsNullOrWhiteSpace(info.TerritoryName))
             .OrderBy(info => info.TerritoryName, StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// 診断レポートを生成してファイルに出力
+    /// </summary>
+    public string GenerateDiagnosticsReport(string outputPath)
+    {
+        if (!_isInitialized)
+        {
+            return "ショップデータが初期化されていません。";
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("# ショップデータ診断レポート");
+        sb.AppendLine($"生成日時: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine();
+
+        // サマリー
+        sb.AppendLine("## サマリー");
+        sb.AppendLine($"- 登録アイテム数: {_itemToLocations.Count}");
+        sb.AppendLine($"- 位置情報なしNPC数: {_excludedNpcs.Count}");
+        sb.AppendLine($"- NPCマッチなしショップ数: {_unmatchedShopItems.Count}");
+        sb.AppendLine();
+
+        // 位置情報なしNPC（ユニークなNPC IDでグループ化）
+        sb.AppendLine("## 位置情報なしNPC一覧");
+        sb.AppendLine("| NPC ID | NPC名 | ショップ数 | ショップ例 |");
+        sb.AppendLine("|--------|-------|------------|-----------|");
+
+        var groupedByNpc = _excludedNpcs
+            .GroupBy(e => e.NpcId)
+            .OrderBy(g => g.First().NpcName)
+            .ToList();
+
+        foreach (var group in groupedByNpc)
+        {
+            var first = group.First();
+            var shopCount = group.Count();
+            var shopExample = group.Take(2).Select(e => e.ShopName).Distinct().Take(2);
+            sb.AppendLine($"| {first.NpcId} | {first.NpcName} | {shopCount} | {string.Join(", ", shopExample)} |");
+        }
+        sb.AppendLine();
+
+        // NPCマッチなしショップ
+        sb.AppendLine("## NPCマッチなしショップ一覧（アイテム例付き）");
+        sb.AppendLine("| ショップID | アイテム例 |");
+        sb.AppendLine("|------------|-----------|");
+
+        var itemSheet = _dataManager.GetExcelSheet<Item>();
+        foreach (var (shopId, itemIds) in _unmatchedShopItems.OrderBy(kvp => kvp.Key).Take(100))
+        {
+            var itemNames = new List<string>();
+            foreach (var itemId in itemIds)
+            {
+                if (itemSheet != null)
+                {
+                    var item = itemSheet.GetRow(itemId);
+                    if (item.RowId != 0)
+                    {
+                        itemNames.Add(item.Name.ToString());
+                    }
+                }
+            }
+            sb.AppendLine($"| {shopId} | {string.Join(", ", itemNames)} |");
+        }
+
+        if (_unmatchedShopItems.Count > 100)
+        {
+            sb.AppendLine($"| ... | （他 {_unmatchedShopItems.Count - 100} ショップ省略） |");
+        }
+
+        var report = sb.ToString();
+
+        // ファイルに出力
+        try
+        {
+            File.WriteAllText(outputPath, report, System.Text.Encoding.UTF8);
+            _pluginLog.Information($"診断レポートを出力しました: {outputPath}");
+            return $"診断レポートを出力しました: {outputPath}";
+        }
+        catch (Exception ex)
+        {
+            _pluginLog.Error(ex, "診断レポートの出力に失敗しました。");
+            return $"診断レポートの出力に失敗しました: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// 位置情報なしNPCの数を取得
+    /// </summary>
+    public int GetExcludedNpcCount() => _excludedNpcs.Count;
+
+    /// <summary>
+    /// NPCマッチなしショップの数を取得
+    /// </summary>
+    public int GetUnmatchedShopCount() => _unmatchedShopItems.Count;
+
+    /// <summary>
+    /// 検索実行時にアイテムの販売場所詳細をログ出力（デバッグ用）
+    /// </summary>
+    public void LogSearchDiagnostics(uint itemId)
+    {
+        if (itemId == 0 || !_isInitialized)
+        {
+            return;
+        }
+
+        var locations = GetShopLocations(itemId);
+        var itemName = GetItemName(itemId);
+        _pluginLog.Information($"検索診断: ItemId={itemId} Name={itemName} 検出数={locations.Count}");
+
+        // 検出されたNPC情報を出力
+        foreach (var loc in locations.Take(5))
+        {
+            _pluginLog.Information($"  検出: {loc.AreaName} / {loc.NpcName} ({loc.MapX:0.0}, {loc.MapY:0.0}) ShopId={loc.ShopId}");
+        }
+
+        // GilShopItem内でこのアイテムを持つ全ショップを調査（位置情報なしのNPCも含めて）
+        var gilShopItemSheet = _dataManager.GetSubrowExcelSheet<GilShopItem>();
+        if (gilShopItemSheet != null)
+        {
+            var shopHits = new List<(uint ShopId, int NpcCount, int ValidCount)>();
+            foreach (var subrowCollection in gilShopItemSheet)
+            {
+                var shopId = subrowCollection.RowId;
+                foreach (var shopItem in subrowCollection)
+                {
+                    if (GetItemIdFromGilShopItem(shopItem) != itemId)
+                    {
+                        continue;
+                    }
+
+                    var npcCount = _gilShopNpcInfos.TryGetValue(shopId, out var list) ? list.Count : 0;
+                    var validCount = list?.Count(IsValidLocation) ?? 0;
+                    shopHits.Add((shopId, npcCount, validCount));
+
+                    // 位置情報なしのNPCがある場合は詳細を出力
+                    if (list != null && npcCount > validCount)
+                    {
+                        foreach (var npc in list.Where(n => !IsValidLocation(n)))
+                        {
+                            _pluginLog.Warning($"  位置情報なしNPC: {npc.NpcName} (ID:{npc.NpcId}) ShopId={shopId} Territory={npc.TerritoryTypeId} Area={npc.AreaName}");
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if (shopHits.Count > 0)
+            {
+                _pluginLog.Information($"GilShopヒット: {string.Join(", ", shopHits.Select(h => $"Shop{h.ShopId}(NPC:{h.NpcCount}/Valid:{h.ValidCount})"))}");
+            }
+        }
     }
 
     public void LogMissingItemDiagnostics(uint itemId)
@@ -383,6 +545,18 @@ public sealed class ShopDataCache
                 {
                     noNpcMatch++;
                     skippedItems++;
+
+                    // 診断用：NPCマッチなしショップを記録
+                    if (!_unmatchedShopItems.TryGetValue(shopId, out var unmatchedItems))
+                    {
+                        unmatchedItems = new List<uint>();
+                        _unmatchedShopItems[shopId] = unmatchedItems;
+                    }
+                    if (unmatchedItems.Count < 3) // 各ショップ3アイテムまで記録
+                    {
+                        unmatchedItems.Add(itemId);
+                    }
+
                     continue;
                 }
 
@@ -414,6 +588,11 @@ public sealed class ShopDataCache
                     // 位置情報がないNPCはスキップ（期間限定イベントNPCなど）
                     if (!IsValidLocation(npcInfo))
                     {
+                        // 診断用：位置情報なしNPCを記録（重複除外）
+                        if (!_excludedNpcs.Any(e => e.NpcId == npcInfo.NpcId && e.ShopId == npcInfo.ShopId))
+                        {
+                            _excludedNpcs.Add((npcInfo.NpcId, npcInfo.NpcName, npcInfo.ShopId, npcInfo.ShopName));
+                        }
                         continue;
                     }
 
@@ -437,7 +616,8 @@ public sealed class ShopDataCache
                         npcInfo.MapX,
                         npcInfo.MapY,
                         price,
-                        conditionNote));
+                        conditionNote,
+                        npcInfo.IsManuallyAdded));
 
                     processedItems++;
                 }
@@ -550,6 +730,11 @@ public sealed class ShopDataCache
                     {
                         if (!IsValidLocation(npcInfo))
                         {
+                            // 診断用：位置情報なしNPCを記録（重複除外）
+                            if (!_excludedNpcs.Any(e => e.NpcId == npcInfo.NpcId && e.ShopId == npcInfo.ShopId))
+                            {
+                                _excludedNpcs.Add((npcInfo.NpcId, npcInfo.NpcName, npcInfo.ShopId, npcInfo.ShopName));
+                            }
                             continue;
                         }
 
@@ -573,7 +758,8 @@ public sealed class ShopDataCache
                             npcInfo.MapX,
                             npcInfo.MapY,
                             0, // SpecialShopは通常ギル価格なし
-                            costNote));
+                            costNote,
+                            npcInfo.IsManuallyAdded));
 
                         processedItems++;
                         specialShopItems++;
@@ -987,7 +1173,8 @@ public sealed class ShopDataCache
             locInfo?.SubAreaName ?? string.Empty,
             locInfo?.MapId ?? 0,
             locInfo?.MapX ?? 0,
-            locInfo?.MapY ?? 0);
+            locInfo?.MapY ?? 0,
+            locInfo?.IsManuallyAdded ?? false);
 
         if (!result.TryGetValue(shopId, out var list))
         {
@@ -1004,12 +1191,27 @@ public sealed class ShopDataCache
         string SubAreaName,
         uint MapId,
         float MapX,
-        float MapY);
+        float MapY,
+        bool IsManuallyAdded = false);
+
+    /// <summary>
+    /// ゲームデータに位置情報がないNPCのフォールバック位置データ
+    /// </summary>
+    private static readonly Dictionary<uint, (uint TerritoryId, string AreaName, float X, float Y)> ManualNpcLocations = new()
+    {
+        // リムサ・ロミンサ下甲板のよろず屋（オーシャンフィッシング関連）
+        // NPC ID 1005422 - Merchant & Mender at Limsa Lominsa Lower Decks (3.3, 12.9)
+        { 1005422, (129, "リムサ・ロミンサ：下甲板層", 3.3f, 12.9f) },
+    };
 
     private Dictionary<uint, NpcLocationInfo> BuildNpcLocationMapping(ExcelSheet<Level> levelSheet)
     {
         var result = new Dictionary<uint, NpcLocationInfo>();
 
+        // Step 0: 手動登録のNPC位置を先に追加
+        AddManualNpcLocations(result);
+
+        // Step 1: Level sheetからNPC位置を取得
         foreach (var level in levelSheet)
         {
             if (level.RowId == 0)
@@ -1051,7 +1253,250 @@ public sealed class ShopDataCache
                 mapY);
         }
 
+        _pluginLog.Information($"Level sheetからNPC位置取得: {result.Count}件");
+
+        // Step 2: LGBファイルからNPC位置を補完
+        var lgbAddedCount = BuildNpcLocationFromLgbFiles(result);
+        _pluginLog.Information($"LGBファイルからNPC位置追加: {lgbAddedCount}件");
+
         return result;
+    }
+
+    private void AddManualNpcLocations(Dictionary<uint, NpcLocationInfo> result)
+    {
+        var territorySheet = _dataManager.GetExcelSheet<TerritoryType>();
+        var mapSheet = _dataManager.GetExcelSheet<Map>();
+        if (territorySheet == null || mapSheet == null)
+        {
+            return;
+        }
+
+        foreach (var (npcId, locData) in ManualNpcLocations)
+        {
+            if (result.ContainsKey(npcId))
+            {
+                continue; // 既に位置情報がある場合はスキップ
+            }
+
+            var territory = territorySheet.GetRow(locData.TerritoryId);
+            if (territory.RowId == 0)
+            {
+                _pluginLog.Warning($"手動NPC位置: Territory {locData.TerritoryId} が見つかりません (NPC:{npcId})");
+                continue;
+            }
+
+            // このTerritoryに対応するMapを検索
+            uint mapId = 0;
+            foreach (var map in mapSheet)
+            {
+                if (map.TerritoryType.RowId == locData.TerritoryId)
+                {
+                    mapId = map.RowId;
+                    break;
+                }
+            }
+
+            if (mapId == 0)
+            {
+                _pluginLog.Warning($"手動NPC位置: Territory {locData.TerritoryId} のMapが見つかりません (NPC:{npcId})");
+                continue;
+            }
+
+            result[npcId] = new NpcLocationInfo(
+                locData.TerritoryId,
+                locData.AreaName,
+                string.Empty, // SubAreaName
+                mapId,
+                locData.X,
+                locData.Y,
+                IsManuallyAdded: true);
+
+            _pluginLog.Information($"手動NPC位置追加: ID={npcId} @ {locData.AreaName} ({locData.X}, {locData.Y})");
+        }
+    }
+
+    private int BuildNpcLocationFromLgbFiles(Dictionary<uint, NpcLocationInfo> result)
+    {
+        var territorySheet = _dataManager.GetExcelSheet<TerritoryType>();
+        var mapSheet = _dataManager.GetExcelSheet<Map>();
+        if (territorySheet == null || mapSheet == null)
+        {
+            return 0;
+        }
+
+        var addedCount = 0;
+        var processedTerritories = 0;
+        var failedFiles = 0;
+
+        // 調査対象のNPC ID（よろず屋など）
+        var targetNpcIds = new HashSet<uint> { 1005422, 1032822 };
+
+        foreach (var territory in territorySheet)
+        {
+            if (territory.RowId == 0)
+            {
+                continue;
+            }
+
+            var bg = territory.Bg.ToString();
+            if (string.IsNullOrEmpty(bg))
+            {
+                continue;
+            }
+
+            // planevent.lgbとbg.lgbの両方を試行
+            var lgbPaths = GetLgbFilePaths(bg);
+            if (lgbPaths.Count == 0)
+            {
+                continue;
+            }
+
+            var territoryProcessed = false;
+            foreach (var lgbPath in lgbPaths)
+            {
+                try
+                {
+                    var lgbFile = _dataManager.GetFile<LgbFile>(lgbPath);
+                    if (lgbFile == null)
+                    {
+                        continue;
+                    }
+
+                    if (!territoryProcessed)
+                    {
+                        processedTerritories++;
+                        territoryProcessed = true;
+                    }
+
+                    addedCount += ParseLgbFileForNpcLocations(lgbFile, territory, mapSheet, result, targetNpcIds);
+                }
+                catch (Exception ex)
+                {
+                    failedFiles++;
+                    if (failedFiles <= 3)
+                    {
+                        _pluginLog.Debug($"LGBファイル解析エラー: {lgbPath} - {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        _pluginLog.Information($"LGB処理完了: Territory={processedTerritories}, 失敗={failedFiles}");
+        return addedCount;
+    }
+
+    private static List<string> GetLgbFilePaths(string bg)
+    {
+        // パス例: ffxiv/sea_s1/twn/s1t1/level/s1t1
+        // 出力: bg/ffxiv/sea_s1/twn/s1t1/level/planevent.lgb, bg.lgb
+        var result = new List<string>();
+        var levelIndex = bg.IndexOf("/level/", StringComparison.Ordinal);
+        if (levelIndex < 0)
+        {
+            return result;
+        }
+
+        var basePath = $"bg/{bg[..(levelIndex + 7)]}";
+        result.Add($"{basePath}planevent.lgb");
+        result.Add($"{basePath}bg.lgb");
+        return result;
+    }
+
+    private int ParseLgbFileForNpcLocations(
+        LgbFile lgbFile,
+        TerritoryType territory,
+        ExcelSheet<Map> mapSheet,
+        Dictionary<uint, NpcLocationInfo> result,
+        HashSet<uint> targetNpcIds)
+    {
+        var addedCount = 0;
+
+        // デフォルトマップを取得
+        Map? defaultMap = null;
+        foreach (var map in mapSheet)
+        {
+            if (map.TerritoryType.RowId == territory.RowId)
+            {
+                defaultMap = map;
+                break;
+            }
+        }
+
+        if (defaultMap == null)
+        {
+            return 0;
+        }
+
+        var areaName = territory.PlaceName.ValueNullable?.Name.ToString() ?? string.Empty;
+        var subAreaName = defaultMap.Value.PlaceNameSub.ValueNullable?.Name.ToString() ?? string.Empty;
+
+        foreach (var layer in lgbFile.Layers)
+        {
+            foreach (var instanceObj in layer.InstanceObjects)
+            {
+                // EventNPCのみ処理
+                if (instanceObj.AssetType != LayerEntryType.EventNPC)
+                {
+                    continue;
+                }
+
+                // NPC IDを取得
+                var npcId = GetNpcIdFromInstanceObject(instanceObj);
+                if (npcId == 0)
+                {
+                    continue;
+                }
+
+                // 調査対象のNPCが見つかった場合はログ出力
+                if (targetNpcIds.Contains(npcId))
+                {
+                    var pos = instanceObj.Transform.Translation;
+                    _pluginLog.Warning($"調査対象NPC発見: ID={npcId} @ {areaName} (Territory:{territory.RowId}, Pos:{pos.X:F1},{pos.Z:F1})");
+                }
+
+                // 既に位置情報がある場合はスキップ（Level sheetの方が正確）
+                if (result.ContainsKey(npcId))
+                {
+                    continue;
+                }
+
+                // 座標を取得
+                var pos2 = instanceObj.Transform.Translation;
+                var mapX = ConvertToMapCoordinate(pos2.X, defaultMap.Value.OffsetX, defaultMap.Value.SizeFactor);
+                var mapY = ConvertToMapCoordinate(pos2.Z, defaultMap.Value.OffsetY, defaultMap.Value.SizeFactor);
+
+                result[npcId] = new NpcLocationInfo(
+                    territory.RowId,
+                    areaName,
+                    subAreaName,
+                    defaultMap.Value.RowId,
+                    mapX,
+                    mapY);
+
+                addedCount++;
+            }
+        }
+
+        return addedCount;
+    }
+
+    private static uint GetNpcIdFromInstanceObject(LayerCommon.InstanceObject instanceObj)
+    {
+        // ENPCInstanceObject -> NPCInstanceObject -> BaseId
+        if (instanceObj.Object is not LayerCommon.ENPCInstanceObject eventNpc)
+        {
+            return 0;
+        }
+
+        // ParentData.ParentData.BaseId からNPC IDを取得
+        try
+        {
+            return eventNpc.ParentData.ParentData.BaseId;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static uint GetRawDataValue(object dataValue)

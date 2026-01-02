@@ -345,6 +345,13 @@ public sealed class MainWindow : Window, IDisposable
             _configuration.Save();
         }
 
+        var windowEnabled = _configuration.ShopSearchWindowEnabled;
+        if (ImGui.Checkbox("検索結果ウィンドウを表示（4件以上）", ref windowEnabled))
+        {
+            _configuration.ShopSearchWindowEnabled = windowEnabled;
+            _configuration.Save();
+        }
+
         ImGui.Separator();
         DrawShopSearchPriorityList();
         ImGui.Separator();

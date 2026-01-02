@@ -29,6 +29,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ChatService _chatService;
     private readonly ShopSearchService _shopSearchService;
     private readonly ContextMenuService _contextMenuService;
+    private readonly TeleportService _teleportService;
     private readonly MainWindow _mainWindow;
     private readonly ShopSearchResultWindow _shopSearchResultWindow;
 
@@ -45,7 +46,8 @@ public sealed class Plugin : IDalamudPlugin
         IPluginLog pluginLog,
         IDataManager dataManager,
         IChatGui chatGui,
-        IContextMenu contextMenu)
+        IContextMenu contextMenu,
+        IAetheryteList aetheryteList)
     {
         _pluginInterface = pluginInterface;
         _commandManager = commandManager;
@@ -79,9 +81,10 @@ public sealed class Plugin : IDalamudPlugin
         _chatService = new ChatService(chatGui, _mapService);
         _shopSearchService = new ShopSearchService(_shopDataCache, _mapService, _chatService, _configuration, pluginLog);
         _contextMenuService = new ContextMenuService(contextMenu, gameGui, _shopSearchService, _shopDataCache, pluginLog);
+        _teleportService = new TeleportService(dataManager, aetheryteList, pluginLog);
 
         _mainWindow = new MainWindow(_configuration, _materiaService, _desynthService, _shopDataCache);
-        _shopSearchResultWindow = new ShopSearchResultWindow(_mapService);
+        _shopSearchResultWindow = new ShopSearchResultWindow(_mapService, _teleportService);
 
         _windowSystem = new WindowSystem("XIV Mini Util");
         _windowSystem.AddWindow(_mainWindow);
@@ -134,6 +137,9 @@ public sealed class Plugin : IDalamudPlugin
             case "config":
                 OpenSettingsWindow();
                 break;
+            case "diag":
+                GenerateDiagnosticsReport();
+                break;
             case "help":
                 PrintHelp();
                 break;
@@ -141,6 +147,15 @@ public sealed class Plugin : IDalamudPlugin
                 PrintHelp();
                 break;
         }
+    }
+
+    private void GenerateDiagnosticsReport()
+    {
+        var configDir = _pluginInterface.ConfigDirectory.FullName;
+        var outputPath = Path.Combine(configDir, $"shop-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.md");
+        var result = _shopDataCache.GenerateDiagnosticsReport(outputPath);
+        _chatGui.Print($"[XIV Mini Util] {result}");
+        _chatGui.Print($"[XIV Mini Util] 位置情報なしNPC: {_shopDataCache.GetExcludedNpcCount()}件, NPCマッチなしショップ: {_shopDataCache.GetUnmatchedShopCount()}件");
     }
 
     private void OpenSettingsWindow()
@@ -157,15 +172,15 @@ public sealed class Plugin : IDalamudPlugin
     {
         _chatGui.Print("/xivminiutil : メインウィンドウを開きます。");
         _chatGui.Print("/xivminiutil config : 設定タブを開きます。");
-        _chatGui.Print("/xmu : メインウィンドウを開きます。");
-        _chatGui.Print("/xmu config : 設定タブを開きます。");
+        _chatGui.Print("/xivminiutil diag : ショップデータ診断レポートを出力します。");
+        _chatGui.Print("/xmu : /xivminiutil のエイリアス");
     }
 
     private void OnShopSearchCompleted(SearchResult result)
     {
         _shopSearchResultWindow.SetResult(result);
 
-        if (result.Success && result.Locations.Count >= 4)
+        if (_configuration.ShopSearchWindowEnabled && result.Success && result.Locations.Count >= 4)
         {
             _shopSearchResultWindow.IsOpen = true;
         }

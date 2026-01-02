@@ -151,11 +151,132 @@ SpecialShop走査完了: 追加=XXX件, スキップ=XXX件
 ショップデータ初期化完了: アイテム 5696件 / 販売場所 16791件 / スキップ 4369件 / 位置不明除外 XXX件
 ```
 
+## NPC位置データソース
+
+### 1. Level Sheet (プライマリ)
+
+```csharp
+// Level.Type == 8 がENpc（NPC）を示す
+foreach (var level in levelSheet)
+{
+    if (level.Type != 8) continue;
+    var objectId = level.Object.RowId;
+    // Territory, Map, X, Z から位置情報を取得
+}
+```
+
+### 2. LGBファイル (セカンダリ)
+
+Level Sheetに登録されていないNPC（主にオーシャンフィッシング関連など）の位置を補完。
+
+```csharp
+// planevent.lgb と bg.lgb を解析
+var lgbPaths = new[]
+{
+    $"bg/{bgPath}/level/planevent.lgb",
+    $"bg/{bgPath}/level/bg.lgb"
+};
+
+foreach (var layer in lgbFile.Layers)
+{
+    foreach (var instanceObj in layer.InstanceObjects)
+    {
+        if (instanceObj.AssetType != LayerEntryType.EventNPC) continue;
+
+        var eventNpc = (LayerCommon.ENPCInstanceObject)instanceObj.Object;
+        var npcId = eventNpc.ParentData.ParentData.BaseId;
+        var pos = instanceObj.Transform.Translation;
+        // X, Z 座標を使用
+    }
+}
+```
+
+### 参考実装
+
+[ItemVendorLocation](https://github.com/electr0sheep/ItemVendorLocation) プラグインを参考にLGB解析を実装。
+
+## チャットリンクからのアイテム検索
+
+### Agent経由でのItemId取得
+
+チャットログ内のアイテムリンクを右クリックした際、`MenuTargetDefault`からはItemIdを直接取得できないため、FFXIVClientStructsのAgentを使用。
+
+```csharp
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+
+private unsafe uint GetItemIdFromAgent(string addonName)
+{
+    switch (addonName)
+    {
+        case "ChatLog":
+            var agentChatLog = AgentChatLog.Instance();
+            if (agentChatLog != null)
+                return agentChatLog->ContextItemId;
+            break;
+
+        case "RecipeNote":
+            var agentRecipeNote = AgentRecipeNote.Instance();
+            if (agentRecipeNote != null)
+                return agentRecipeNote->ContextMenuResultItemId;
+            break;
+
+        case "ItemSearch":
+            var agentContext = AgentContext.Instance();
+            if (agentContext != null)
+                return (uint)agentContext->UpdateCheckerParam;
+            break;
+    }
+    return 0;
+}
+```
+
+### フォールバック
+
+Agent経由で取得できない場合、`IGameGui.HoveredItem`をフォールバックとして使用。
+
+```csharp
+var hoveredItem = _gameGui.HoveredItem;
+if (hoveredItem > 0)
+{
+    var itemId = (uint)(hoveredItem % 500000); // HQ正規化
+    return itemId;
+}
+```
+
+## マップリンク表示
+
+### クリック可能なマップリンク生成
+
+```csharp
+var payload = _mapService.CreateMapLink(location);
+if (payload != null)
+{
+    builder.AddUiForeground(0x01F4); // マップリンク用の色 (500)
+    builder.Add(payload);
+    builder.AddText($"({location.MapX:0.0}, {location.MapY:0.0})");
+    builder.Add(RawPayload.LinkTerminator); // 必須: リンク終端
+    builder.AddUiForegroundOff();
+}
+```
+
+**重要**: `RawPayload.LinkTerminator`を追加しないとリンクがクリックできない。
+
+## 設定項目
+
+### ShopSearchEchoEnabled
+
+チャットへのEcho投稿の有効/無効を切り替え。
+
+```csharp
+public bool ShopSearchEchoEnabled { get; set; } = true;
+```
+
 ## 既知の制限事項
 
 1. **イベント限定NPC** - 位置情報がないNPCは除外される（例：レルムリボーン販売NPC）
 2. **インスタンスダンジョン内NPC** - 位置情報がない場合がある
 3. **SpecialShop構造の変動** - Luminaバージョンにより構造が変わる可能性あり（リフレクションで対応）
+4. **LGBファイル未登録NPC** - Level SheetにもLGBファイルにも位置情報がないNPCは検索不可
 
 ## ファイル構成
 
@@ -187,3 +308,59 @@ projects/XIV-Mini-Util/
 - 2025-12-30: NPC位置情報の取得を実装
 - 2025-12-30: 位置不明NPCのフィルタリングを追加
 - 2025-12-30: SpecialShop対応を追加
+- 2025-12-30: マップリンクのクリック対応（UiForeground + LinkTerminator）
+- 2025-12-30: Echo表示設定（ShopSearchEchoEnabled）を追加
+- 2025-12-30: チャットリンク右クリック対応（Agent経由のItemId取得）
+- 2025-12-30: LGBファイル解析によるNPC位置補完を追加
+- 2026-01-02: 手動NPC位置データ機能を追加（万能ルアー問題対応）
+- 2026-01-02: コンテキストメニューのPrefix警告を修正（PrefixChar='M'）
+- 2026-01-02: 検索診断ログ機能を追加（LogSearchDiagnostics）
+- 2026-01-02: 検索結果ウィンドウ表示設定を追加（ShopSearchWindowEnabled）
+- 2026-01-02: テレポ機能を追加（TeleportService）
+- 2026-01-02: 検索結果ウィンドウUIを改善（アイテム情報上部表示、テレポボタン各行配置）
+
+## 手動NPC位置データ
+
+### 概要
+
+一部のNPCはLevel SheetにもLGBファイルにも位置情報が登録されていません。
+これらのNPCについては `ShopDataCache.ManualNpcLocations` に手動で位置データを追加しています。
+
+### 登録済みNPC
+
+| NPC ID | NPC名 | 場所 | 座標 | 備考 |
+|--------|-------|------|------|------|
+| 1005422 | よろず屋 | リムサ・ロミンサ：下甲板層 | (3.3, 12.9) | オーシャンフィッシング関連 |
+
+### 追加方法
+
+`ShopDataCache.cs` の `ManualNpcLocations` に以下の形式で追加：
+
+```csharp
+private static readonly Dictionary<uint, (uint TerritoryId, string AreaName, float X, float Y)> ManualNpcLocations = new()
+{
+    { NPC_ID, (TERRITORY_ID, "エリア名", X座標, Y座標) },
+};
+```
+
+**TerritoryId参考値**:
+- 128: リムサ・ロミンサ：上甲板層
+- 129: リムサ・ロミンサ：下甲板層
+- 130: ウルダハ：ナル回廊
+- 131: ウルダハ：ザル回廊
+- 132: グリダニア：新市街
+- 133: グリダニア：旧市街
+
+## 解決済みの課題
+
+### 万能ルアー（Versatile Lure）検索問題
+
+**症状**: 万能ルアーを販売しているNPCの一部が検索結果に表示されない
+
+**原因**: NPC ID 1005422（リムサ・ロミンサ下甲板のよろず屋）がLevel Sheet / LGBのどちらにも位置情報がなかった
+
+**対応**: `ManualNpcLocations` に手動で位置データを追加
+
+**参考リンク**:
+- [consolegameswiki - Versatile Lure](https://ffxiv.consolegameswiki.com/wiki/Versatile_Lure)
+- [ItemVendorLocation Plugin](https://github.com/electr0sheep/ItemVendorLocation)
