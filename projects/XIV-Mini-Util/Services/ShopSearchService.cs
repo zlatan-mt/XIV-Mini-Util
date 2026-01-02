@@ -12,6 +12,7 @@ public sealed class ShopSearchService
     private readonly ShopDataCache _shopDataCache;
     private readonly MapService _mapService;
     private readonly ChatService _chatService;
+    private readonly TeleportService _teleportService;
     private readonly Configuration _configuration;
     private readonly IPluginLog _pluginLog;
 
@@ -19,12 +20,14 @@ public sealed class ShopSearchService
         ShopDataCache shopDataCache,
         MapService mapService,
         ChatService chatService,
+        TeleportService teleportService,
         Configuration configuration,
         IPluginLog pluginLog)
     {
         _shopDataCache = shopDataCache;
         _mapService = mapService;
         _chatService = chatService;
+        _teleportService = teleportService;
         _configuration = configuration;
         _pluginLog = pluginLog;
     }
@@ -60,6 +63,10 @@ public sealed class ShopSearchService
         try
         {
             _mapService.SetMapMarker(sorted[0]);
+            if (_configuration.ShopSearchAutoTeleportEnabled)
+            {
+                _teleportService.TeleportToNearestAetheryte(sorted[0]);
+            }
             if (_configuration.ShopSearchEchoEnabled)
             {
                 _chatService.PostSearchResult(itemName, sorted, 3);

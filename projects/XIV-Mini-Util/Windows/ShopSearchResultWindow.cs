@@ -16,16 +16,24 @@ namespace XivMiniUtil.Windows;
 
 public sealed class ShopSearchResultWindow : Window, IDisposable
 {
+    private const int MaxDisplayResults = 10;
+    private const int MaxTeleportButtons = 10;
+
     private readonly MapService _mapService;
     private readonly TeleportService _teleportService;
+    private readonly Configuration _configuration;
     private SearchResult? _result;
+    private IReadOnlyList<ShopLocationInfo> _displayLocations = Array.Empty<ShopLocationInfo>();
+    private readonly Dictionary<int, AetheryteInfo?> _aetheryteInfoCache = new();
+    private readonly Dictionary<int, bool> _aetheryteUnlockCache = new();
     private int _selectedIndex = -1;
 
-    public ShopSearchResultWindow(MapService mapService, TeleportService teleportService)
+    public ShopSearchResultWindow(MapService mapService, TeleportService teleportService, Configuration configuration)
         : base("販売場所検索")
     {
         _mapService = mapService;
         _teleportService = teleportService;
+        _configuration = configuration;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -37,7 +45,20 @@ public sealed class ShopSearchResultWindow : Window, IDisposable
     public void SetResult(SearchResult result)
     {
         _result = result;
+        _displayLocations = result.Locations.Take(MaxDisplayResults).ToList();
+        _aetheryteInfoCache.Clear();
+        _aetheryteUnlockCache.Clear();
         _selectedIndex = -1;
+
+        // 描画中に重い処理をしないため、表示対象の情報を先にキャッシュ
+        for (var i = 0; i < _displayLocations.Count; i++)
+        {
+            var location = _displayLocations[i];
+            var aetheryteInfo = _teleportService.GetNearestAetheryteInfo(location);
+            _aetheryteInfoCache[i] = aetheryteInfo;
+            _aetheryteUnlockCache[i] = aetheryteInfo != null
+                && _teleportService.IsAetheryteUnlocked(aetheryteInfo.AetheryteId);
+        }
     }
 
     public override void Draw()
@@ -56,8 +77,8 @@ public sealed class ShopSearchResultWindow : Window, IDisposable
 
         DrawItemInfo(_result);
         ImGui.Separator();
-        DrawLocationTable(_result.Locations);
-        DrawSelectedDetails(_result.Locations);
+        DrawLocationTable(_displayLocations);
+        DrawSelectedDetails(_displayLocations);
     }
 
     private void DrawItemInfo(SearchResult result)
@@ -87,6 +108,10 @@ public sealed class ShopSearchResultWindow : Window, IDisposable
         }
 
         ImGui.Text($"販売店舗: {result.Locations.Count}件");
+        if (result.Locations.Count > MaxDisplayResults)
+        {
+            ImGui.TextDisabled($"表示: 上位{MaxDisplayResults}件のみ");
+        }
     }
 
     public void Dispose()
@@ -118,11 +143,19 @@ public sealed class ShopSearchResultWindow : Window, IDisposable
                 ? location.AreaName
                 : $"{location.AreaName} {location.SubAreaName}";
 
-            if (ImGui.Selectable(label, _selectedIndex == i, ImGuiSelectableFlags.SpanAllColumns))
+            // 同名エリアが複数行に出るため、IDは行番号でユニーク化する
+            var selectableId = $"{label}##{i}";
+            if (ImGui.Selectable(selectableId, _selectedIndex == i, ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowItemOverlap))
             {
                 _selectedIndex = i;
                 _mapService.SetMapMarker(location);
+                if (_configuration.ShopSearchAutoTeleportEnabled)
+                {
+                    _teleportService.TeleportToNearestAetheryte(location);
+                }
             }
+            // 行全体のSelectableが他の操作を奪わないようにする
+            ImGui.SetItemAllowOverlap();
 
             // NPC列
             ImGui.TableSetColumnIndex(1);
@@ -134,7 +167,8 @@ public sealed class ShopSearchResultWindow : Window, IDisposable
 
             // テレポ列（上位3件のみ表示）
             ImGui.TableSetColumnIndex(3);
-            if (i < 3)
+            ImGui.PushID(i);
+            if (i < MaxTeleportButtons)
             {
                 DrawRowTeleportButton(location, i);
             }
@@ -142,6 +176,7 @@ public sealed class ShopSearchResultWindow : Window, IDisposable
             {
                 ImGui.TextDisabled("-");
             }
+            ImGui.PopID();
         }
 
         ImGui.EndTable();
@@ -149,14 +184,22 @@ public sealed class ShopSearchResultWindow : Window, IDisposable
 
     private void DrawRowTeleportButton(ShopLocationInfo location, int rowIndex)
     {
-        var aetheryteInfo = _teleportService.GetNearestAetheryteInfo(location);
+        if (!_aetheryteInfoCache.TryGetValue(rowIndex, out var aetheryteInfo))
+        {
+            aetheryteInfo = _teleportService.GetNearestAetheryteInfo(location);
+            _aetheryteInfoCache[rowIndex] = aetheryteInfo;
+        }
         if (aetheryteInfo == null)
         {
             ImGui.TextDisabled("-");
             return;
         }
 
-        var isUnlocked = _teleportService.IsAetheryteUnlocked(aetheryteInfo.AetheryteId);
+        if (!_aetheryteUnlockCache.TryGetValue(rowIndex, out var isUnlocked))
+        {
+            isUnlocked = _teleportService.IsAetheryteUnlocked(aetheryteInfo.AetheryteId);
+            _aetheryteUnlockCache[rowIndex] = isUnlocked;
+        }
         var buttonId = $"{aetheryteInfo.Name}##{rowIndex}";
 
         if (!isUnlocked)

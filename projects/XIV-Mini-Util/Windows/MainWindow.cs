@@ -352,6 +352,13 @@ public sealed class MainWindow : Window, IDisposable
             _configuration.Save();
         }
 
+        var autoTeleportEnabled = _configuration.ShopSearchAutoTeleportEnabled;
+        if (ImGui.Checkbox("検索時/マップピン時に自動テレポ", ref autoTeleportEnabled))
+        {
+            _configuration.ShopSearchAutoTeleportEnabled = autoTeleportEnabled;
+            _configuration.Save();
+        }
+
         ImGui.Separator();
         DrawShopSearchPriorityList();
         ImGui.Separator();

@@ -15,6 +15,10 @@ public sealed class TeleportService
     private readonly IDataManager _dataManager;
     private readonly IAetheryteList _aetheryteList;
     private readonly IPluginLog _pluginLog;
+    private readonly Dictionary<uint, List<AetheryteEntry>> _aetheryteByTerritory = new();
+    private bool _aetheryteCacheReady;
+    private readonly HashSet<uint> _unlockedAetherytes = new();
+    private bool _unlockedCacheReady;
 
     public TeleportService(IDataManager dataManager, IAetheryteList aetheryteList, IPluginLog pluginLog)
     {
@@ -35,8 +39,8 @@ public sealed class TeleportService
             return false;
         }
 
-        var aetheryteId = aetheryte.Value.RowId;
-        var aetheryteName = aetheryte.Value.PlaceName.ValueNullable?.Name.ToString() ?? "不明";
+        var aetheryteId = aetheryte.AetheryteId;
+        var aetheryteName = aetheryte.Name;
 
         // テレポ実行
         var telepo = Telepo.Instance();
@@ -53,7 +57,9 @@ public sealed class TeleportService
             return false;
         }
 
-        var result = telepo->Teleport(aetheryteId, 0);
+        // サブインデックスが必要なケースに備えて、解放済みリストから補完する
+        var subIndex = GetUnlockedAetheryteSubIndex(aetheryteId);
+        var result = telepo->Teleport(aetheryteId, subIndex);
         if (result)
         {
             _pluginLog.Information($"テレポ開始: {aetheryteName} (ID:{aetheryteId})");
@@ -77,8 +83,7 @@ public sealed class TeleportService
             return null;
         }
 
-        var name = aetheryte.Value.PlaceName.ValueNullable?.Name.ToString() ?? "不明";
-        return new AetheryteInfo(aetheryte.Value.RowId, name);
+        return new AetheryteInfo(aetheryte.AetheryteId, aetheryte.Name);
     }
 
     /// <summary>
@@ -86,69 +91,75 @@ public sealed class TeleportService
     /// </summary>
     public bool IsAetheryteUnlocked(uint aetheryteId)
     {
-        // IAetheryteListを使用して解放状況を確認
+        EnsureUnlockedCache();
+        return _unlockedAetherytes.Contains(aetheryteId);
+    }
+
+    private byte GetUnlockedAetheryteSubIndex(uint aetheryteId)
+    {
         foreach (var entry in _aetheryteList)
         {
-            if (entry.AetheryteId == aetheryteId)
+            if (entry.AetheryteId != aetheryteId)
             {
-                return true; // リストに存在すれば解放済み
+                continue;
+            }
+
+            var subIndex = GetSubIndexFromEntry(entry);
+            if (subIndex.HasValue)
+            {
+                return subIndex.Value;
             }
         }
 
-        return false;
+        return 0;
     }
 
-    private Aetheryte? FindNearestAetheryte(uint territoryTypeId, float mapX, float mapY)
+    private static byte? GetSubIndexFromEntry(object entry)
     {
-        var aetheryteSheet = _dataManager.GetExcelSheet<Aetheryte>();
-        var mapSheet = _dataManager.GetExcelSheet<LuminaMap>();
-        if (aetheryteSheet == null || mapSheet == null)
+        var property = entry.GetType().GetProperty("SubIndex");
+        if (property == null)
         {
             return null;
         }
 
-        Aetheryte? nearest = null;
+        var value = property.GetValue(entry);
+        return value switch
+        {
+            byte b => b,
+            ushort s => (byte)Math.Clamp(s, byte.MinValue, byte.MaxValue),
+            uint u => (byte)Math.Clamp(u, byte.MinValue, byte.MaxValue),
+            int i when i >= 0 => (byte)Math.Clamp(i, byte.MinValue, byte.MaxValue),
+            _ => null,
+        };
+    }
+
+    private AetheryteEntry? FindNearestAetheryte(uint territoryTypeId, float mapX, float mapY)
+    {
+        EnsureAetheryteCache();
+        if (!_aetheryteCacheReady)
+        {
+            return null;
+        }
+
+        if (!_aetheryteByTerritory.TryGetValue(territoryTypeId, out var entries) || entries.Count == 0)
+        {
+            return FindRelatedAetheryte(territoryTypeId);
+        }
+
+        AetheryteEntry? nearest = null;
         var minDistance = float.MaxValue;
 
-        foreach (var aetheryte in aetheryteSheet)
+        foreach (var entry in entries)
         {
-            if (aetheryte.RowId == 0)
-            {
-                continue;
-            }
-
-            // 同じTerritoryTypeのエーテライトのみ
-            var aetheryteTerritoryId = aetheryte.Territory.RowId;
-            if (aetheryteTerritoryId != territoryTypeId)
-            {
-                continue;
-            }
-
-            // エーテライトプラザ（都市内テレポ）は除外
-            if (aetheryte.IsAetheryte == false)
-            {
-                continue;
-            }
-
-            // エーテライトのマップ座標を取得
-            var aetheryteMap = aetheryte.Map.ValueNullable;
-            if (aetheryteMap == null)
-            {
-                continue;
-            }
-
-            var aetheryteX = ConvertToMapCoordinate(aetheryte.AetherstreamX, aetheryteMap.Value.OffsetX, aetheryteMap.Value.SizeFactor);
-            var aetheryteY = ConvertToMapCoordinate(aetheryte.AetherstreamY, aetheryteMap.Value.OffsetY, aetheryteMap.Value.SizeFactor);
-
             // 距離計算
-            var dx = aetheryteX - mapX;
-            var dy = aetheryteY - mapY;
+            var dx = entry.MapX - mapX;
+            var dy = entry.MapY - mapY;
             var distance = MathF.Sqrt(dx * dx + dy * dy);
 
             if (distance < minDistance)
             {
                 minDistance = distance;
-                nearest = aetheryte;
+                nearest = entry;
             }
         }
 
@@ -156,13 +167,13 @@ public sealed class TeleportService
         // （例：リムサ・ロミンサ上甲板層 → リムサ・ロミンサ・エーテライトプラザ）
         if (nearest == null)
         {
-            nearest = FindRelatedAetheryte(territoryTypeId, aetheryteSheet);
+            nearest = FindRelatedAetheryte(territoryTypeId);
         }
 
         return nearest;
     }
 
-    private Aetheryte? FindRelatedAetheryte(uint territoryTypeId, Lumina.Excel.ExcelSheet<Aetheryte> aetheryteSheet)
+    private AetheryteEntry? FindRelatedAetheryte(uint territoryTypeId)
     {
         // 三大都市の関連マッピング
         var relatedTerritories = new Dictionary<uint, uint>
@@ -180,20 +191,12 @@ public sealed class TeleportService
             return null;
         }
 
-        foreach (var aetheryte in aetheryteSheet)
+        if (!_aetheryteByTerritory.TryGetValue(mainTerritoryId, out var entries) || entries.Count == 0)
         {
-            if (aetheryte.RowId == 0)
-            {
-                continue;
-            }
-
-            if (aetheryte.Territory.RowId == mainTerritoryId && aetheryte.IsAetheryte)
-            {
-                return aetheryte;
-            }
+            return null;
         }
 
-        return null;
+        return entries[0];
     }
 
     private static float ConvertToMapCoordinate(short rawPosition, short offset, ushort sizeFactor)
@@ -204,6 +207,82 @@ public sealed class TeleportService
         var adjusted = (rawPosition * scale + 1024f) / 2048f;
         return c * adjusted + 1f;
     }
+
+    private void EnsureAetheryteCache()
+    {
+        if (_aetheryteCacheReady)
+        {
+            return;
+        }
+
+        var aetheryteSheet = _dataManager.GetExcelSheet<Aetheryte>();
+        if (aetheryteSheet == null)
+        {
+            return;
+        }
+
+        foreach (var aetheryte in aetheryteSheet)
+        {
+            if (aetheryte.RowId == 0)
+            {
+                continue;
+            }
+
+            if (!aetheryte.IsAetheryte)
+            {
+                continue;
+            }
+
+            var aetheryteMap = aetheryte.Map.ValueNullable;
+            if (aetheryteMap == null)
+            {
+                continue;
+            }
+
+            var territoryId = aetheryte.Territory.RowId;
+            if (territoryId == 0)
+            {
+                continue;
+            }
+
+            var mapX = ConvertToMapCoordinate(aetheryte.AetherstreamX, aetheryteMap.Value.OffsetX, aetheryteMap.Value.SizeFactor);
+            var mapY = ConvertToMapCoordinate(aetheryte.AetherstreamY, aetheryteMap.Value.OffsetY, aetheryteMap.Value.SizeFactor);
+            var name = aetheryte.PlaceName.ValueNullable?.Name.ToString() ?? "不明";
+
+            if (!_aetheryteByTerritory.TryGetValue(territoryId, out var list))
+            {
+                list = new List<AetheryteEntry>();
+                _aetheryteByTerritory[territoryId] = list;
+            }
+
+            list.Add(new AetheryteEntry(aetheryte.RowId, territoryId, name, mapX, mapY));
+        }
+
+        _aetheryteCacheReady = true;
+    }
+
+    private void EnsureUnlockedCache()
+    {
+        if (_unlockedCacheReady)
+        {
+            return;
+        }
+
+        _unlockedAetherytes.Clear();
+        foreach (var entry in _aetheryteList)
+        {
+            _unlockedAetherytes.Add(entry.AetheryteId);
+        }
+
+        _unlockedCacheReady = true;
+    }
 }
 
 public sealed record AetheryteInfo(uint AetheryteId, string Name);
+
+public sealed record AetheryteEntry(
+    uint AetheryteId,
+    uint TerritoryTypeId,
+    string Name,
+    float MapX,
+    float MapY);

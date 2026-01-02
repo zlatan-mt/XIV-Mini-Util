@@ -79,12 +79,12 @@ public sealed class Plugin : IDalamudPlugin
         _shopDataCache = new ShopDataCache(dataManager, pluginLog);
         _mapService = new MapService(gameGui, pluginLog);
         _chatService = new ChatService(chatGui, _mapService);
-        _shopSearchService = new ShopSearchService(_shopDataCache, _mapService, _chatService, _configuration, pluginLog);
-        _contextMenuService = new ContextMenuService(contextMenu, gameGui, _shopSearchService, _shopDataCache, pluginLog);
         _teleportService = new TeleportService(dataManager, aetheryteList, pluginLog);
+        _shopSearchService = new ShopSearchService(_shopDataCache, _mapService, _chatService, _teleportService, _configuration, pluginLog);
+        _contextMenuService = new ContextMenuService(contextMenu, gameGui, _shopSearchService, _shopDataCache, pluginLog);
 
         _mainWindow = new MainWindow(_configuration, _materiaService, _desynthService, _shopDataCache);
-        _shopSearchResultWindow = new ShopSearchResultWindow(_mapService, _teleportService);
+        _shopSearchResultWindow = new ShopSearchResultWindow(_mapService, _teleportService, _configuration);
 
         _windowSystem = new WindowSystem("XIV Mini Util");
         _windowSystem.AddWindow(_mainWindow);
