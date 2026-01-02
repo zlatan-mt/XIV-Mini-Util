@@ -15,6 +15,9 @@ public sealed class Plugin : IDalamudPlugin
 {
     private const string CommandName = "/xivminiutil";
     private const string CommandAlias = "/xmu";
+    // 公開版で一時的に無効化する機能の切り替え
+    private const bool MateriaFeatureEnabled = false;
+    private const bool DesynthFeatureEnabled = false;
 
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
@@ -83,7 +86,23 @@ public sealed class Plugin : IDalamudPlugin
         _shopSearchService = new ShopSearchService(_shopDataCache, _mapService, _chatService, _teleportService, _configuration, pluginLog);
         _contextMenuService = new ContextMenuService(contextMenu, gameGui, _shopSearchService, _shopDataCache, pluginLog);
 
-        _mainWindow = new MainWindow(_configuration, _materiaService, _desynthService, _shopDataCache);
+        if (!MateriaFeatureEnabled)
+        {
+            _materiaService.Disable();
+        }
+
+        if (!DesynthFeatureEnabled)
+        {
+            _desynthService.Stop();
+        }
+
+        _mainWindow = new MainWindow(
+            _configuration,
+            _materiaService,
+            _desynthService,
+            _shopDataCache,
+            MateriaFeatureEnabled,
+            DesynthFeatureEnabled);
         _shopSearchResultWindow = new ShopSearchResultWindow(_mapService, _teleportService, _configuration);
 
         _windowSystem = new WindowSystem("XIV Mini Util");

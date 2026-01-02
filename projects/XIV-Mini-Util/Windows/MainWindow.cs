@@ -22,6 +22,8 @@ public sealed class MainWindow : Window, IDisposable
     private readonly MateriaExtractService _materiaService;
     private readonly DesynthService _desynthService;
     private readonly ShopDataCache _shopDataCache;
+    private readonly bool _materiaFeatureEnabled;
+    private readonly bool _desynthFeatureEnabled;
 
     private DesynthWarningInfo? _warningInfo;
     private bool _showWarningDialog;
@@ -39,13 +41,17 @@ public sealed class MainWindow : Window, IDisposable
         Configuration configuration,
         MateriaExtractService materiaService,
         DesynthService desynthService,
-        ShopDataCache shopDataCache)
+        ShopDataCache shopDataCache,
+        bool materiaFeatureEnabled,
+        bool desynthFeatureEnabled)
         : base("XIV Mini Util")
     {
         _configuration = configuration;
         _materiaService = materiaService;
         _desynthService = desynthService;
         _shopDataCache = shopDataCache;
+        _materiaFeatureEnabled = materiaFeatureEnabled;
+        _desynthFeatureEnabled = desynthFeatureEnabled;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -106,8 +112,14 @@ public sealed class MainWindow : Window, IDisposable
     private void DrawMateriaSection()
     {
         ImGui.Text("マテリア精製");
+        if (!_materiaFeatureEnabled)
+        {
+            ImGui.Text("現在は無効中です。");
+            ImGui.BeginDisabled();
+        }
+
         var enabled = _materiaService.IsEnabled;
-        if (ImGui.Checkbox("有効", ref enabled))
+        if (ImGui.Checkbox("有効", ref enabled) && _materiaFeatureEnabled)
         {
             if (enabled)
             {
@@ -120,12 +132,24 @@ public sealed class MainWindow : Window, IDisposable
         }
 
         ImGui.SameLine();
-        ImGui.Text(_materiaService.IsProcessing ? "処理中" : "待機中");
+        ImGui.Text(_materiaFeatureEnabled
+            ? (_materiaService.IsProcessing ? "処理中" : "待機中")
+            : "無効中");
+
+        if (!_materiaFeatureEnabled)
+        {
+            ImGui.EndDisabled();
+        }
     }
 
     private void DrawDesynthActionSection()
     {
         ImGui.Text("アイテム分解");
+        if (!_desynthFeatureEnabled)
+        {
+            ImGui.Text("現在は無効中です。");
+            ImGui.BeginDisabled();
+        }
 
         var isProcessing = _desynthService.IsProcessing;
 
@@ -136,7 +160,10 @@ public sealed class MainWindow : Window, IDisposable
 
         if (ImGui.Button("分解開始"))
         {
-            _ = StartDesynthAsync();
+            if (_desynthFeatureEnabled)
+            {
+                _ = StartDesynthAsync();
+            }
         }
 
         if (isProcessing)
@@ -153,10 +180,18 @@ public sealed class MainWindow : Window, IDisposable
 
         if (ImGui.Button("分解停止"))
         {
-            _desynthService.Stop();
+            if (_desynthFeatureEnabled)
+            {
+                _desynthService.Stop();
+            }
         }
 
         if (!isProcessing)
+        {
+            ImGui.EndDisabled();
+        }
+
+        if (!_desynthFeatureEnabled)
         {
             ImGui.EndDisabled();
         }
@@ -192,7 +227,12 @@ public sealed class MainWindow : Window, IDisposable
 
     private void DrawSettingsCategoryList()
     {
-        var categories = new[] { "General & Materia", "Desynthesis", "Shop Search" };
+        var categories = new[]
+        {
+            _materiaFeatureEnabled ? "General & Materia" : "General & Materia (無効中)",
+            _desynthFeatureEnabled ? "Desynthesis" : "Desynthesis (無効中)",
+            "Shop Search",
+        };
 
         if (ImGui.BeginChild("SettingsCategories", new Vector2(0, 0), true))
         {
@@ -236,9 +276,14 @@ public sealed class MainWindow : Window, IDisposable
         ImGui.Text("一般設定");
         ImGui.Separator();
         ImGui.Text("マテリア精製");
+        if (!_materiaFeatureEnabled)
+        {
+            ImGui.Text("現在は無効中です。");
+            ImGui.BeginDisabled();
+        }
 
         var enabled = _materiaService.IsEnabled;
-        if (ImGui.Checkbox("自動精製を有効化", ref enabled))
+        if (ImGui.Checkbox("自動精製を有効化", ref enabled) && _materiaFeatureEnabled)
         {
             if (enabled)
             {
@@ -250,13 +295,25 @@ public sealed class MainWindow : Window, IDisposable
             }
         }
 
-        ImGui.Text(_materiaService.IsProcessing ? "状態: 処理中" : "状態: 待機中");
+        ImGui.Text(_materiaFeatureEnabled
+            ? (_materiaService.IsProcessing ? "状態: 処理中" : "状態: 待機中")
+            : "状態: 無効中");
+
+        if (!_materiaFeatureEnabled)
+        {
+            ImGui.EndDisabled();
+        }
     }
 
     private void DrawDesynthSettings()
     {
         ImGui.Text("分解設定");
         ImGui.Separator();
+        if (!_desynthFeatureEnabled)
+        {
+            ImGui.Text("現在は無効中です。");
+            ImGui.BeginDisabled();
+        }
 
         var minLevel = _configuration.DesynthMinLevel;
         var maxLevel = _configuration.DesynthMaxLevel;
@@ -324,6 +381,11 @@ public sealed class MainWindow : Window, IDisposable
         {
             _configuration.DesynthWarningThreshold = Math.Clamp(warningThreshold, 1, 999);
             _configuration.Save();
+        }
+
+        if (!_desynthFeatureEnabled)
+        {
+            ImGui.EndDisabled();
         }
     }
 
