@@ -63,6 +63,12 @@ public sealed class ContextMenuService : IDisposable
         }
 
         var addonName = args.AddonName ?? string.Empty;
+        if (addonName == "ColorantColoring")
+        {
+            // 右クリックごとに差分状態を初期化し、前回の差分が次回に持ち越されないようにする。
+            ResetColorantNumericDiff("ContextMenuOpened");
+        }
+
         if (args.Target == null || !TryGetItemId(args.Target, addonName, out var itemId))
         {
             return;
@@ -637,6 +643,13 @@ public sealed class ContextMenuService : IDisposable
         return 0;
     }
 
+    private void ResetColorantNumericDiff(string reason)
+    {
+        _lastColorantNumericSnapshot = null;
+        _lastColorantNumericDiffIndices = new List<int>();
+        _pluginLog.Information($"[ColorantDebug] 数値差分をリセット: Reason={reason}");
+    }
+
     private unsafe uint GetItemIdFromAddonText(AtkUnitBase* addon, ushort count)
     {
         var labelCandidates = new List<string>();
@@ -653,9 +666,15 @@ public sealed class ContextMenuService : IDisposable
         {
             var value = addon->AtkValues[i];
             var itemCandidate = ExtractItemId(value);
-            if (itemCandidate != 0 && _shopDataCache.IsLikelyColorantItemId(itemCandidate))
+            if (itemCandidate != 0)
             {
-                colorantItemCandidates.Add((i, itemCandidate));
+                // カララント判定に加え、テレビン油（Terebinth）も対象とする
+                // 短絡評価により、カララントでない場合のみ名前チェックを行う
+                if (_shopDataCache.IsLikelyColorantItemId(itemCandidate)
+                    || IsTurpentineLabel(_shopDataCache.GetItemName(itemCandidate)))
+                {
+                    colorantItemCandidates.Add((i, itemCandidate));
+                }
             }
 
             var text = ExtractString(value);
@@ -770,9 +789,15 @@ public sealed class ContextMenuService : IDisposable
             _pluginLog.Information($"[ColorantDebug] 両方候補: Colorant={colorantSelectedId}({colorantSelectedLabel}) Item={itemSelectedId}({itemSelectedLabel})");
         }
 
-        if (hasItemSelection && itemSelectedId != 0 && itemDiffIndex >= 200)
+        if (hasItemSelection
+            && itemSelectedId != 0
+            && itemDiffIndex >= 200
+            && (!colorantChanged || IsTurpentineLabel(itemSelectedLabel)))
         {
-            _pluginLog.Information($"ColorantAddonアイテム選択(差分)経由でItemId取得: {itemSelectedId} (Text={itemSelectedLabel})");
+            _pluginLog.Information($"ColorantAddonアイテム選択(差分)経由でItemId取得: {itemSelectedId} (Text={itemSelectedLabel}, DiffIndex={itemDiffIndex})");
+            // 高DiffIndexはアイテム優先。次の染色選択で変更判定が動くように状態をリセットする。
+            _lastColorantSelectedIndex = -1;
+            _lastColorantSelectedLabel = string.Empty;
             return itemSelectedId;
         }
 
@@ -821,7 +846,13 @@ public sealed class ContextMenuService : IDisposable
                 }
             }
         }
-        else if (itemLabelIndexList.Count == 0 && itemTextCandidates.Count > 0)
+        if (itemLabelIndexList.Count > 0)
+        {
+            var labelSummary = string.Join(", ", itemLabelIndexList.Take(12).Select(entry => $"{entry.Index}:{entry.Label}"));
+            _pluginLog.Information($"[ColorantDebug] アイテムラベル候補: {labelSummary}");
+        }
+
+        if (itemTextCandidates.Count > 0)
         {
             _pluginLog.Information($"[ColorantDebug] アイテム文字列候補: {string.Join(", ", itemTextCandidates)}");
         }
@@ -963,6 +994,23 @@ public sealed class ContextMenuService : IDisposable
             return string.Empty;
         }
 
+        // テレビン油・Terebinth・Turpentineを検出し、その位置から抽出する
+        // 先頭にゴミがある場合も、ない場合も統一的に処理する
+        if (text.IndexOf("テレビン油", StringComparison.Ordinal) is var jaIndex && jaIndex >= 0)
+        {
+            return text[jaIndex..].Trim();
+        }
+
+        if (text.IndexOf("Terebinth", StringComparison.OrdinalIgnoreCase) is var enIndex && enIndex >= 0)
+        {
+            return text[enIndex..].Trim();
+        }
+
+        if (text.IndexOf("Turpentine", StringComparison.OrdinalIgnoreCase) is var legacyIndex && legacyIndex >= 0)
+        {
+            return text[legacyIndex..].Trim();
+        }
+
         var start = FindFirstPreferredChar(text, preferNonAscii: true);
         if (start < 0)
         {
@@ -1083,17 +1131,29 @@ public sealed class ContextMenuService : IDisposable
         return length == 0 ? string.Empty : new string(buffer, 0, length).Trim();
     }
 
-    private static bool IsLikelyColorantLabel(string text)
+    private static bool IsColorantOrRelatedItem(string text)
     {
         return text.Contains("カララント", StringComparison.Ordinal)
             || text.Contains("Colorant", StringComparison.OrdinalIgnoreCase)
             || text.Contains("Dye", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsTurpentineLabel(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        return text.Contains("テレビン油", StringComparison.Ordinal)
+            || text.Contains("Terebinth", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("Turpentine", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool TryExtractColorantLabel(string text, out string label)
     {
         label = string.Empty;
-        if (!IsLikelyColorantLabel(text))
+        if (!IsColorantOrRelatedItem(text))
         {
             return false;
         }
