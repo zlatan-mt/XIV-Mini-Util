@@ -200,7 +200,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         _shopSearchResultWindow.SetResult(result);
 
-        if (_configuration.ShopSearchWindowEnabled && result.Success && result.Locations.Count >= 4)
+        if (_configuration.ShopSearchWindowEnabled && result.Success && result.Locations.Count > 0)
         {
             _shopSearchResultWindow.IsOpen = true;
         }

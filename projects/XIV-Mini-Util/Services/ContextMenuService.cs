@@ -624,6 +624,8 @@ public sealed class ContextMenuService : IDisposable
         var allStrings = new List<(int Index, string Text)>();
         var labelIndexMap = new Dictionary<int, string>();
         var labelIndexList = new List<(int Index, string Label)>();
+        var itemLabelIndexList = new List<(int Index, string Label, uint ItemId)>();
+        var itemTextCandidates = new List<string>();
         var numericCandidates = new List<(int Index, int Value)>();
         var colorantItemCandidates = new List<(int Index, uint ItemId)>();
 
@@ -652,6 +654,21 @@ public sealed class ContextMenuService : IDisposable
 
             if (!TryExtractColorantLabel(sanitized, out var label))
             {
+                if (TryExtractItemLabel(sanitized, out var itemLabel, out var itemId))
+                {
+                    itemLabelIndexList.Add((i, itemLabel, itemId));
+                    if (labelCandidates.Count < 20)
+                    {
+                        labelCandidates.Add($"[{i}] {itemLabel}");
+                    }
+                    continue;
+                }
+
+                if (!IsIgnorableColorantUiText(sanitized) && itemTextCandidates.Count < 20)
+                {
+                    itemTextCandidates.Add($"[{i}] {sanitized}");
+                }
+
                 if (textCandidates.Count < 20)
                 {
                     textCandidates.Add($"[{i}] {value.Type} {sanitized}");
@@ -684,13 +701,43 @@ public sealed class ContextMenuService : IDisposable
             }
         }
 
-        if (TryFindSelectedColorantLabelByIndex(addon, count, labelIndexMap, labelIndexList, _pluginLog, out var indexedLabel, out var selectedIndex))
+        if (itemLabelIndexList.Count > 0)
+        {
+            if (TryResolveItemIdFromItemLabels(itemLabelIndexList, out var resolvedLabel, out var resolvedId))
+            {
+                _pluginLog.Information($"ColorantAddonアイテム候補経由でItemId取得: {resolvedId} (Text={resolvedLabel})");
+                return resolvedId;
+            }
+
+            if (TryFindSelectedIndex(addon, count, itemLabelIndexList.Count, _pluginLog, out var itemSelectedIndex))
+            {
+                var adjustedIndex = itemSelectedIndex > 0 ? itemSelectedIndex - 1 : itemSelectedIndex;
+                if (adjustedIndex != itemSelectedIndex)
+                {
+                    _pluginLog.Information($"[ColorantDebug] 選択Index補正: {itemSelectedIndex} -> {adjustedIndex}");
+                }
+
+                LogItemIndexWindow(_pluginLog, adjustedIndex, itemLabelIndexList);
+                var mappedItemId = MapItemIdBySelectedIndex(adjustedIndex, itemLabelIndexList, out var mappedLabel);
+                if (mappedItemId != 0)
+                {
+                    _pluginLog.Information($"ColorantAddon選択Index(数値)経由でItemId取得: {mappedItemId} (Text={mappedLabel})");
+                    return mappedItemId;
+                }
+            }
+        }
+        else if (itemLabelIndexList.Count == 0 && itemTextCandidates.Count > 0)
+        {
+            _pluginLog.Information($"[ColorantDebug] アイテム文字列候補: {string.Join(", ", itemTextCandidates)}");
+        }
+
+        if (TryFindSelectedColorantLabelByIndex(addon, count, labelIndexMap, labelIndexList, _pluginLog, out var indexedLabel, out var colorantSelectedIndex))
         {
             // 選択Indexが確定している場合は、数値候補ブロックからItemIdを対応付ける
-            var mappedItemId = TryMapColorantItemIdByIndex(selectedIndex, labelIndexList.Count, colorantItemCandidates);
+            var mappedItemId = TryMapColorantItemIdByIndex(colorantSelectedIndex, labelIndexList.Count, colorantItemCandidates);
             if (mappedItemId != 0)
             {
-                _pluginLog.Information($"ColorantAddon選択Index(数値)経由でItemId取得: {mappedItemId} (Index={selectedIndex})");
+                _pluginLog.Information($"ColorantAddon選択Index(数値)経由でItemId取得: {mappedItemId} (Index={colorantSelectedIndex})");
                 return mappedItemId;
             }
 
@@ -741,6 +788,163 @@ public sealed class ContextMenuService : IDisposable
         }
 
         return 0;
+    }
+
+    private bool TryExtractItemLabel(string text, out string label, out uint itemId)
+    {
+        label = string.Empty;
+        itemId = 0;
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        if (IsIgnorableColorantUiText(text))
+        {
+            return false;
+        }
+
+        if (TryExtractColorantLabel(text, out _))
+        {
+            // カララント名は専用のリストで処理するため、ここでは除外
+            return false;
+        }
+
+        var normalized = NormalizeItemLabel(text);
+        if (string.IsNullOrWhiteSpace(normalized) || IsIgnorableColorantUiText(normalized))
+        {
+            return false;
+        }
+
+        if (TryExtractColorantLabel(normalized, out _))
+        {
+            return false;
+        }
+
+        var candidate = TrimItemLabelSuffixes(normalized);
+        if (!string.IsNullOrWhiteSpace(candidate))
+        {
+            var candidateId = _shopDataCache.GetItemIdFromName(candidate);
+            if (candidateId != 0)
+            {
+                label = candidate;
+                itemId = candidateId;
+                return true;
+            }
+        }
+
+        var fallbackId = _shopDataCache.GetItemIdFromName(normalized);
+        if (fallbackId == 0)
+        {
+            return false;
+        }
+
+        label = normalized;
+        itemId = fallbackId;
+        return true;
+    }
+
+    private static string NormalizeItemLabel(string text)
+    {
+        var trimmed = TrimNonLabelSuffix(text);
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return string.Empty;
+        }
+
+        trimmed = TrimTrailingAsciiTag(trimmed);
+        trimmed = StripLeadingMarkers(trimmed);
+        return trimmed.Trim();
+    }
+
+    private static string StripLeadingMarkers(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var start = FindFirstPreferredChar(text, preferNonAscii: true);
+        if (start < 0)
+        {
+            start = FindFirstPreferredChar(text, preferNonAscii: false);
+        }
+
+        if (start <= 0)
+        {
+            return text.Trim();
+        }
+
+        return text[start..].Trim();
+    }
+
+    private static int FindFirstPreferredChar(string text, bool preferNonAscii)
+    {
+        for (var i = 0; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (!IsPreferredItemChar(ch))
+            {
+                continue;
+            }
+
+            if (!preferNonAscii || ch > 0x7F)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool IsPreferredItemChar(char ch)
+    {
+        return char.IsLetterOrDigit(ch)
+            || ch == '・'
+            || ch == 'ー'
+            || ch == '－'
+            || ch == '-';
+    }
+
+    private static string TrimItemLabelSuffixes(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var separators = new[]
+        {
+            " 所持",
+            " 必要",
+            " 所要",
+            " 個",
+            " 枚",
+            " x",
+            " ×",
+            "／",
+            "/",
+        };
+
+        foreach (var separator in separators)
+        {
+            var index = text.IndexOf(separator, StringComparison.Ordinal);
+            if (index > 0)
+            {
+                return text[..index].Trim();
+            }
+        }
+
+        return text.Trim();
+    }
+
+    private static bool IsIgnorableColorantUiText(string text)
+    {
+        return text.Contains("このカララント", StringComparison.Ordinal)
+            || text.Contains("染色1の使用カララント", StringComparison.Ordinal)
+            || text.Contains("染色2の使用カララント", StringComparison.Ordinal)
+            || text.Contains("EQUIPMENT", StringComparison.Ordinal);
     }
 
     private static unsafe string ExtractString(AtkValue value)
@@ -982,6 +1186,63 @@ public sealed class ContextMenuService : IDisposable
         return false;
     }
 
+    private static unsafe bool TryFindSelectedIndex(
+        AtkUnitBase* addon,
+        ushort count,
+        int listCount,
+        IPluginLog pluginLog,
+        out int selectedIndex)
+    {
+        selectedIndex = -1;
+        if (listCount <= 0 || addon == null || count == 0)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            var value = addon->AtkValues[i];
+            int candidate;
+            if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int)
+            {
+                candidate = value.Int;
+            }
+            else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+            {
+                if (value.UInt > int.MaxValue)
+                {
+                    continue;
+                }
+                candidate = (int)value.UInt;
+            }
+            else
+            {
+                continue;
+            }
+
+            if (candidate < 0 || candidate >= listCount)
+            {
+                continue;
+            }
+
+            if (i == 22)
+            {
+                selectedIndex = candidate;
+                return true;
+            }
+
+            selectedIndex = candidate;
+        }
+
+        if (selectedIndex >= 0)
+        {
+            return true;
+        }
+
+        pluginLog.Warning("[ColorantDebug] 選択Indexの取得に失敗しました。");
+        return false;
+    }
+
     private static void LogColorantIndexWindow(IPluginLog pluginLog, int index, List<(int Index, string Label)> labelIndexList)
     {
         if (index < 0 || labelIndexList.Count == 0)
@@ -998,6 +1259,24 @@ public sealed class ContextMenuService : IDisposable
         }
 
         pluginLog.Information($"[ColorantDebug] 選択Index={index} 周辺ラベル: {string.Join(", ", window)}");
+    }
+
+    private static void LogItemIndexWindow(IPluginLog pluginLog, int index, List<(int Index, string Label, uint ItemId)> labelIndexList)
+    {
+        if (index < 0 || labelIndexList.Count == 0)
+        {
+            return;
+        }
+
+        var start = Math.Max(0, index - 2);
+        var end = Math.Min(labelIndexList.Count - 1, index + 2);
+        var window = new List<string>();
+        for (var i = start; i <= end; i++)
+        {
+            window.Add($"{i}:{labelIndexList[i].Label}");
+        }
+
+        pluginLog.Information($"[ColorantDebug] 選択Index={index} 周辺アイテム: {string.Join(", ", window)}");
     }
 
     private static uint TryMapColorantItemIdByIndex(
@@ -1044,6 +1323,61 @@ public sealed class ContextMenuService : IDisposable
         }
 
         return bestBlock[selectedIndex];
+    }
+
+    private static uint MapItemIdBySelectedIndex(
+        int selectedIndex,
+        List<(int Index, string Label, uint ItemId)> itemLabels,
+        out string label)
+    {
+        label = string.Empty;
+        if (selectedIndex < 0 || itemLabels.Count == 0)
+        {
+            return 0;
+        }
+
+        itemLabels.Sort((a, b) => a.Index.CompareTo(b.Index));
+        if (selectedIndex >= itemLabels.Count)
+        {
+            return 0;
+        }
+
+        var entry = itemLabels[selectedIndex];
+        label = entry.Label;
+        return entry.ItemId;
+    }
+
+    private bool TryResolveItemIdFromItemLabels(
+        List<(int Index, string Label, uint ItemId)> itemLabels,
+        out string label,
+        out uint itemId)
+    {
+        label = string.Empty;
+        itemId = 0;
+        if (itemLabels.Count == 0)
+        {
+            return false;
+        }
+
+        var withShop = itemLabels
+            .Where(entry => _shopDataCache.HasShopData(entry.ItemId))
+            .ToList();
+
+        if (withShop.Count == 1)
+        {
+            label = withShop[0].Label;
+            itemId = withShop[0].ItemId;
+            return true;
+        }
+
+        if (itemLabels.Count == 1)
+        {
+            label = itemLabels[0].Label;
+            itemId = itemLabels[0].ItemId;
+            return true;
+        }
+
+        return false;
     }
 
     private unsafe void CaptureColorantNumericDiff(
