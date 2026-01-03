@@ -59,9 +59,7 @@ public sealed record ShopLocationInfo(
     float MapY,
     int Price,
     string ConditionNote,
-    bool IsManuallyAdded = false,
-    Guid? CustomShopId = null,
-    bool IsCustomShop = false);
+    bool IsManuallyAdded = false);
 
 public sealed record ShopTerritoryInfo(
     uint TerritoryTypeId,

@@ -2,8 +2,6 @@
 // Description: ショップ販売データを起動時に読み込みキャッシュする
 // Reason: 検索を高速化しゲーム中の再読み込みを避けるため
 // RELEVANT FILES: projects/XIV-Mini-Util/Services/ShopSearchService.cs, projects/XIV-Mini-Util/Services/ContextMenuService.cs, projects/XIV-Mini-Util/Models/DomainModels.cs
-using System.Numerics;
-using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Lumina.Data.Files;
 using Lumina.Data.Parsing.Layer;
@@ -17,7 +15,6 @@ public sealed class ShopDataCache
 {
     private readonly IDataManager _dataManager;
     private readonly IPluginLog _pluginLog;
-    private readonly HousingNpcDataManager _housingNpcDataManager;
     private readonly Dictionary<uint, List<ShopLocationInfo>> _itemToLocations = new();
     private readonly Dictionary<uint, string> _itemNames = new();
     private readonly Dictionary<uint, string> _territoryNames = new();
@@ -33,10 +30,6 @@ public sealed class ShopDataCache
     private Dictionary<uint, List<NpcShopInfo>> _gilShopNpcInfos = new();
     private Dictionary<uint, List<NpcShopInfo>> _specialShopNpcInfos = new();
 
-    // カスタムショップ（ハウジングNPC等）
-    private readonly object _customShopLock = new();
-    private Dictionary<uint, List<ShopLocationInfo>> _customShopLocations = new();
-
     // 診断用：位置情報なしで除外されたNPC
     private readonly List<(uint NpcId, string NpcName, uint ShopId, string ShopName)> _excludedNpcs = new();
     // 診断用：NPCマッチがなかったショップ
@@ -44,45 +37,6 @@ public sealed class ShopDataCache
 
     private Task? _initializeTask;
     private bool _isInitialized;
-
-    /// <summary>
-    /// ハウジングエリア情報
-    /// </summary>
-    public static class HousingAreas
-    {
-        public static readonly (uint TerritoryTypeId, string Name)[] All = new[]
-        {
-            (339u, "ミスト・ヴィレッジ"),
-            (340u, "ラベンダーベッド"),
-            (341u, "ゴブレットビュート"),
-            (641u, "シロガネ"),
-            (979u, "エンピレアム"),
-        };
-
-        public static string GetName(uint territoryTypeId)
-        {
-            foreach (var (id, name) in All)
-            {
-                if (id == territoryTypeId)
-                {
-                    return name;
-                }
-            }
-            return string.Empty;
-        }
-
-        public static bool IsHousingArea(uint territoryTypeId)
-        {
-            foreach (var (id, _) in All)
-            {
-                if (id == territoryTypeId)
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-    }
 
     private sealed record NpcShopInfo(
         uint NpcId,
@@ -98,32 +52,14 @@ public sealed class ShopDataCache
         bool IsManuallyAdded = false);
 
     public ShopDataCache(
-        IDalamudPluginInterface pluginInterface,
         IDataManager dataManager,
         IPluginLog pluginLog)
     {
         _dataManager = dataManager;
         _pluginLog = pluginLog;
-        _housingNpcDataManager = new HousingNpcDataManager(pluginInterface, dataManager, pluginLog);
     }
 
     public bool IsInitialized => _isInitialized;
-
-    /// <summary>
-    /// ハウジングNPCの販売アイテムを取得する
-    /// </summary>
-    public IReadOnlyList<uint> GetHousingNpcItems(HousingNpcType npcType)
-    {
-        return _housingNpcDataManager.GetItems(npcType);
-    }
-
-    /// <summary>
-    /// ハウジングNPCマスターの診断情報を取得する
-    /// </summary>
-    public HousingNpcDataManager.HousingNpcDiagnostics GetHousingNpcDiagnostics()
-    {
-        return _housingNpcDataManager.GetDiagnostics();
-    }
 
     public Task InitializeAsync()
     {
@@ -138,16 +74,7 @@ public sealed class ShopDataCache
             return false;
         }
 
-        if (_itemToLocations.ContainsKey(itemId))
-        {
-            return true;
-        }
-
-        // カスタムショップもチェック
-        lock (_customShopLock)
-        {
-            return _customShopLocations.ContainsKey(itemId);
-        }
+        return _itemToLocations.ContainsKey(itemId);
     }
 
     public IReadOnlyList<ShopLocationInfo> GetShopLocations(uint itemId)
@@ -157,173 +84,9 @@ public sealed class ShopDataCache
             return Array.Empty<ShopLocationInfo>();
         }
 
-        var baseLocations = _itemToLocations.TryGetValue(itemId, out var locations)
+        return _itemToLocations.TryGetValue(itemId, out var locations)
             ? locations
             : new List<ShopLocationInfo>();
-
-        // カスタムショップからもマージ
-        List<ShopLocationInfo>? customLocations = null;
-        lock (_customShopLock)
-        {
-            if (_customShopLocations.TryGetValue(itemId, out var custom))
-            {
-                customLocations = custom.ToList();
-            }
-        }
-
-        if (customLocations == null || customLocations.Count == 0)
-        {
-            return baseLocations;
-        }
-
-        if (baseLocations.Count == 0)
-        {
-            return customLocations;
-        }
-
-        // 両方ある場合はマージ
-        var merged = new List<ShopLocationInfo>(baseLocations.Count + customLocations.Count);
-        merged.AddRange(baseLocations);
-        merged.AddRange(customLocations);
-        return merged;
-    }
-
-    /// <summary>
-    /// カスタムショップ設定からアイテム→販売場所のマッピングを再構築する
-    /// </summary>
-    public void RefreshCustomShops(IReadOnlyList<CustomShopConfig> customShops)
-    {
-        var newLocations = new Dictionary<uint, List<ShopLocationInfo>>();
-
-        foreach (var shop in customShops)
-        {
-            if (!shop.IsEnabled || string.IsNullOrWhiteSpace(shop.Name))
-            {
-                continue;
-            }
-
-            // マップピン（MapLinkPayload）には MapId が必須。
-            // ハウジングは設定側でMapIdを持たない運用のため、TerritoryTypeから解決して埋める。
-            var resolvedMapId = GetDefaultMapId(shop.TerritoryTypeId);
-            if (resolvedMapId == 0)
-            {
-                resolvedMapId = shop.MapId;
-            }
-
-            var areaName = GetTerritoryName(shop.TerritoryTypeId);
-            if (string.IsNullOrWhiteSpace(areaName))
-            {
-                areaName = HousingAreas.GetName(shop.TerritoryTypeId);
-            }
-            if (string.IsNullOrWhiteSpace(areaName))
-            {
-                areaName = $"エリア#{shop.TerritoryTypeId}";
-            }
-
-            // 各NPCタイプのアイテムを追加
-            foreach (var npcType in shop.Npcs)
-            {
-                var items = GetHousingNpcItems(npcType);
-                foreach (var itemId in items)
-                {
-                    // ここで不正なIDを落としておく（検索結果に「アイテム#xxxx」が混ざるのを防ぐ）
-                    if (!IsValidItemId(itemId))
-                    {
-                        continue;
-                    }
-
-                    if (!newLocations.TryGetValue(itemId, out var list))
-                    {
-                        list = new List<ShopLocationInfo>();
-                        newLocations[itemId] = list;
-                    }
-
-                    // 重複チェック
-                    if (list.Any(l => l.CustomShopId == shop.Id))
-                    {
-                        continue;
-                    }
-
-                    var npcTypeName = npcType switch
-                    {
-                        HousingNpcType.MaterialSupplier => "素材屋",
-                        HousingNpcType.Junkmonger => "よろず屋",
-                        _ => "NPC",
-                    };
-
-                    list.Add(new ShopLocationInfo(
-                        ShopId: 0, // カスタムショップにはShopIdなし
-                        ShopName: shop.Name,
-                        NpcName: $"{npcTypeName} ({shop.Name})",
-                        TerritoryTypeId: shop.TerritoryTypeId,
-                        AreaName: areaName,
-                        SubAreaName: string.Empty,
-                        MapId: resolvedMapId,
-                        MapX: shop.X,
-                        MapY: shop.Y,
-                        Price: 0,
-                        ConditionNote: "カスタム登録",
-                        IsManuallyAdded: true,
-                        CustomShopId: shop.Id,
-                        IsCustomShop: true));
-                }
-            }
-        }
-
-        lock (_customShopLock)
-        {
-            _customShopLocations = newLocations;
-        }
-
-        _pluginLog.Information($"カスタムショップ更新: {customShops.Count}件 → {newLocations.Count}アイテム");
-    }
-
-    private bool IsValidItemId(uint itemId)
-    {
-        if (itemId == 0)
-        {
-            return false;
-        }
-
-        var name = GetItemName(itemId);
-        return !string.IsNullOrWhiteSpace(name);
-    }
-
-    private uint GetDefaultMapId(uint territoryTypeId)
-    {
-        if (territoryTypeId == 0)
-        {
-            return 0;
-        }
-
-        var mapSheet = _dataManager.GetExcelSheet<Map>();
-        if (mapSheet == null)
-        {
-            return 0;
-        }
-
-        // TerritoryType.Map は環境差/用途差で期待とズレる場合があるため、
-        // TerritoryTypeId に紐づく Map を Mapシート側から選ぶ。
-        // まずは PlaceNameSub が空の「メインマップ」を優先する。
-        uint fallbackId = 0;
-        foreach (var map in mapSheet)
-        {
-            if (map.RowId != 0 && map.TerritoryType.RowId == territoryTypeId)
-            {
-                if (fallbackId == 0)
-                {
-                    fallbackId = map.RowId;
-                }
-
-                var subName = map.PlaceNameSub.ValueNullable?.Name.ToString() ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(subName))
-                {
-                    return map.RowId;
-                }
-            }
-        }
-
-        return fallbackId;
     }
 
     public string GetItemName(uint itemId)
@@ -487,21 +250,11 @@ public sealed class ShopDataCache
         CollectTerritoryIds(_gilShopNpcInfos, ids);
         CollectTerritoryIds(_specialShopNpcInfos, ids);
 
-        // 固定ショップが存在しない場合でも、ハウジングエリアは候補として出したい
-        foreach (var (territoryTypeId, _) in HousingAreas.All)
-        {
-            ids.Add(territoryTypeId);
-        }
-
         // 同名エリアは代表IDにまとめる（最小IDで固定）
         return ids
             .Select(id =>
             {
                 var name = GetTerritoryName(id);
-                if (string.IsNullOrWhiteSpace(name) && HousingAreas.IsHousingArea(id))
-                {
-                    name = HousingAreas.GetName(id);
-                }
                 return new { Id = id, Name = name };
             })
             .Where(entry => !string.IsNullOrWhiteSpace(entry.Name))
@@ -943,37 +696,6 @@ public sealed class ShopDataCache
         sb.AppendLine($"- NPCマッチなしショップ数: {_unmatchedShopItems.Count}");
         sb.AppendLine();
 
-        // ハウジングNPCマスター
-        var housingDiagnostics = GetHousingNpcDiagnostics();
-        sb.AppendLine("## ハウジングNPCマスター");
-        sb.AppendLine($"- バージョン: {housingDiagnostics.Version}");
-        sb.AppendLine($"- ロード元: {housingDiagnostics.Source}");
-        sb.AppendLine($"- 素材屋アイテム数: {GetHousingNpcCount(housingDiagnostics.ValidCounts, HousingNpcType.MaterialSupplier)}");
-        sb.AppendLine($"- よろず屋アイテム数: {GetHousingNpcCount(housingDiagnostics.ValidCounts, HousingNpcType.Junkmonger)}");
-        sb.AppendLine($"- 除外総数: {housingDiagnostics.TotalExcluded}");
-        sb.AppendLine();
-
-        sb.AppendLine("## ハウジングNPCマスター 除外アイテム");
-        if (housingDiagnostics.ExcludedByReason.Count == 0)
-        {
-            sb.AppendLine("除外されたアイテムはありません。");
-            sb.AppendLine();
-        }
-        else
-        {
-            foreach (var entry in housingDiagnostics.ExcludedByReason.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
-            {
-                var ids = entry.Value
-                    .Distinct()
-                    .OrderBy(id => id)
-                    .Select(id => id.ToString())
-                    .ToArray();
-                var idLine = ids.Length == 0 ? "(なし)" : string.Join(", ", ids);
-                sb.AppendLine($"- {entry.Key}: {idLine}");
-            }
-            sb.AppendLine();
-        }
-
         // 位置情報なしNPC（ユニークなNPC IDでグループ化）
         sb.AppendLine("## 位置情報なしNPC一覧");
         sb.AppendLine("| NPC ID | NPC名 | ショップ数 | ショップ例 |");
@@ -1062,13 +784,6 @@ public sealed class ShopDataCache
         {
             _pluginLog.Warning($"診断レポートのローテーションに失敗しました: {ex.Message}");
         }
-    }
-
-    private static int GetHousingNpcCount(
-        IReadOnlyDictionary<HousingNpcType, int> counts,
-        HousingNpcType npcType)
-    {
-        return counts.TryGetValue(npcType, out var count) ? count : 0;
     }
 
     /// <summary>
@@ -2397,34 +2112,6 @@ public sealed class ShopDataCache
         {
             return string.Empty;
         }
-    }
-
-    /// <summary>
-    /// ワールド座標からマップ座標に変換する
-    /// </summary>
-    public (float X, float Y) WorldToMapCoordinates(uint territoryTypeId, float worldX, float worldZ)
-    {
-        var mapSheet = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.Map>();
-        if (mapSheet == null)
-        {
-            return (0, 0);
-        }
-
-        var mapId = GetDefaultMapId(territoryTypeId);
-        if (mapId == 0)
-        {
-            return (0, 0);
-        }
-
-        var map = mapSheet.GetRow(mapId);
-        if (map.RowId == 0)
-        {
-            return (0, 0);
-        }
-
-        var mapX = ConvertToMapCoordinate(worldX, map.OffsetX, map.SizeFactor);
-        var mapY = ConvertToMapCoordinate(worldZ, map.OffsetY, map.SizeFactor);
-        return (mapX, mapY);
     }
 
     private static float ConvertToMapCoordinate(float rawPosition, float offset, ushort sizeFactor)
