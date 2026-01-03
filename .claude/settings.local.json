@@ -23,7 +23,10 @@
       "WebFetch(domain:ffxiv.gamerescape.com)",
       "WebFetch(domain:www.garlandtools.org)",
       "WebFetch(domain:ffxiv.consolegameswiki.com)",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(git fetch:*)",
+      "Bash(git push:*)",
+      "Bash(gh release create v0.1.1 \"projects/XIV-Mini-Util/bin/Release/XivMiniUtil/XivMiniUtil.zip\" --title \"v0.1.1\" --notes \"$\\(cat <<''EOF''\n## Changes\n- マテリア精製・分解機能を一時的に無効化（公開版向け安定性対応）\n- UI上で無効化された機能はグレーアウト表示\n\n## Notes\nショップ検索機能は引き続き利用可能です。\nEOF\n\\)\")"
     ]
   }
 }

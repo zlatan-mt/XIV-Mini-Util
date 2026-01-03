@@ -84,6 +84,8 @@ CLAUDE.md
 
 # External dependencies (managed separately)
 projects/FFXIVClientStructs/
+projects/ECommons/
+projects/DailyRoutines.ModulesPublic/
 
 # Temporary planning files
 plans/

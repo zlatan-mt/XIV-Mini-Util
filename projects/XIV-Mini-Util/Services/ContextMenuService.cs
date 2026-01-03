@@ -6,6 +6,8 @@ using Dalamud.Game.Gui.ContextMenu;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using FFXIVClientStructs.FFXIV.Component.GUI;
+using System.Reflection;
 
 namespace XivMiniUtil.Services;
 
@@ -18,6 +20,7 @@ public sealed class ContextMenuService : IDisposable
     private readonly ShopSearchService _shopSearchService;
     private readonly ShopDataCache _shopDataCache;
     private readonly IPluginLog _pluginLog;
+    private bool _loggedColorantDebug;
 
     public ContextMenuService(
         IContextMenu contextMenu,
@@ -100,6 +103,18 @@ public sealed class ContextMenuService : IDisposable
 
     private bool TryGetItemId(object target, string addonName, out uint itemId)
     {
+        // 染色画面はAddonのAtkValuesからItemIdを取得する
+        if (addonName == "ColorantColoring")
+        {
+            var colorantItemId = GetColorantItemIdFromAddon();
+            if (colorantItemId != 0)
+            {
+                itemId = colorantItemId;
+                _pluginLog.Information($"ColorantAddon経由でItemId取得: {itemId}");
+                return true;
+            }
+        }
+
         // インベントリアイテム
         if (target is MenuTargetInventory inventoryTarget && inventoryTarget.TargetItem is { } inventoryItem)
         {
@@ -227,6 +242,9 @@ public sealed class ContextMenuService : IDisposable
                         itemId = (uint)agentContext->UpdateCheckerParam;
                     }
                     break;
+                case "ColorantColoring":
+                    itemId = GetItemIdFromColorantAgent();
+                    break;
             }
 
             // HQ品のIDを通常品に正規化
@@ -237,6 +255,421 @@ public sealed class ContextMenuService : IDisposable
             _pluginLog.Warning(ex, $"Agent経由のItemId取得に失敗: {addonName}");
             return 0;
         }
+    }
+
+    private unsafe uint GetItemIdFromColorantAgent()
+    {
+        try
+        {
+            var agentColorant = AgentColorant.Instance();
+            if (agentColorant == null)
+            {
+                return 0;
+            }
+
+            var stainId = agentColorant->CharaView.SelectedStain;
+            if (stainId == 0)
+            {
+                // 右クリックのみの場合はSelectedStainが入らないことがあるため、他候補を探す
+                stainId = TryGetStainIdFromCharaView(agentColorant->CharaView);
+            }
+
+            if (stainId == 0)
+            {
+                LogColorantDebugOnce(agentColorant);
+                return 0;
+            }
+
+            var itemId = _shopDataCache.GetItemIdFromStain(stainId);
+            if (itemId != 0)
+            {
+                _pluginLog.Information($"染色取得: Stain={stainId} ItemId={itemId}");
+            }
+
+            return itemId;
+        }
+        catch (Exception ex)
+        {
+            _pluginLog.Warning(ex, "ColorantAgentからのItemId取得に失敗しました。");
+            return 0;
+        }
+    }
+
+    private static byte TryGetStainIdFromCharaView<T>(T charaView) where T : struct
+    {
+        var candidateNames = new[]
+        {
+            "SelectedStain",
+            "SelectedStainId",
+            "SelectedColorant",
+            "SelectedColorantId",
+            "HoverStain",
+            "HoveredStain",
+            "HoveredColorant",
+            "HoveredColorantId",
+            "CurrentStain",
+            "ActiveStain",
+            "CurrentColorant",
+            "ActiveColorant",
+        };
+
+        foreach (var name in candidateNames)
+        {
+            if (TryGetFieldValue(charaView, name, out var stainId) && stainId != 0)
+            {
+                return stainId;
+            }
+        }
+
+        return 0;
+    }
+
+    private unsafe void LogColorantDebugOnce(AgentColorant* agentColorant)
+    {
+        if (_loggedColorantDebug)
+        {
+            return;
+        }
+
+        _loggedColorantDebug = true;
+
+        try
+        {
+            var selected = agentColorant->CharaView.SelectedStain;
+            _pluginLog.Information($"[ColorantDebug] SelectedStain={selected}");
+
+            var charaView = agentColorant->CharaView;
+            LogStructFields(charaView, "CharaView");
+            LogStructNumericFields(charaView, "CharaView");
+            LogStructFieldsRecursive(charaView, "CharaView", 2, false);
+
+            // Agent本体にも手がかりがある可能性があるため、広めに調査する
+            var agentValue = *agentColorant;
+            LogStructFields(agentValue, "AgentColorant");
+            LogStructNumericFields(agentValue, "AgentColorant");
+            LogStructFieldsRecursive(agentValue, "AgentColorant", 2, false);
+        }
+        catch (Exception ex)
+        {
+            _pluginLog.Warning(ex, "ColorantDebugの出力に失敗しました。");
+        }
+    }
+
+    private void LogStructFields<T>(T value, string label) where T : struct
+    {
+        var fields = typeof(T).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        foreach (var field in fields.Where(field =>
+            field.Name.Contains("Stain", StringComparison.OrdinalIgnoreCase)
+            || field.Name.Contains("Color", StringComparison.OrdinalIgnoreCase)
+            || field.Name.Contains("Dye", StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                var fieldValue = field.GetValueDirect(__makeref(value));
+                _pluginLog.Information($"[ColorantDebug] {label}.{field.Name}={fieldValue}");
+            }
+            catch
+            {
+                // 反射読み取りに失敗しても調査を継続する
+            }
+        }
+    }
+
+    private void LogStructNumericFields<T>(T value, string label) where T : struct
+    {
+        var fields = typeof(T).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        var logged = 0;
+
+        foreach (var field in fields)
+        {
+            if (logged >= 60)
+            {
+                break;
+            }
+
+            var fieldType = field.FieldType;
+            if (!IsNumericFieldType(fieldType))
+            {
+                continue;
+            }
+
+            try
+            {
+                var fieldValue = field.GetValueDirect(__makeref(value));
+                _pluginLog.Information($"[ColorantDebug] {label}.{field.Name}={fieldValue}");
+                logged++;
+            }
+            catch
+            {
+                // 反射読み取りに失敗しても調査を継続する
+            }
+        }
+    }
+
+    private static bool IsNumericFieldType(Type fieldType)
+    {
+        return fieldType == typeof(byte)
+            || fieldType == typeof(sbyte)
+            || fieldType == typeof(short)
+            || fieldType == typeof(ushort)
+            || fieldType == typeof(int)
+            || fieldType == typeof(uint)
+            || fieldType == typeof(long)
+            || fieldType == typeof(ulong);
+    }
+
+    private void LogStructFieldsRecursive(object value, string label, int depth, bool parentHasKeyword)
+    {
+        if (depth < 0)
+        {
+            return;
+        }
+
+        var valueType = value.GetType();
+        var fields = valueType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        foreach (var field in fields)
+        {
+            if (field.FieldType.IsPointer)
+            {
+                continue;
+            }
+
+            var fieldName = field.Name;
+            var hasKeyword = parentHasKeyword || FieldNameHasKeyword(fieldName);
+
+            object? fieldValue;
+            try
+            {
+                fieldValue = field.GetValue(value);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (field.FieldType.IsEnum || IsNumericFieldType(field.FieldType))
+            {
+                if (hasKeyword || FieldNameHasKeyword(fieldName))
+                {
+                    _pluginLog.Information($"[ColorantDebug] {label}.{fieldName}={fieldValue}");
+                }
+                continue;
+            }
+
+            if (field.FieldType.IsValueType)
+            {
+                if (depth == 0)
+                {
+                    continue;
+                }
+
+                var nextLabel = $"{label}.{fieldName}";
+                if (fieldValue != null)
+                {
+                    LogStructFieldsRecursive(fieldValue, nextLabel, depth - 1, hasKeyword);
+                }
+            }
+        }
+    }
+
+    private static bool FieldNameHasKeyword(string fieldName)
+    {
+        return fieldName.Contains("Stain", StringComparison.OrdinalIgnoreCase)
+            || fieldName.Contains("Color", StringComparison.OrdinalIgnoreCase)
+            || fieldName.Contains("Dye", StringComparison.OrdinalIgnoreCase)
+            || fieldName.Contains("Colorant", StringComparison.OrdinalIgnoreCase)
+            || fieldName.Contains("Selected", StringComparison.OrdinalIgnoreCase)
+            || fieldName.Contains("Hover", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private unsafe uint GetColorantItemIdFromAddon()
+    {
+        nint addonPtr = _gameGui.GetAddonByName("ColorantColoring", 1);
+        if (addonPtr == nint.Zero)
+        {
+            return 0;
+        }
+
+        var addon = (AtkUnitBase*)addonPtr;
+        if (addon->AtkValuesCount == 0)
+        {
+            return 0;
+        }
+
+        var matches = new List<(int Index, uint ItemId)>();
+        var count = addon->AtkValuesCount;
+        for (var i = 0; i < count; i++)
+        {
+            var value = addon->AtkValues[i];
+            var candidate = ExtractItemId(value);
+            if (candidate == 0)
+            {
+                continue;
+            }
+
+            if (_shopDataCache.IsStainItemId(candidate))
+            {
+                matches.Add((i, candidate));
+                if (matches.Count >= 12)
+                {
+                    break;
+                }
+            }
+        }
+
+        if (matches.Count == 1)
+        {
+            return matches[0].ItemId;
+        }
+
+        if (matches.Count > 1)
+        {
+            var summary = string.Join(", ", matches.Select(m => $"[{m.Index}]={m.ItemId}"));
+            _pluginLog.Information($"[ColorantDebug] 染料候補: {summary}");
+        }
+        else if (matches.Count == 0)
+        {
+            var stainCandidates = new List<(int Index, byte StainId, uint ItemId)>();
+            var rawStainCandidates = new List<(int Index, byte StainId)>();
+            for (var i = 0; i < count; i++)
+            {
+                var value = addon->AtkValues[i];
+                var stainId = ExtractStainId(value);
+                if (stainId == 0)
+                {
+                    continue;
+                }
+
+                if (rawStainCandidates.Count < 12)
+                {
+                    rawStainCandidates.Add((i, stainId));
+                }
+
+                var itemId = _shopDataCache.GetItemIdFromStain(stainId);
+                if (itemId != 0)
+                {
+                    stainCandidates.Add((i, stainId, itemId));
+                    if (stainCandidates.Count >= 12)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (stainCandidates.Count == 1)
+            {
+                return stainCandidates[0].ItemId;
+            }
+
+            if (stainCandidates.Count > 1)
+            {
+                // 実測ログで、Index=14が右クリックした染料と連動して変化するため優先する
+                var preferred = stainCandidates.FirstOrDefault(m => m.Index == 14);
+                if (preferred.ItemId != 0)
+                {
+                    _pluginLog.Information($"[ColorantDebug] 染色ID候補からIndex=14を採用: Stain={preferred.StainId} ItemId={preferred.ItemId}");
+                    return preferred.ItemId;
+                }
+
+                var summary = string.Join(", ", stainCandidates.Select(m => $"[{m.Index}]=Stain:{m.StainId} ItemId:{m.ItemId}"));
+                _pluginLog.Information($"[ColorantDebug] 染色ID候補: {summary}");
+            }
+            else if (rawStainCandidates.Count > 0)
+            {
+                var summary = string.Join(", ", rawStainCandidates.Select(m => $"[{m.Index}]=Stain:{m.StainId}"));
+                _pluginLog.Information($"[ColorantDebug] 染色ID候補(未解決): {summary}");
+            }
+
+            // 取得できる数値候補を限定的にログ出しして手掛かりを集める
+            var numericCandidates = new List<string>();
+            var limit = Math.Min((int)count, 60);
+            for (var i = 0; i < limit; i++)
+            {
+                var value = addon->AtkValues[i];
+                if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt && value.UInt != 0)
+                {
+                    numericCandidates.Add($"[{i}]=UInt:{value.UInt}");
+                }
+                else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int && value.Int > 0)
+                {
+                    numericCandidates.Add($"[{i}]=Int:{value.Int}");
+                }
+
+                if (numericCandidates.Count >= 12)
+                {
+                    break;
+                }
+            }
+
+            var numericSummary = numericCandidates.Count == 0 ? "<none>" : string.Join(", ", numericCandidates);
+            _pluginLog.Information($"[ColorantDebug] 染料候補なし: AtkValuesCount={count}, NumericCandidates={numericSummary}");
+        }
+
+        return 0;
+    }
+
+    private static uint ExtractItemId(AtkValue value)
+    {
+        switch (value.Type)
+        {
+            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt:
+                return value.UInt % 500000;
+            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int:
+                return value.Int > 0 ? (uint)value.Int % 500000 : 0;
+            default:
+                return 0;
+        }
+    }
+
+    private static byte ExtractStainId(AtkValue value)
+    {
+        switch (value.Type)
+        {
+            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt:
+                return value.UInt <= byte.MaxValue ? (byte)value.UInt : (byte)0;
+            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int:
+                return value.Int > 0 && value.Int <= byte.MaxValue ? (byte)value.Int : (byte)0;
+            default:
+                return 0;
+        }
+    }
+
+    private static bool TryGetFieldValue<TStruct>(TStruct value, string fieldName, out byte result) where TStruct : struct
+    {
+        result = 0;
+        var field = typeof(TStruct).GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        if (field == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var raw = field.GetValueDirect(__makeref(value));
+            if (raw is byte byteValue)
+            {
+                result = byteValue;
+                return true;
+            }
+
+            if (raw is ushort ushortValue && ushortValue <= byte.MaxValue)
+            {
+                result = (byte)ushortValue;
+                return true;
+            }
+
+            if (raw is uint uintValue && uintValue <= byte.MaxValue)
+            {
+                result = (byte)uintValue;
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
     }
 
     private static string BuildMenuLabel(bool isReady, bool hasData)

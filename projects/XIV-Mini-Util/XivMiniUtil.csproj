@@ -40,6 +40,14 @@
     <DevPluginOutputDir>$(APPDATA)\XIVLauncher\devPlugins\XivMiniUtil\</DevPluginOutputDir>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <DalamudPluginInternalName>XivMiniUtil.Dev</DalamudPluginInternalName>
+    <DalamudPluginName>XIV Mini Util (Dev)</DalamudPluginName>
+    <InternalName>XivMiniUtil.Dev</InternalName>
+    <AssemblyName>XivMiniUtil.Dev</AssemblyName>
+    <DevPluginOutputDir>$(APPDATA)\XIVLauncher\devPlugins\XivMiniUtil.Dev\</DevPluginOutputDir>
+  </PropertyGroup>
+
   <Target Name="CopyDevPluginOutput" AfterTargets="Build">
     <MakeDir Directories="$(DevPluginOutputDir)" Condition="!Exists('$(DevPluginOutputDir)')" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DevPluginOutputDir)" SkipUnchangedFiles="true" />

@@ -20,6 +20,11 @@ public sealed class ShopDataCache
     private readonly Dictionary<uint, string> _itemNames = new();
     private readonly Dictionary<uint, string> _territoryNames = new();
     private readonly HashSet<uint> _loggedMissingItems = new();
+    private readonly Dictionary<byte, uint> _stainToItemId = new();
+    private readonly HashSet<byte> _loggedStainDiagnostics = new();
+    private readonly Dictionary<string, uint> _stainNameToItemId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, uint> _stainNameNormalizedToItemId = new(StringComparer.Ordinal);
+    private HashSet<uint>? _stainItemIds;
 
     private Dictionary<uint, List<NpcShopInfo>> _gilShopNpcInfos = new();
     private Dictionary<uint, List<NpcShopInfo>> _specialShopNpcInfos = new();
@@ -91,6 +96,60 @@ public sealed class ShopDataCache
         return _itemNames.TryGetValue(itemId, out var name) ? name : string.Empty;
     }
 
+    /// <summary>
+    /// 染色ID（Stain）から対応するアイテムIDを取得する
+    /// </summary>
+    public uint GetItemIdFromStain(byte stainId)
+    {
+        if (stainId == 0)
+        {
+            return 0;
+        }
+
+        if (_stainToItemId.TryGetValue(stainId, out var cached))
+        {
+            return cached;
+        }
+
+        uint itemId = 0;
+        var stainSheet = _dataManager.GetExcelSheet<Stain>();
+        if (stainSheet != null)
+        {
+            var stainRow = stainSheet.GetRow(stainId);
+            if (stainRow.RowId != 0)
+            {
+                // StainシートのItem参照はバージョン差があるため反射で取得する
+                itemId = TryGetItemIdFromStainRow(stainRow);
+                if (itemId == 0)
+                {
+                    itemId = TryGetItemIdFromStainName(stainRow);
+                }
+
+                if (itemId == 0)
+                {
+                    LogStainRowDiagnostics(stainId, stainRow);
+                }
+            }
+        }
+
+        _stainToItemId[stainId] = itemId;
+        return itemId;
+    }
+
+    /// <summary>
+    /// アイテムIDが染料（Stain）に紐づくか判定する
+    /// </summary>
+    public bool IsStainItemId(uint itemId)
+    {
+        if (itemId == 0)
+        {
+            return false;
+        }
+
+        EnsureStainItemIds();
+        return _stainItemIds != null && _stainItemIds.Contains(itemId);
+    }
+
     public string GetTerritoryName(uint territoryTypeId)
     {
         if (territoryTypeId == 0)
@@ -160,6 +219,282 @@ public sealed class ShopDataCache
             .Where(kvp => kvp.Value.Contains(trimmedQuery, StringComparison.OrdinalIgnoreCase))
             .Take(limit)
             .Select(kvp => (kvp.Key, kvp.Value));
+    }
+
+    private static uint TryGetItemIdFromStainRow(Stain stainRow)
+    {
+        var rowType = stainRow.GetType();
+        var candidates = new[] { "Item", "ItemId", "ItemID" };
+
+        foreach (var name in candidates)
+        {
+            var prop = rowType.GetProperty(name);
+            if (prop == null)
+            {
+                continue;
+            }
+
+            var value = prop.GetValue(stainRow);
+            var rowId = TryGetRowId(value);
+            if (rowId is { } id && id != 0)
+            {
+                return id;
+            }
+        }
+
+        return 0;
+    }
+
+    private uint TryGetItemIdFromStainName(Stain stainRow)
+    {
+        var stainName = stainRow.Name.ToString();
+        if (string.IsNullOrWhiteSpace(stainName))
+        {
+            return 0;
+        }
+
+        EnsureStainNameIndex();
+        if (_stainNameToItemId.TryGetValue(stainName, out var itemId))
+        {
+            return itemId;
+        }
+
+        var normalized = NormalizeName(stainName);
+        return _stainNameNormalizedToItemId.TryGetValue(normalized, out var normalizedItemId) ? normalizedItemId : 0;
+    }
+
+    private void EnsureStainNameIndex()
+    {
+        if (_stainNameToItemId.Count > 0 || _stainNameNormalizedToItemId.Count > 0)
+        {
+            return;
+        }
+
+        var stainSheet = _dataManager.GetExcelSheet<Stain>();
+        var itemSheet = _dataManager.GetExcelSheet<Item>();
+        if (stainSheet == null || itemSheet == null)
+        {
+            return;
+        }
+
+        var stainNames = new HashSet<string>(StringComparer.Ordinal);
+        var stainNamesNormalized = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var stainRow in stainSheet)
+        {
+            if (stainRow.RowId == 0)
+            {
+                continue;
+            }
+
+            var name = stainRow.Name.ToString();
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                stainNames.Add(name);
+                var normalized = NormalizeName(name);
+                if (!string.IsNullOrEmpty(normalized))
+                {
+                    stainNamesNormalized.Add(normalized);
+                }
+            }
+        }
+
+        foreach (var itemRow in itemSheet)
+        {
+            if (itemRow.RowId == 0)
+            {
+                continue;
+            }
+
+            var name = itemRow.Name.ToString();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            if (stainNames.Contains(name) && !_stainNameToItemId.ContainsKey(name))
+            {
+                _stainNameToItemId[name] = itemRow.RowId;
+            }
+
+            var normalized = NormalizeName(name);
+            if (!string.IsNullOrEmpty(normalized) && stainNamesNormalized.Contains(normalized) && !_stainNameNormalizedToItemId.ContainsKey(normalized))
+            {
+                _stainNameNormalizedToItemId[normalized] = itemRow.RowId;
+            }
+        }
+    }
+
+    private void LogStainRowDiagnostics(byte stainId, Stain stainRow)
+    {
+        if (!_loggedStainDiagnostics.Add(stainId))
+        {
+            return;
+        }
+
+        try
+        {
+            var rowType = stainRow.GetType();
+            var properties = rowType.GetProperties()
+                .Where(p => p.GetIndexParameters().Length == 0)
+                .ToArray();
+
+            var propertyNames = string.Join(", ", properties.Select(p => p.Name));
+            _pluginLog.Information($"[StainDebug] StainRow#{stainId} properties: {propertyNames}");
+
+            foreach (var property in properties)
+            {
+                if (!PropertyNameHasKeyword(property.Name))
+                {
+                    continue;
+                }
+
+                object? value;
+                try
+                {
+                    value = property.GetValue(stainRow);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                var rowId = TryGetRowId(value);
+                if (rowId is { } id && id != 0)
+                {
+                    _pluginLog.Information($"[StainDebug] StainRow#{stainId} {property.Name} RowId={id}");
+                }
+                else if (value != null)
+                {
+                    _pluginLog.Information($"[StainDebug] StainRow#{stainId} {property.Name}={value}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _pluginLog.Warning(ex, "StainRow診断の出力に失敗しました。");
+        }
+    }
+
+    private static bool PropertyNameHasKeyword(string name)
+    {
+        return name.Contains("Item", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Stain", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Dye", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Color", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
+        var buffer = new char[name.Length];
+        var length = 0;
+        foreach (var ch in name)
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                buffer[length] = ch;
+                length++;
+            }
+        }
+
+        return length == 0 ? string.Empty : new string(buffer, 0, length);
+    }
+
+    private void EnsureStainItemIds()
+    {
+        if (_stainItemIds != null)
+        {
+            return;
+        }
+
+        _stainItemIds = new HashSet<uint>();
+        var stainSheet = _dataManager.GetExcelSheet<Stain>();
+        if (stainSheet == null)
+        {
+            return;
+        }
+
+        foreach (var row in stainSheet)
+        {
+            if (row.RowId == 0)
+            {
+                continue;
+            }
+
+            var itemId = TryGetItemIdFromStainRow(row);
+            if (itemId == 0)
+            {
+                itemId = TryGetItemIdFromStainName(row);
+            }
+
+            if (itemId != 0)
+            {
+                _stainItemIds.Add(itemId);
+            }
+        }
+    }
+
+    private static uint? TryGetRowId(object? value)
+    {
+        if (value == null)
+        {
+            return null;
+        }
+
+        if (value is uint directUint)
+        {
+            return directUint;
+        }
+
+        if (value is int directInt && directInt >= 0)
+        {
+            return (uint)directInt;
+        }
+
+        var type = value.GetType();
+        var rowIdProp = type.GetProperty("RowId") ?? type.GetProperty("Id") ?? type.GetProperty("ItemId") ?? type.GetProperty("ItemID");
+        if (rowIdProp != null)
+        {
+            var rowIdValue = rowIdProp.GetValue(value);
+            if (rowIdValue is uint rowIdUint)
+            {
+                return rowIdUint;
+            }
+
+            if (rowIdValue is int rowIdInt && rowIdInt >= 0)
+            {
+                return (uint)rowIdInt;
+            }
+        }
+
+        // LazyRow/RowRefのValue/ValueNullableを辿る
+        var valueNullableProp = type.GetProperty("ValueNullable");
+        if (valueNullableProp != null)
+        {
+            var nestedValue = valueNullableProp.GetValue(value);
+            var nestedRowId = TryGetRowId(nestedValue);
+            if (nestedRowId is { } nested && nested != 0)
+            {
+                return nested;
+            }
+        }
+
+        var valueProp = type.GetProperty("Value");
+        if (valueProp != null)
+        {
+            var nestedValue = valueProp.GetValue(value);
+            var nestedRowId = TryGetRowId(nestedValue);
+            if (nestedRowId is { } nested && nested != 0)
+            {
+                return nested;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
