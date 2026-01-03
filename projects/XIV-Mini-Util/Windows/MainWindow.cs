@@ -500,6 +500,10 @@ public sealed class MainWindow : Window, IDisposable
             {
                 var territoryId = priorities[i];
                 var territoryName = _shopDataCache.GetTerritoryName(territoryId);
+                if (string.IsNullOrWhiteSpace(territoryName))
+                {
+                    territoryName = ShopDataCache.HousingAreas.GetName(territoryId);
+                }
                 var label = string.IsNullOrWhiteSpace(territoryName)
                     ? $"不明 (ID:{territoryId})"
                     : territoryName;
@@ -1193,7 +1197,8 @@ public sealed class MainWindow : Window, IDisposable
                 .Select(entry => new
                 {
                     entry.Key,
-                    ItemName = GetItemNameOrFallback(entry.Key),
+                    // カスタムショップ由来は不明アイテムを表示しない（入力ミス/古いID混入の検出を優先）
+                    ItemName = _shopDataCache.GetItemName(entry.Key),
                     entry.Value,
                 })
                 .Where(entry => !string.IsNullOrWhiteSpace(entry.ItemName))
@@ -1297,6 +1302,13 @@ public sealed class MainWindow : Window, IDisposable
         foreach (var territoryId in priorities)
         {
             var territoryName = _shopDataCache.GetTerritoryName(territoryId);
+            if (!string.IsNullOrWhiteSpace(territoryName))
+            {
+                names.Add(territoryName);
+                continue;
+            }
+
+            territoryName = ShopDataCache.HousingAreas.GetName(territoryId);
             if (!string.IsNullOrWhiteSpace(territoryName))
             {
                 names.Add(territoryName);

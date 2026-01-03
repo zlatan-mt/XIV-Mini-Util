@@ -52,12 +52,7 @@ public sealed class ShopDataCache
         /// <summary>素材屋の販売アイテム</summary>
         public static readonly uint[] MaterialSupplier = new uint[]
         {
-            // シャード
-            2, 3, 4, 5, 6, 7,           // ファイア〜アースシャード
-            // クリスタル
-            8, 9, 10, 11, 12, 13,       // ファイア〜アースクリスタル
-            // クラスター
-            14, 15, 16, 17, 18, 19,     // ファイア〜アースクラスター
+            // 注意: シャード/クリスタル/クラスターは購入できるNPCが存在しないため含めない
             // 基礎素材
             5504,  // 獣脂
             5505,  // 蜜蝋
@@ -74,7 +69,6 @@ public sealed class ShopDataCache
             4551,  // カーボンコート
             5594,  // グロースフォーミュラ・ガンマ
             7059,  // 亜鉛鉱
-            7060,  // ボーキサイト
         };
 
         /// <summary>HousingNpcTypeに対応するアイテムリストを取得</summary>
@@ -226,6 +220,10 @@ public sealed class ShopDataCache
             var areaName = GetTerritoryName(shop.TerritoryTypeId);
             if (string.IsNullOrWhiteSpace(areaName))
             {
+                areaName = HousingAreas.GetName(shop.TerritoryTypeId);
+            }
+            if (string.IsNullOrWhiteSpace(areaName))
+            {
                 areaName = $"エリア#{shop.TerritoryTypeId}";
             }
 
@@ -235,6 +233,12 @@ public sealed class ShopDataCache
                 var items = HousingNpcItems.GetItems(npcType);
                 foreach (var itemId in items)
                 {
+                    // ここで不正なIDを落としておく（検索結果に「アイテム#xxxx」が混ざるのを防ぐ）
+                    if (!IsValidItemId(itemId))
+                    {
+                        continue;
+                    }
+
                     if (!newLocations.TryGetValue(itemId, out var list))
                     {
                         list = new List<ShopLocationInfo>();
@@ -279,6 +283,17 @@ public sealed class ShopDataCache
         }
 
         _pluginLog.Information($"カスタムショップ更新: {customShops.Count}件 → {newLocations.Count}アイテム");
+    }
+
+    private bool IsValidItemId(uint itemId)
+    {
+        if (itemId == 0)
+        {
+            return false;
+        }
+
+        var name = GetItemName(itemId);
+        return !string.IsNullOrWhiteSpace(name);
     }
 
     public string GetItemName(uint itemId)
@@ -442,9 +457,23 @@ public sealed class ShopDataCache
         CollectTerritoryIds(_gilShopNpcInfos, ids);
         CollectTerritoryIds(_specialShopNpcInfos, ids);
 
+        // 固定ショップが存在しない場合でも、ハウジングエリアは候補として出したい
+        foreach (var (territoryTypeId, _) in HousingAreas.All)
+        {
+            ids.Add(territoryTypeId);
+        }
+
         // 同名エリアは代表IDにまとめる（最小IDで固定）
         return ids
-            .Select(id => new { Id = id, Name = GetTerritoryName(id) })
+            .Select(id =>
+            {
+                var name = GetTerritoryName(id);
+                if (string.IsNullOrWhiteSpace(name) && HousingAreas.IsHousingArea(id))
+                {
+                    name = HousingAreas.GetName(id);
+                }
+                return new { Id = id, Name = name };
+            })
             .Where(entry => !string.IsNullOrWhiteSpace(entry.Name))
             .GroupBy(entry => entry.Name, StringComparer.Ordinal)
             .Select(group =>
