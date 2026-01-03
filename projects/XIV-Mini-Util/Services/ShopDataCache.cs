@@ -217,6 +217,14 @@ public sealed class ShopDataCache
                 continue;
             }
 
+            // マップピン（MapLinkPayload）には MapId が必須。
+            // ハウジングは設定側でMapIdを持たない運用のため、TerritoryTypeから解決して埋める。
+            var resolvedMapId = GetDefaultMapId(shop.TerritoryTypeId);
+            if (resolvedMapId == 0)
+            {
+                resolvedMapId = shop.MapId;
+            }
+
             var areaName = GetTerritoryName(shop.TerritoryTypeId);
             if (string.IsNullOrWhiteSpace(areaName))
             {
@@ -265,7 +273,7 @@ public sealed class ShopDataCache
                         TerritoryTypeId: shop.TerritoryTypeId,
                         AreaName: areaName,
                         SubAreaName: string.Empty,
-                        MapId: shop.MapId,
+                        MapId: resolvedMapId,
                         MapX: shop.X,
                         MapY: shop.Y,
                         Price: 0,
@@ -294,6 +302,45 @@ public sealed class ShopDataCache
 
         var name = GetItemName(itemId);
         return !string.IsNullOrWhiteSpace(name);
+    }
+
+    private uint GetDefaultMapId(uint territoryTypeId)
+    {
+        if (territoryTypeId == 0)
+        {
+            return 0;
+        }
+
+        var territorySheet = _dataManager.GetExcelSheet<TerritoryType>();
+        if (territorySheet != null)
+        {
+            var territory = territorySheet.GetRow(territoryTypeId);
+            if (territory.RowId != 0)
+            {
+                var mapId = territory.Map.RowId;
+                if (mapId != 0)
+                {
+                    return mapId;
+                }
+            }
+        }
+
+        // 念のためMapシートを走査して補完（TerritoryType.Mapが取れない環境向け）
+        var mapSheet = _dataManager.GetExcelSheet<Map>();
+        if (mapSheet == null)
+        {
+            return 0;
+        }
+
+        foreach (var map in mapSheet)
+        {
+            if (map.RowId != 0 && map.TerritoryType.RowId == territoryTypeId)
+            {
+                return map.RowId;
+            }
+        }
+
+        return 0;
     }
 
     public string GetItemName(uint itemId)
