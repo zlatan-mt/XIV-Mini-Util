@@ -3,6 +3,7 @@
 // Reason: 検索を高速化しゲーム中の再読み込みを避けるため
 // RELEVANT FILES: projects/XIV-Mini-Util/Services/ShopSearchService.cs, projects/XIV-Mini-Util/Services/ContextMenuService.cs, projects/XIV-Mini-Util/Models/DomainModels.cs
 using System.Numerics;
+using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Lumina.Data.Files;
 using Lumina.Data.Parsing.Layer;
@@ -16,6 +17,7 @@ public sealed class ShopDataCache
 {
     private readonly IDataManager _dataManager;
     private readonly IPluginLog _pluginLog;
+    private readonly HousingNpcDataManager _housingNpcDataManager;
     private readonly Dictionary<uint, List<ShopLocationInfo>> _itemToLocations = new();
     private readonly Dictionary<uint, string> _itemNames = new();
     private readonly Dictionary<uint, string> _territoryNames = new();
@@ -42,43 +44,6 @@ public sealed class ShopDataCache
 
     private Task? _initializeTask;
     private bool _isInitialized;
-
-    /// <summary>
-    /// ハウジングNPCの販売アイテムリスト（ハードコード）
-    /// ゲームデータから取得できないため、既知のアイテムIDを直接定義
-    /// </summary>
-    public static class HousingNpcItems
-    {
-        /// <summary>素材屋の販売アイテム</summary>
-        public static readonly uint[] MaterialSupplier = new uint[]
-        {
-            // 注意: シャード/クリスタル/クラスターは購入できるNPCが存在しないため含めない
-            // 基礎素材
-            5504,  // 獣脂
-            5505,  // 蜜蝋
-            5530,  // にかわ
-            5339,  // 天然水
-            5356,  // 霊銀砂
-            5357,  // オーガニック肥料
-        };
-
-        /// <summary>よろず屋の販売アイテム</summary>
-        public static readonly uint[] Junkmonger = new uint[]
-        {
-            // 基礎素材・消耗品
-            4551,  // カーボンコート
-            5594,  // グロースフォーミュラ・ガンマ
-            7059,  // 亜鉛鉱
-        };
-
-        /// <summary>HousingNpcTypeに対応するアイテムリストを取得</summary>
-        public static uint[] GetItems(HousingNpcType npcType) => npcType switch
-        {
-            HousingNpcType.MaterialSupplier => MaterialSupplier,
-            HousingNpcType.Junkmonger => Junkmonger,
-            _ => Array.Empty<uint>(),
-        };
-    }
 
     /// <summary>
     /// ハウジングエリア情報
@@ -132,13 +97,33 @@ public sealed class ShopDataCache
         float MapY,
         bool IsManuallyAdded = false);
 
-    public ShopDataCache(IDataManager dataManager, IPluginLog pluginLog)
+    public ShopDataCache(
+        IDalamudPluginInterface pluginInterface,
+        IDataManager dataManager,
+        IPluginLog pluginLog)
     {
         _dataManager = dataManager;
         _pluginLog = pluginLog;
+        _housingNpcDataManager = new HousingNpcDataManager(pluginInterface, dataManager, pluginLog);
     }
 
     public bool IsInitialized => _isInitialized;
+
+    /// <summary>
+    /// ハウジングNPCの販売アイテムを取得する
+    /// </summary>
+    public IReadOnlyList<uint> GetHousingNpcItems(HousingNpcType npcType)
+    {
+        return _housingNpcDataManager.GetItems(npcType);
+    }
+
+    /// <summary>
+    /// ハウジングNPCマスターの診断情報を取得する
+    /// </summary>
+    public HousingNpcDataManager.HousingNpcDiagnostics GetHousingNpcDiagnostics()
+    {
+        return _housingNpcDataManager.GetDiagnostics();
+    }
 
     public Task InitializeAsync()
     {
@@ -238,7 +223,7 @@ public sealed class ShopDataCache
             // 各NPCタイプのアイテムを追加
             foreach (var npcType in shop.Npcs)
             {
-                var items = HousingNpcItems.GetItems(npcType);
+                var items = GetHousingNpcItems(npcType);
                 foreach (var itemId in items)
                 {
                     // ここで不正なIDを落としておく（検索結果に「アイテム#xxxx」が混ざるのを防ぐ）
@@ -944,6 +929,8 @@ public sealed class ShopDataCache
             return "ショップデータが初期化されていません。";
         }
 
+        RotateDiagnosticsReports(outputPath);
+
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("# ショップデータ診断レポート");
         sb.AppendLine($"生成日時: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
@@ -955,6 +942,37 @@ public sealed class ShopDataCache
         sb.AppendLine($"- 位置情報なしNPC数: {_excludedNpcs.Count}");
         sb.AppendLine($"- NPCマッチなしショップ数: {_unmatchedShopItems.Count}");
         sb.AppendLine();
+
+        // ハウジングNPCマスター
+        var housingDiagnostics = GetHousingNpcDiagnostics();
+        sb.AppendLine("## ハウジングNPCマスター");
+        sb.AppendLine($"- バージョン: {housingDiagnostics.Version}");
+        sb.AppendLine($"- ロード元: {housingDiagnostics.Source}");
+        sb.AppendLine($"- 素材屋アイテム数: {GetHousingNpcCount(housingDiagnostics.ValidCounts, HousingNpcType.MaterialSupplier)}");
+        sb.AppendLine($"- よろず屋アイテム数: {GetHousingNpcCount(housingDiagnostics.ValidCounts, HousingNpcType.Junkmonger)}");
+        sb.AppendLine($"- 除外総数: {housingDiagnostics.TotalExcluded}");
+        sb.AppendLine();
+
+        sb.AppendLine("## ハウジングNPCマスター 除外アイテム");
+        if (housingDiagnostics.ExcludedByReason.Count == 0)
+        {
+            sb.AppendLine("除外されたアイテムはありません。");
+            sb.AppendLine();
+        }
+        else
+        {
+            foreach (var entry in housingDiagnostics.ExcludedByReason.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+            {
+                var ids = entry.Value
+                    .Distinct()
+                    .OrderBy(id => id)
+                    .Select(id => id.ToString())
+                    .ToArray();
+                var idLine = ids.Length == 0 ? "(なし)" : string.Join(", ", ids);
+                sb.AppendLine($"- {entry.Key}: {idLine}");
+            }
+            sb.AppendLine();
+        }
 
         // 位置情報なしNPC（ユニークなNPC IDでグループ化）
         sb.AppendLine("## 位置情報なしNPC一覧");
@@ -1017,6 +1035,40 @@ public sealed class ShopDataCache
             _pluginLog.Error(ex, "診断レポートの出力に失敗しました。");
             return $"診断レポートの出力に失敗しました: {ex.Message}";
         }
+    }
+
+    private void RotateDiagnosticsReports(string outputPath)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(outputPath);
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                return;
+            }
+
+            var files = Directory.GetFiles(directory, "shop-diagnostics-*.md")
+                .OrderBy(path => path, StringComparer.Ordinal)
+                .ToList();
+
+            while (files.Count >= 5)
+            {
+                var target = files[0];
+                files.RemoveAt(0);
+                File.Delete(target);
+            }
+        }
+        catch (Exception ex)
+        {
+            _pluginLog.Warning($"診断レポートのローテーションに失敗しました: {ex.Message}");
+        }
+    }
+
+    private static int GetHousingNpcCount(
+        IReadOnlyDictionary<HousingNpcType, int> counts,
+        HousingNpcType npcType)
+    {
+        return counts.TryGetValue(npcType, out var count) ? count : 0;
     }
 
     /// <summary>

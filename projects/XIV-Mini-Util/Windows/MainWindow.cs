@@ -1261,7 +1261,7 @@ public sealed class MainWindow : Window, IDisposable
         {
             foreach (var npcType in shop.Npcs)
             {
-                var items = ShopDataCache.HousingNpcItems.GetItems(npcType);
+                var items = _shopDataCache.GetHousingNpcItems(npcType);
                 foreach (var itemId in items)
                 {
                     if (!result.TryGetValue(itemId, out var shopNames))

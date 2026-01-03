@@ -88,7 +88,7 @@ public sealed class Plugin : IDalamudPlugin
             gameUiService,
             _configuration);
 
-        _shopDataCache = new ShopDataCache(dataManager, pluginLog);
+        _shopDataCache = new ShopDataCache(pluginInterface, dataManager, pluginLog);
         _mapService = new MapService(gameGui, pluginLog);
         _chatService = new ChatService(chatGui, _mapService);
         _teleportService = new TeleportService(dataManager, aetheryteList, pluginLog);

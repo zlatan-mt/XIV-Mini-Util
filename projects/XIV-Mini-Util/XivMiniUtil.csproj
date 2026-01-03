@@ -36,6 +36,12 @@
     </Reference>
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\housing_npc_master.json">
+      <LogicalName>XivMiniUtil.Resources.housing_npc_master.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <PropertyGroup>
     <DevPluginOutputDir>$(APPDATA)\XIVLauncher\devPlugins\XivMiniUtil\</DevPluginOutputDir>
   </PropertyGroup>
