@@ -95,19 +95,59 @@ public sealed class ShopSearchService
     {
         var priority = _configuration.ShopSearchAreaPriority;
         var priorityIndex = new Dictionary<uint, int>(priority.Count);
+        var priorityNameIndex = new Dictionary<string, int>(StringComparer.Ordinal);
         for (var i = 0; i < priority.Count; i++)
         {
             priorityIndex[priority[i]] = i;
+
+            var territoryName = _shopDataCache.GetTerritoryName(priority[i]);
+            if (!string.IsNullOrWhiteSpace(territoryName) && !priorityNameIndex.ContainsKey(territoryName))
+            {
+                // 先に登録された優先度を維持する
+                priorityNameIndex[territoryName] = i;
+            }
         }
 
         // 優先度指定の有無でグループ化し、指定済みは順序、それ以外は名称順にする
         // 同じエリア内では手動登録NPCを最後に表示
         return locations
-            .OrderBy(location => priorityIndex.ContainsKey(location.TerritoryTypeId) ? 0 : 1)
-            .ThenBy(location => priorityIndex.TryGetValue(location.TerritoryTypeId, out var index) ? index : int.MaxValue)
+            .OrderBy(location => IsPriorityLocation(location, priorityIndex, priorityNameIndex) ? 0 : 1)
+            .ThenBy(location => GetPriorityIndex(location, priorityIndex, priorityNameIndex))
             .ThenBy(location => location.AreaName, StringComparer.Ordinal)
             .ThenBy(location => location.IsManuallyAdded ? 1 : 0) // 手動登録は同エリア内で最後
             .ThenBy(location => location.NpcName, StringComparer.Ordinal)
             .ToList();
+    }
+
+    private static bool IsPriorityLocation(
+        ShopLocationInfo location,
+        IReadOnlyDictionary<uint, int> priorityIndex,
+        IReadOnlyDictionary<string, int> priorityNameIndex)
+    {
+        if (priorityIndex.ContainsKey(location.TerritoryTypeId))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(location.AreaName) && priorityNameIndex.ContainsKey(location.AreaName);
+    }
+
+    private static int GetPriorityIndex(
+        ShopLocationInfo location,
+        IReadOnlyDictionary<uint, int> priorityIndex,
+        IReadOnlyDictionary<string, int> priorityNameIndex)
+    {
+        if (priorityIndex.TryGetValue(location.TerritoryTypeId, out var idIndex))
+        {
+            return idIndex;
+        }
+
+        if (!string.IsNullOrWhiteSpace(location.AreaName)
+            && priorityNameIndex.TryGetValue(location.AreaName, out var nameIndex))
+        {
+            return nameIndex;
+        }
+
+        return int.MaxValue;
     }
 }

@@ -34,6 +34,9 @@ public sealed class Configuration : IPluginConfiguration
     public bool ShopSearchAutoTeleportEnabled { get; set; } = false;
     public List<uint> ShopSearchAreaPriority { get; set; } = DefaultShopSearchAreaPriority.ToList();
 
+    // カスタムショップ設定
+    public List<CustomShopConfig> CustomShops { get; set; } = new();
+
     private IDalamudPluginInterface? _pluginInterface;
 
     public void Initialize(IDalamudPluginInterface pluginInterface)
@@ -104,6 +107,7 @@ public sealed class Configuration : IPluginConfiguration
 
             imported = envelope.Config;
             imported.ShopSearchAreaPriority ??= DefaultShopSearchAreaPriority.ToList();
+            imported.CustomShops ??= new List<CustomShopConfig>();
             return true;
         }
         catch (FormatException)
@@ -139,6 +143,7 @@ public sealed class Configuration : IPluginConfiguration
         ShopSearchWindowEnabled = source.ShopSearchWindowEnabled;
         ShopSearchAutoTeleportEnabled = source.ShopSearchAutoTeleportEnabled;
         ShopSearchAreaPriority = source.ShopSearchAreaPriority?.ToList() ?? DefaultShopSearchAreaPriority.ToList();
+        CustomShops = source.CustomShops?.Select(c => c.Clone()).ToList() ?? new List<CustomShopConfig>();
     }
 
     private Configuration BuildExportSnapshot()
@@ -149,4 +154,51 @@ public sealed class Configuration : IPluginConfiguration
     }
 
     private sealed record ConfigurationEnvelope(int Version, Configuration Config);
+}
+
+/// <summary>
+/// ハウジングに配置可能な販売NPCの種類
+/// </summary>
+public enum HousingNpcType
+{
+    /// <summary>素材屋</summary>
+    MaterialSupplier,
+
+    /// <summary>よろず屋</summary>
+    Junkmonger,
+}
+
+/// <summary>
+/// カスタムショップ（ハウジングNPC等）の設定
+/// </summary>
+[Serializable]
+public sealed class CustomShopConfig
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; } = true;
+
+    // 位置情報
+    public uint TerritoryTypeId { get; set; }
+    public uint MapId { get; set; }
+    public float X { get; set; }
+    public float Y { get; set; }
+
+    // 配置NPC
+    public List<HousingNpcType> Npcs { get; set; } = new();
+
+    public CustomShopConfig Clone()
+    {
+        return new CustomShopConfig
+        {
+            Id = Id,
+            Name = Name,
+            IsEnabled = IsEnabled,
+            TerritoryTypeId = TerritoryTypeId,
+            MapId = MapId,
+            X = X,
+            Y = Y,
+            Npcs = Npcs.ToList(),
+        };
+    }
 }

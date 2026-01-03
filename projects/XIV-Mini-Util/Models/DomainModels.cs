@@ -59,11 +59,21 @@ public sealed record ShopLocationInfo(
     float MapY,
     int Price,
     string ConditionNote,
-    bool IsManuallyAdded = false);
+    bool IsManuallyAdded = false,
+    Guid? CustomShopId = null,
+    bool IsCustomShop = false);
 
 public sealed record ShopTerritoryInfo(
     uint TerritoryTypeId,
     string TerritoryName);
+
+/// <summary>
+/// 同名エリアを代表IDでまとめた情報
+/// </summary>
+public sealed record ShopTerritoryGroup(
+    string TerritoryName,
+    uint RepresentativeTerritoryTypeId,
+    IReadOnlyList<uint> TerritoryTypeIds);
 
 public sealed record SearchResult(
     uint ItemId,

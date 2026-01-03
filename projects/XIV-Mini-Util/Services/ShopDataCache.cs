@@ -31,6 +31,10 @@ public sealed class ShopDataCache
     private Dictionary<uint, List<NpcShopInfo>> _gilShopNpcInfos = new();
     private Dictionary<uint, List<NpcShopInfo>> _specialShopNpcInfos = new();
 
+    // カスタムショップ（ハウジングNPC等）
+    private readonly object _customShopLock = new();
+    private Dictionary<uint, List<ShopLocationInfo>> _customShopLocations = new();
+
     // 診断用：位置情報なしで除外されたNPC
     private readonly List<(uint NpcId, string NpcName, uint ShopId, string ShopName)> _excludedNpcs = new();
     // 診断用：NPCマッチがなかったショップ
@@ -38,6 +42,88 @@ public sealed class ShopDataCache
 
     private Task? _initializeTask;
     private bool _isInitialized;
+
+    /// <summary>
+    /// ハウジングNPCの販売アイテムリスト（ハードコード）
+    /// ゲームデータから取得できないため、既知のアイテムIDを直接定義
+    /// </summary>
+    public static class HousingNpcItems
+    {
+        /// <summary>素材屋の販売アイテム</summary>
+        public static readonly uint[] MaterialSupplier = new uint[]
+        {
+            // シャード
+            2, 3, 4, 5, 6, 7,           // ファイア〜アースシャード
+            // クリスタル
+            8, 9, 10, 11, 12, 13,       // ファイア〜アースクリスタル
+            // クラスター
+            14, 15, 16, 17, 18, 19,     // ファイア〜アースクラスター
+            // 基礎素材
+            5504,  // 獣脂
+            5505,  // 蜜蝋
+            5530,  // にかわ
+            5339,  // 天然水
+            5356,  // 霊銀砂
+            5357,  // オーガニック肥料
+        };
+
+        /// <summary>よろず屋の販売アイテム</summary>
+        public static readonly uint[] Junkmonger = new uint[]
+        {
+            // 基礎素材・消耗品
+            4551,  // カーボンコート
+            5594,  // グロースフォーミュラ・ガンマ
+            7059,  // 亜鉛鉱
+            7060,  // ボーキサイト
+        };
+
+        /// <summary>HousingNpcTypeに対応するアイテムリストを取得</summary>
+        public static uint[] GetItems(HousingNpcType npcType) => npcType switch
+        {
+            HousingNpcType.MaterialSupplier => MaterialSupplier,
+            HousingNpcType.Junkmonger => Junkmonger,
+            _ => Array.Empty<uint>(),
+        };
+    }
+
+    /// <summary>
+    /// ハウジングエリア情報
+    /// </summary>
+    public static class HousingAreas
+    {
+        public static readonly (uint TerritoryTypeId, string Name)[] All = new[]
+        {
+            (339u, "ミスト・ヴィレッジ"),
+            (340u, "ラベンダーベッド"),
+            (341u, "ゴブレットビュート"),
+            (641u, "シロガネ"),
+            (979u, "エンピレアム"),
+        };
+
+        public static string GetName(uint territoryTypeId)
+        {
+            foreach (var (id, name) in All)
+            {
+                if (id == territoryTypeId)
+                {
+                    return name;
+                }
+            }
+            return string.Empty;
+        }
+
+        public static bool IsHousingArea(uint territoryTypeId)
+        {
+            foreach (var (id, _) in All)
+            {
+                if (id == territoryTypeId)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
 
     private sealed record NpcShopInfo(
         uint NpcId,
@@ -73,7 +159,16 @@ public sealed class ShopDataCache
             return false;
         }
 
-        return _itemToLocations.ContainsKey(itemId);
+        if (_itemToLocations.ContainsKey(itemId))
+        {
+            return true;
+        }
+
+        // カスタムショップもチェック
+        lock (_customShopLock)
+        {
+            return _customShopLocations.ContainsKey(itemId);
+        }
     }
 
     public IReadOnlyList<ShopLocationInfo> GetShopLocations(uint itemId)
@@ -83,9 +178,107 @@ public sealed class ShopDataCache
             return Array.Empty<ShopLocationInfo>();
         }
 
-        return _itemToLocations.TryGetValue(itemId, out var locations)
+        var baseLocations = _itemToLocations.TryGetValue(itemId, out var locations)
             ? locations
-            : Array.Empty<ShopLocationInfo>();
+            : new List<ShopLocationInfo>();
+
+        // カスタムショップからもマージ
+        List<ShopLocationInfo>? customLocations = null;
+        lock (_customShopLock)
+        {
+            if (_customShopLocations.TryGetValue(itemId, out var custom))
+            {
+                customLocations = custom.ToList();
+            }
+        }
+
+        if (customLocations == null || customLocations.Count == 0)
+        {
+            return baseLocations;
+        }
+
+        if (baseLocations.Count == 0)
+        {
+            return customLocations;
+        }
+
+        // 両方ある場合はマージ
+        var merged = new List<ShopLocationInfo>(baseLocations.Count + customLocations.Count);
+        merged.AddRange(baseLocations);
+        merged.AddRange(customLocations);
+        return merged;
+    }
+
+    /// <summary>
+    /// カスタムショップ設定からアイテム→販売場所のマッピングを再構築する
+    /// </summary>
+    public void RefreshCustomShops(IReadOnlyList<CustomShopConfig> customShops)
+    {
+        var newLocations = new Dictionary<uint, List<ShopLocationInfo>>();
+
+        foreach (var shop in customShops)
+        {
+            if (!shop.IsEnabled || string.IsNullOrWhiteSpace(shop.Name))
+            {
+                continue;
+            }
+
+            var areaName = GetTerritoryName(shop.TerritoryTypeId);
+            if (string.IsNullOrWhiteSpace(areaName))
+            {
+                areaName = $"エリア#{shop.TerritoryTypeId}";
+            }
+
+            // 各NPCタイプのアイテムを追加
+            foreach (var npcType in shop.Npcs)
+            {
+                var items = HousingNpcItems.GetItems(npcType);
+                foreach (var itemId in items)
+                {
+                    if (!newLocations.TryGetValue(itemId, out var list))
+                    {
+                        list = new List<ShopLocationInfo>();
+                        newLocations[itemId] = list;
+                    }
+
+                    // 重複チェック
+                    if (list.Any(l => l.CustomShopId == shop.Id))
+                    {
+                        continue;
+                    }
+
+                    var npcTypeName = npcType switch
+                    {
+                        HousingNpcType.MaterialSupplier => "素材屋",
+                        HousingNpcType.Junkmonger => "よろず屋",
+                        _ => "NPC",
+                    };
+
+                    list.Add(new ShopLocationInfo(
+                        ShopId: 0, // カスタムショップにはShopIdなし
+                        ShopName: shop.Name,
+                        NpcName: $"{npcTypeName} ({shop.Name})",
+                        TerritoryTypeId: shop.TerritoryTypeId,
+                        AreaName: areaName,
+                        SubAreaName: string.Empty,
+                        MapId: shop.MapId,
+                        MapX: shop.X,
+                        MapY: shop.Y,
+                        Price: 0,
+                        ConditionNote: "カスタム登録",
+                        IsManuallyAdded: true,
+                        CustomShopId: shop.Id,
+                        IsCustomShop: true));
+                }
+            }
+        }
+
+        lock (_customShopLock)
+        {
+            _customShopLocations = newLocations;
+        }
+
+        _pluginLog.Information($"カスタムショップ更新: {customShops.Count}件 → {newLocations.Count}アイテム");
     }
 
     public string GetItemName(uint itemId)
@@ -232,19 +425,40 @@ public sealed class ShopDataCache
 
     public IReadOnlyList<ShopTerritoryInfo> GetAllShopTerritories()
     {
+        // 互換のため従来の戻り値を維持しつつ、内部は代表IDでまとめる
+        return GetShopTerritoryGroups()
+            .Select(group => new ShopTerritoryInfo(group.RepresentativeTerritoryTypeId, group.TerritoryName))
+            .ToList();
+    }
+
+    public IReadOnlyList<ShopTerritoryGroup> GetShopTerritoryGroups()
+    {
         if (!_isInitialized)
         {
-            return Array.Empty<ShopTerritoryInfo>();
+            return Array.Empty<ShopTerritoryGroup>();
         }
 
         var ids = new HashSet<uint>();
         CollectTerritoryIds(_gilShopNpcInfos, ids);
         CollectTerritoryIds(_specialShopNpcInfos, ids);
 
+        // 同名エリアは代表IDにまとめる（最小IDで固定）
         return ids
-            .Select(id => new ShopTerritoryInfo(id, GetTerritoryName(id)))
-            .Where(info => !string.IsNullOrWhiteSpace(info.TerritoryName))
-            .OrderBy(info => info.TerritoryName, StringComparer.Ordinal)
+            .Select(id => new { Id = id, Name = GetTerritoryName(id) })
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Name))
+            .GroupBy(entry => entry.Name, StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var territoryIds = group
+                    .Select(entry => entry.Id)
+                    .OrderBy(id => id)
+                    .ToList();
+                return new ShopTerritoryGroup(
+                    group.Key,
+                    territoryIds[0],
+                    territoryIds);
+            })
+            .OrderBy(group => group.TerritoryName, StringComparer.Ordinal)
             .ToList();
     }
 
@@ -2057,6 +2271,40 @@ public sealed class ShopDataCache
         {
             return string.Empty;
         }
+    }
+
+    /// <summary>
+    /// ワールド座標からマップ座標に変換する
+    /// </summary>
+    public (float X, float Y) WorldToMapCoordinates(uint territoryTypeId, float worldX, float worldZ)
+    {
+        var territorySheet = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>();
+        if (territorySheet == null)
+        {
+            return (0, 0);
+        }
+
+        var territory = territorySheet.GetRowOrDefault(territoryTypeId);
+        if (territory == null)
+        {
+            return (0, 0);
+        }
+
+        var mapSheet = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.Map>();
+        if (mapSheet == null)
+        {
+            return (0, 0);
+        }
+
+        var map = mapSheet.GetRowOrDefault(territory.Value.Map.RowId);
+        if (map == null)
+        {
+            return (0, 0);
+        }
+
+        var mapX = ConvertToMapCoordinate(worldX, map.Value.OffsetX, map.Value.SizeFactor);
+        var mapY = ConvertToMapCoordinate(worldZ, map.Value.OffsetY, map.Value.SizeFactor);
+        return (mapX, mapY);
     }
 
     private static float ConvertToMapCoordinate(float rawPosition, float offset, ushort sizeFactor)
