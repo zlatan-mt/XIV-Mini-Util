@@ -24,6 +24,11 @@ public sealed class ContextMenuService : IDisposable
     private bool _loggedColorantDebug;
     private bool _loggedColorantTextDebug;
     private Dictionary<int, int>? _lastColorantNumericSnapshot;
+    private List<int> _lastColorantNumericDiffIndices = new();
+    private int _lastColorantSelectedIndex = -1;
+    private string _lastColorantSelectedLabel = string.Empty;
+    private long _lastColorantDecisionTick;
+    private uint _lastColorantDecisionItemId;
 
     public ContextMenuService(
         IContextMenu contextMenu,
@@ -493,6 +498,13 @@ public sealed class ContextMenuService : IDisposable
             return 0;
         }
 
+        var nowTick = Environment.TickCount64;
+        if (_lastColorantDecisionItemId != 0 && nowTick - _lastColorantDecisionTick <= 800)
+        {
+            _pluginLog.Information($"ColorantAddon決定キャッシュを使用: {_lastColorantDecisionItemId}");
+            return _lastColorantDecisionItemId;
+        }
+
         var addon = (AtkUnitBase*)addonPtr;
         if (addon->AtkValuesCount == 0)
         {
@@ -502,6 +514,8 @@ public sealed class ContextMenuService : IDisposable
         var textItemId = GetItemIdFromAddonText(addon, addon->AtkValuesCount);
         if (textItemId != 0)
         {
+            _lastColorantDecisionItemId = textItemId;
+            _lastColorantDecisionTick = nowTick;
             return textItemId;
         }
 
@@ -528,6 +542,8 @@ public sealed class ContextMenuService : IDisposable
 
         if (matches.Count == 1)
         {
+            _lastColorantDecisionItemId = matches[0].ItemId;
+            _lastColorantDecisionTick = nowTick;
             return matches[0].ItemId;
         }
 
@@ -567,6 +583,8 @@ public sealed class ContextMenuService : IDisposable
 
             if (stainCandidates.Count == 1)
             {
+                _lastColorantDecisionItemId = stainCandidates[0].ItemId;
+                _lastColorantDecisionTick = nowTick;
                 return stainCandidates[0].ItemId;
             }
 
@@ -577,6 +595,8 @@ public sealed class ContextMenuService : IDisposable
                 if (preferred.ItemId != 0)
                 {
                     _pluginLog.Information($"[ColorantDebug] 染色ID候補からIndex=14を採用: Stain={preferred.StainId} ItemId={preferred.ItemId}");
+                    _lastColorantDecisionItemId = preferred.ItemId;
+                    _lastColorantDecisionTick = nowTick;
                     return preferred.ItemId;
                 }
 
@@ -691,17 +711,92 @@ public sealed class ContextMenuService : IDisposable
 
         CaptureColorantNumericDiff(addon, count, numericCandidates);
 
+        var hasColorantSelection = false;
+        var colorantSelectedIndex = -1;
+        var colorantSelectedLabel = string.Empty;
+        var colorantSelectedId = 0u;
+
         if (TryFindSelectedColorantLabelFromUsageSection(allStrings, out var selectedLabel))
         {
             var selectedId = _shopDataCache.GetItemIdFromName(selectedLabel);
             if (selectedId != 0)
             {
-                _pluginLog.Information($"ColorantAddon使用中ラベル経由でItemId取得: {selectedId} (Text={selectedLabel})");
-                return selectedId;
+                hasColorantSelection = true;
+                colorantSelectedLabel = selectedLabel;
+                colorantSelectedId = selectedId;
             }
         }
 
-        if (itemLabelIndexList.Count > 0)
+        if (colorantSelectedId == 0
+            && TryFindSelectedColorantLabelByIndex(addon, count, labelIndexMap, labelIndexList, _pluginLog, out var indexedLabel, out var indexedColorantIndex))
+        {
+            // 選択Indexが確定している場合は、数値候補ブロックからItemIdを対応付ける
+            var mappedItemId = TryMapColorantItemIdByIndex(indexedColorantIndex, labelIndexList.Count, colorantItemCandidates);
+            if (mappedItemId != 0)
+            {
+                hasColorantSelection = true;
+                colorantSelectedIndex = indexedColorantIndex;
+                colorantSelectedLabel = indexedLabel;
+                colorantSelectedId = mappedItemId;
+            }
+
+            if (colorantSelectedId == 0)
+            {
+                var indexedId = _shopDataCache.GetItemIdFromName(indexedLabel);
+                if (indexedId != 0)
+                {
+                    hasColorantSelection = true;
+                    colorantSelectedIndex = indexedColorantIndex;
+                    colorantSelectedLabel = indexedLabel;
+                    colorantSelectedId = indexedId;
+                }
+            }
+        }
+
+        var hasItemSelection = false;
+        var itemSelectedLabel = string.Empty;
+        var itemSelectedId = 0u;
+        var itemDiffIndex = -1;
+        if (TryResolveItemIdFromChangedIndex(itemLabelIndexList, numericCandidates, out var changedLabel, out var changedId, out itemDiffIndex))
+        {
+            hasItemSelection = true;
+            itemSelectedLabel = changedLabel;
+            itemSelectedId = changedId;
+        }
+
+        var colorantChanged = HasColorantSelectionChanged(colorantSelectedIndex, colorantSelectedLabel);
+        if (hasColorantSelection && hasItemSelection)
+        {
+            _pluginLog.Information($"[ColorantDebug] 両方候補: Colorant={colorantSelectedId}({colorantSelectedLabel}) Item={itemSelectedId}({itemSelectedLabel})");
+        }
+
+        if (hasItemSelection && itemSelectedId != 0 && itemDiffIndex >= 200)
+        {
+            _pluginLog.Information($"ColorantAddonアイテム選択(差分)経由でItemId取得: {itemSelectedId} (Text={itemSelectedLabel})");
+            return itemSelectedId;
+        }
+
+        if (hasColorantSelection && colorantSelectedId != 0 && colorantChanged)
+        {
+            _pluginLog.Information($"ColorantAddon選択Index(数値)経由でItemId取得: {colorantSelectedId} (Index={colorantSelectedIndex})");
+            UpdateLastColorantSelection(colorantSelectedIndex, colorantSelectedLabel);
+            return colorantSelectedId;
+        }
+
+        if (hasItemSelection && itemSelectedId != 0)
+        {
+            _pluginLog.Information($"ColorantAddonアイテム選択(差分)経由でItemId取得: {itemSelectedId} (Text={itemSelectedLabel})");
+            return itemSelectedId;
+        }
+
+        if (hasColorantSelection && colorantSelectedId != 0)
+        {
+            _pluginLog.Information($"ColorantAddon選択Index(数値)経由でItemId取得: {colorantSelectedId} (Index={colorantSelectedIndex})");
+            UpdateLastColorantSelection(colorantSelectedIndex, colorantSelectedLabel);
+            return colorantSelectedId;
+        }
+
+        if (itemLabelIndexList.Count > 0 && labelIndexList.Count == 0 && colorantItemCandidates.Count == 0)
         {
             if (TryResolveItemIdFromItemLabels(itemLabelIndexList, out var resolvedLabel, out var resolvedId))
             {
@@ -729,24 +824,6 @@ public sealed class ContextMenuService : IDisposable
         else if (itemLabelIndexList.Count == 0 && itemTextCandidates.Count > 0)
         {
             _pluginLog.Information($"[ColorantDebug] アイテム文字列候補: {string.Join(", ", itemTextCandidates)}");
-        }
-
-        if (TryFindSelectedColorantLabelByIndex(addon, count, labelIndexMap, labelIndexList, _pluginLog, out var indexedLabel, out var colorantSelectedIndex))
-        {
-            // 選択Indexが確定している場合は、数値候補ブロックからItemIdを対応付ける
-            var mappedItemId = TryMapColorantItemIdByIndex(colorantSelectedIndex, labelIndexList.Count, colorantItemCandidates);
-            if (mappedItemId != 0)
-            {
-                _pluginLog.Information($"ColorantAddon選択Index(数値)経由でItemId取得: {mappedItemId} (Index={colorantSelectedIndex})");
-                return mappedItemId;
-            }
-
-            var indexedId = _shopDataCache.GetItemIdFromName(indexedLabel);
-            if (indexedId != 0)
-            {
-                _pluginLog.Information($"ColorantAddon選択Index経由でItemId取得: {indexedId} (Text={indexedLabel})");
-                return indexedId;
-            }
         }
 
         if (numericCandidates.Count > 0)
@@ -788,6 +865,27 @@ public sealed class ContextMenuService : IDisposable
         }
 
         return 0;
+    }
+
+    private static bool TryGetColorantLabelByListIndex(
+        List<(int Index, string Label)> labelIndexList,
+        int selectedIndex,
+        out string label)
+    {
+        label = string.Empty;
+        if (selectedIndex < 0 || labelIndexList.Count == 0)
+        {
+            return false;
+        }
+
+        labelIndexList.Sort((a, b) => a.Index.CompareTo(b.Index));
+        if (selectedIndex >= labelIndexList.Count)
+        {
+            return false;
+        }
+
+        label = labelIndexList[selectedIndex].Label;
+        return !string.IsNullOrWhiteSpace(label);
     }
 
     private bool TryExtractItemLabel(string text, out string label, out uint itemId)
@@ -1380,6 +1478,86 @@ public sealed class ContextMenuService : IDisposable
         return false;
     }
 
+    private bool TryResolveItemIdFromChangedIndex(
+        List<(int Index, string Label, uint ItemId)> itemLabels,
+        List<(int Index, int Value)> numericCandidates,
+        out string label,
+        out uint itemId,
+        out int diffIndex)
+    {
+        label = string.Empty;
+        itemId = 0;
+        diffIndex = -1;
+
+        if (itemLabels.Count == 0 || numericCandidates.Count == 0 || _lastColorantNumericDiffIndices.Count == 0)
+        {
+            return false;
+        }
+
+        var listCount = itemLabels.Count;
+        var candidate = numericCandidates
+            .Where(entry => entry.Value >= 0
+                && entry.Value < listCount
+                && _lastColorantNumericDiffIndices.Contains(entry.Index))
+            .OrderByDescending(entry => entry.Index)
+            .FirstOrDefault();
+
+        if (candidate == default)
+        {
+            return false;
+        }
+
+        diffIndex = candidate.Index;
+        _pluginLog.Information($"[ColorantDebug] アイテム選択候補: DiffIndex={candidate.Index} Value={candidate.Value} ListCount={listCount}");
+        _pluginLog.Information($"[ColorantDebug] 差分Index一覧: {string.Join(", ", _lastColorantNumericDiffIndices)}");
+        LogItemIndexWindow(_pluginLog, candidate.Value, itemLabels);
+        var mappedId = MapItemIdBySelectedIndex(candidate.Value, itemLabels, out var mappedLabel);
+        if (mappedId == 0
+            || mappedLabel.StartsWith("カララント:", StringComparison.Ordinal)
+            || !_shopDataCache.HasShopData(mappedId))
+        {
+            return false;
+        }
+
+        label = mappedLabel;
+        itemId = mappedId;
+        return true;
+    }
+
+    private bool HasColorantSelectionChanged(int index, string label)
+    {
+        if (index < 0 && string.IsNullOrWhiteSpace(label))
+        {
+            return false;
+        }
+
+        if (_lastColorantSelectedIndex != index)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(label)
+            && !string.Equals(label, _lastColorantSelectedLabel, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private void UpdateLastColorantSelection(int index, string label)
+    {
+        if (index >= 0)
+        {
+            _lastColorantSelectedIndex = index;
+        }
+
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            _lastColorantSelectedLabel = label;
+        }
+    }
+
     private unsafe void CaptureColorantNumericDiff(
         AtkUnitBase* addon,
         ushort count,
@@ -1422,10 +1600,12 @@ public sealed class ContextMenuService : IDisposable
         if (_lastColorantNumericSnapshot == null)
         {
             _lastColorantNumericSnapshot = snapshot;
+            _lastColorantNumericDiffIndices = new List<int>();
             return;
         }
 
         var diffs = new List<string>();
+        var diffIndices = new List<int>();
         foreach (var (index, value) in snapshot)
         {
             if (_lastColorantNumericSnapshot.TryGetValue(index, out var previous) && previous == value)
@@ -1434,6 +1614,7 @@ public sealed class ContextMenuService : IDisposable
             }
 
             diffs.Add($"[{index}] {(_lastColorantNumericSnapshot.TryGetValue(index, out previous) ? previous : 0)} -> {value}");
+            diffIndices.Add(index);
             if (diffs.Count >= 12)
             {
                 break;
@@ -1446,6 +1627,7 @@ public sealed class ContextMenuService : IDisposable
         }
 
         _lastColorantNumericSnapshot = snapshot;
+        _lastColorantNumericDiffIndices = diffIndices;
     }
 
     private static uint ExtractItemId(AtkValue value)
