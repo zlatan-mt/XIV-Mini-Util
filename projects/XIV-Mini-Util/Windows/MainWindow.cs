@@ -891,7 +891,7 @@ public sealed class MainWindow : Window, IDisposable
 
         _editingCustomShop.Name = _customShopNameInput;
         _editingCustomShop.TerritoryTypeId = housingAreas[_customShopAreaIndex].TerritoryTypeId;
-        _editingCustomShop.MapId = 0; // ハウジングエリアではMapIdは使用しない
+        _editingCustomShop.MapId = 0; // MapIdはキャッシュ側で解決して埋める（互換維持）
         _editingCustomShop.X = _customShopXInput;
         _editingCustomShop.Y = _customShopYInput;
 

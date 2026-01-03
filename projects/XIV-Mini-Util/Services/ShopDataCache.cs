@@ -311,36 +311,34 @@ public sealed class ShopDataCache
             return 0;
         }
 
-        var territorySheet = _dataManager.GetExcelSheet<TerritoryType>();
-        if (territorySheet != null)
-        {
-            var territory = territorySheet.GetRow(territoryTypeId);
-            if (territory.RowId != 0)
-            {
-                var mapId = territory.Map.RowId;
-                if (mapId != 0)
-                {
-                    return mapId;
-                }
-            }
-        }
-
-        // 念のためMapシートを走査して補完（TerritoryType.Mapが取れない環境向け）
         var mapSheet = _dataManager.GetExcelSheet<Map>();
         if (mapSheet == null)
         {
             return 0;
         }
 
+        // TerritoryType.Map は環境差/用途差で期待とズレる場合があるため、
+        // TerritoryTypeId に紐づく Map を Mapシート側から選ぶ。
+        // まずは PlaceNameSub が空の「メインマップ」を優先する。
+        uint fallbackId = 0;
         foreach (var map in mapSheet)
         {
             if (map.RowId != 0 && map.TerritoryType.RowId == territoryTypeId)
             {
-                return map.RowId;
+                if (fallbackId == 0)
+                {
+                    fallbackId = map.RowId;
+                }
+
+                var subName = map.PlaceNameSub.ValueNullable?.Name.ToString() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(subName))
+                {
+                    return map.RowId;
+                }
             }
         }
 
-        return 0;
+        return fallbackId;
     }
 
     public string GetItemName(uint itemId)
@@ -2354,32 +2352,26 @@ public sealed class ShopDataCache
     /// </summary>
     public (float X, float Y) WorldToMapCoordinates(uint territoryTypeId, float worldX, float worldZ)
     {
-        var territorySheet = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>();
-        if (territorySheet == null)
-        {
-            return (0, 0);
-        }
-
-        var territory = territorySheet.GetRowOrDefault(territoryTypeId);
-        if (territory == null)
-        {
-            return (0, 0);
-        }
-
         var mapSheet = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.Map>();
         if (mapSheet == null)
         {
             return (0, 0);
         }
 
-        var map = mapSheet.GetRowOrDefault(territory.Value.Map.RowId);
-        if (map == null)
+        var mapId = GetDefaultMapId(territoryTypeId);
+        if (mapId == 0)
         {
             return (0, 0);
         }
 
-        var mapX = ConvertToMapCoordinate(worldX, map.Value.OffsetX, map.Value.SizeFactor);
-        var mapY = ConvertToMapCoordinate(worldZ, map.Value.OffsetY, map.Value.SizeFactor);
+        var map = mapSheet.GetRow(mapId);
+        if (map.RowId == 0)
+        {
+            return (0, 0);
+        }
+
+        var mapX = ConvertToMapCoordinate(worldX, map.OffsetX, map.SizeFactor);
+        var mapY = ConvertToMapCoordinate(worldZ, map.OffsetY, map.SizeFactor);
         return (mapX, mapY);
     }
 

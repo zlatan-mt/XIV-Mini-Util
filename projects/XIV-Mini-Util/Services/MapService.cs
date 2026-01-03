@@ -24,7 +24,7 @@ public sealed class MapService
         var payload = CreateMapLink(location);
         if (payload == null)
         {
-            _pluginLog.Warning("マップリンク生成に失敗しました。");
+            _pluginLog.Warning($"マップリンク生成に失敗しました。Territory={location.TerritoryTypeId}, Map={location.MapId}, X={location.MapX:0.0}, Y={location.MapY:0.0}, Area={location.AreaName}, Npc={location.NpcName}");
             return;
         }
 
