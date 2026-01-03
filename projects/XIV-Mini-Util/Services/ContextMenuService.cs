@@ -625,10 +625,17 @@ public sealed class ContextMenuService : IDisposable
         var labelIndexMap = new Dictionary<int, string>();
         var labelIndexList = new List<(int Index, string Label)>();
         var numericCandidates = new List<(int Index, int Value)>();
+        var colorantItemCandidates = new List<(int Index, uint ItemId)>();
 
         for (var i = 0; i < count; i++)
         {
             var value = addon->AtkValues[i];
+            var itemCandidate = ExtractItemId(value);
+            if (itemCandidate != 0 && _shopDataCache.IsLikelyColorantItemId(itemCandidate))
+            {
+                colorantItemCandidates.Add((i, itemCandidate));
+            }
+
             var text = ExtractString(value);
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -677,8 +684,16 @@ public sealed class ContextMenuService : IDisposable
             }
         }
 
-        if (TryFindSelectedColorantLabelByIndex(addon, count, labelIndexMap, labelIndexList, out var indexedLabel))
+        if (TryFindSelectedColorantLabelByIndex(addon, count, labelIndexMap, labelIndexList, _pluginLog, out var indexedLabel, out var selectedIndex))
         {
+            // 選択Indexが確定している場合は、数値候補ブロックからItemIdを対応付ける
+            var mappedItemId = TryMapColorantItemIdByIndex(selectedIndex, labelIndexList.Count, colorantItemCandidates);
+            if (mappedItemId != 0)
+            {
+                _pluginLog.Information($"ColorantAddon選択Index(数値)経由でItemId取得: {mappedItemId} (Index={selectedIndex})");
+                return mappedItemId;
+            }
+
             var indexedId = _shopDataCache.GetItemIdFromName(indexedLabel);
             if (indexedId != 0)
             {
@@ -839,22 +854,13 @@ public sealed class ContextMenuService : IDisposable
             return string.Empty;
         }
 
-        var end = text.Length - 1;
-        var removed = 0;
-        while (end >= 0 && removed < 3)
+        if (text.EndsWith("IH", StringComparison.Ordinal)
+            || text.EndsWith("HQ", StringComparison.Ordinal))
         {
-            var ch = text[end];
-            if (ch >= 'A' && ch <= 'Z')
-            {
-                end--;
-                removed++;
-                continue;
-            }
-
-            break;
+            return text[..^2].Trim();
         }
 
-        return end < 0 ? string.Empty : text[..(end + 1)].Trim();
+        return text.Trim();
     }
 
     private static bool TryFindSelectedColorantLabelFromUsageSection(
@@ -916,9 +922,12 @@ public sealed class ContextMenuService : IDisposable
         ushort count,
         Dictionary<int, string> labelIndexMap,
         List<(int Index, string Label)> labelIndexList,
-        out string label)
+        IPluginLog pluginLog,
+        out string label,
+        out int selectedIndex)
     {
         label = string.Empty;
+        selectedIndex = -1;
         if (labelIndexMap.Count == 0 || addon == null || count == 0)
         {
             return false;
@@ -956,6 +965,8 @@ public sealed class ContextMenuService : IDisposable
                 if (i == 22)
                 {
                     label = labelIndexList[candidate].Label;
+                    selectedIndex = candidate;
+                    LogColorantIndexWindow(pluginLog, candidate, labelIndexList);
                     return true;
                 }
             }
@@ -963,11 +974,76 @@ public sealed class ContextMenuService : IDisposable
             if (labelIndexMap.TryGetValue(candidate, out var indexedLabel))
             {
                 label = indexedLabel;
+                selectedIndex = candidate;
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static void LogColorantIndexWindow(IPluginLog pluginLog, int index, List<(int Index, string Label)> labelIndexList)
+    {
+        if (index < 0 || labelIndexList.Count == 0)
+        {
+            return;
+        }
+
+        var start = Math.Max(0, index - 2);
+        var end = Math.Min(labelIndexList.Count - 1, index + 2);
+        var window = new List<string>();
+        for (var i = start; i <= end; i++)
+        {
+            window.Add($"{i}:{labelIndexList[i].Label}");
+        }
+
+        pluginLog.Information($"[ColorantDebug] 選択Index={index} 周辺ラベル: {string.Join(", ", window)}");
+    }
+
+    private static uint TryMapColorantItemIdByIndex(
+        int selectedIndex,
+        int labelCount,
+        List<(int Index, uint ItemId)> itemCandidates)
+    {
+        if (selectedIndex < 0 || labelCount <= 0 || itemCandidates.Count == 0)
+        {
+            return 0;
+        }
+
+        itemCandidates.Sort((a, b) => a.Index.CompareTo(b.Index));
+
+        var blocks = new List<List<uint>>();
+        var current = new List<uint>();
+        var lastIndex = -2;
+
+        foreach (var (index, itemId) in itemCandidates)
+        {
+            if (index != lastIndex + 1 && current.Count > 0)
+            {
+                blocks.Add(current);
+                current = new List<uint>();
+            }
+
+            current.Add(itemId);
+            lastIndex = index;
+        }
+
+        if (current.Count > 0)
+        {
+            blocks.Add(current);
+        }
+
+        // ラベル数に最も近いブロックを採用する
+        var bestBlock = blocks
+            .OrderBy(block => Math.Abs(block.Count - labelCount))
+            .FirstOrDefault();
+
+        if (bestBlock == null || selectedIndex >= bestBlock.Count)
+        {
+            return 0;
+        }
+
+        return bestBlock[selectedIndex];
     }
 
     private unsafe void CaptureColorantNumericDiff(

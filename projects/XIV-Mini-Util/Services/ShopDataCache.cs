@@ -172,6 +172,31 @@ public sealed class ShopDataCache
         return _stainItemIds != null && _stainItemIds.Contains(itemId);
     }
 
+    /// <summary>
+    /// カララント系のアイテムかどうかを簡易判定する（EX含む）
+    /// </summary>
+    public bool IsLikelyColorantItemId(uint itemId)
+    {
+        if (itemId == 0)
+        {
+            return false;
+        }
+
+        if (IsStainItemId(itemId))
+        {
+            return true;
+        }
+
+        var name = GetItemNameFromSheet(itemId);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        return IsLikelyDyeItemName(name);
+    }
+
+
     public string GetTerritoryName(uint territoryTypeId)
     {
         if (territoryTypeId == 0)
@@ -486,6 +511,46 @@ public sealed class ShopDataCache
             || name.Contains("カララント", StringComparison.Ordinal)
             || name.Contains("Dye", StringComparison.OrdinalIgnoreCase)
             || name.Contains("Colorant", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string GetItemNameFromSheet(uint itemId)
+    {
+        if (itemId == 0)
+        {
+            return string.Empty;
+        }
+
+        if (_itemNames.TryGetValue(itemId, out var cached) && !string.IsNullOrWhiteSpace(cached))
+        {
+            return cached;
+        }
+
+        var itemSheet = _dataManager.GetExcelSheet<Item>();
+        if (itemSheet == null)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var row = itemSheet.GetRow(itemId);
+            if (row.RowId == 0)
+            {
+                return string.Empty;
+            }
+
+            var name = row.Name.ToString();
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                _itemNames[itemId] = name;
+            }
+
+            return name;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private void EnsureStainItemIds()
