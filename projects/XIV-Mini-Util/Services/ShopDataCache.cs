@@ -20,6 +20,8 @@ public sealed class ShopDataCache
     private readonly Dictionary<uint, string> _itemNames = new();
     private readonly Dictionary<uint, string> _territoryNames = new();
     private readonly HashSet<uint> _loggedMissingItems = new();
+    private readonly Dictionary<string, uint> _itemNameToId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, uint> _itemNameNormalizedToId = new(StringComparer.Ordinal);
     private readonly Dictionary<byte, uint> _stainToItemId = new();
     private readonly HashSet<byte> _loggedStainDiagnostics = new();
     private readonly Dictionary<string, uint> _stainNameToItemId = new(StringComparer.Ordinal);
@@ -134,6 +136,26 @@ public sealed class ShopDataCache
 
         _stainToItemId[stainId] = itemId;
         return itemId;
+    }
+
+    /// <summary>
+    /// アイテム名からIDを取得する（カララント名などの逆引き用）
+    /// </summary>
+    public uint GetItemIdFromName(string itemName)
+    {
+        if (string.IsNullOrWhiteSpace(itemName))
+        {
+            return 0;
+        }
+
+        EnsureItemNameIndex();
+        if (_itemNameToId.TryGetValue(itemName, out var itemId))
+        {
+            return itemId;
+        }
+
+        var normalized = NormalizeName(itemName);
+        return _itemNameNormalizedToId.TryGetValue(normalized, out var normalizedId) ? normalizedId : 0;
     }
 
     /// <summary>
@@ -263,6 +285,45 @@ public sealed class ShopDataCache
         return _stainNameNormalizedToItemId.TryGetValue(normalized, out var normalizedItemId) ? normalizedItemId : 0;
     }
 
+    private void EnsureItemNameIndex()
+    {
+        if (_itemNameToId.Count > 0 || _itemNameNormalizedToId.Count > 0)
+        {
+            return;
+        }
+
+        var itemSheet = _dataManager.GetExcelSheet<Item>();
+        if (itemSheet == null)
+        {
+            return;
+        }
+
+        foreach (var itemRow in itemSheet)
+        {
+            if (itemRow.RowId == 0)
+            {
+                continue;
+            }
+
+            var name = itemRow.Name.ToString();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            if (!_itemNameToId.ContainsKey(name))
+            {
+                _itemNameToId[name] = itemRow.RowId;
+            }
+
+            var normalized = NormalizeName(name);
+            if (!string.IsNullOrEmpty(normalized) && !_itemNameNormalizedToId.ContainsKey(normalized))
+            {
+                _itemNameNormalizedToId[normalized] = itemRow.RowId;
+            }
+        }
+    }
+
     private void EnsureStainNameIndex()
     {
         if (_stainNameToItemId.Count > 0 || _stainNameNormalizedToItemId.Count > 0)
@@ -298,6 +359,8 @@ public sealed class ShopDataCache
             }
         }
 
+        var stainNormalizedList = stainNamesNormalized.ToList();
+
         foreach (var itemRow in itemSheet)
         {
             if (itemRow.RowId == 0)
@@ -320,6 +383,19 @@ public sealed class ShopDataCache
             if (!string.IsNullOrEmpty(normalized) && stainNamesNormalized.Contains(normalized) && !_stainNameNormalizedToItemId.ContainsKey(normalized))
             {
                 _stainNameNormalizedToItemId[normalized] = itemRow.RowId;
+            }
+
+            if (!IsLikelyDyeItemName(name) || string.IsNullOrEmpty(normalized))
+            {
+                continue;
+            }
+
+            foreach (var stainNormalized in stainNormalizedList)
+            {
+                if (!_stainNameNormalizedToItemId.ContainsKey(stainNormalized) && normalized.Contains(stainNormalized, StringComparison.Ordinal))
+                {
+                    _stainNameNormalizedToItemId[stainNormalized] = itemRow.RowId;
+                }
             }
         }
     }
@@ -402,6 +478,14 @@ public sealed class ShopDataCache
         }
 
         return length == 0 ? string.Empty : new string(buffer, 0, length);
+    }
+
+    private static bool IsLikelyDyeItemName(string name)
+    {
+        return name.Contains("染料", StringComparison.Ordinal)
+            || name.Contains("カララント", StringComparison.Ordinal)
+            || name.Contains("Dye", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Colorant", StringComparison.OrdinalIgnoreCase);
     }
 
     private void EnsureStainItemIds()

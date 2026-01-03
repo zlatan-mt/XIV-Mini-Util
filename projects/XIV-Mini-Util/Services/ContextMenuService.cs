@@ -7,6 +7,7 @@ using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using System.Runtime.InteropServices;
 using System.Reflection;
 
 namespace XivMiniUtil.Services;
@@ -21,6 +22,8 @@ public sealed class ContextMenuService : IDisposable
     private readonly ShopDataCache _shopDataCache;
     private readonly IPluginLog _pluginLog;
     private bool _loggedColorantDebug;
+    private bool _loggedColorantTextDebug;
+    private Dictionary<int, int>? _lastColorantNumericSnapshot;
 
     public ContextMenuService(
         IContextMenu contextMenu,
@@ -496,6 +499,12 @@ public sealed class ContextMenuService : IDisposable
             return 0;
         }
 
+        var textItemId = GetItemIdFromAddonText(addon, addon->AtkValuesCount);
+        if (textItemId != 0)
+        {
+            return textItemId;
+        }
+
         var matches = new List<(int Index, uint ItemId)>();
         var count = addon->AtkValuesCount;
         for (var i = 0; i < count; i++)
@@ -606,6 +615,427 @@ public sealed class ContextMenuService : IDisposable
         }
 
         return 0;
+    }
+
+    private unsafe uint GetItemIdFromAddonText(AtkUnitBase* addon, ushort count)
+    {
+        var labelCandidates = new List<string>();
+        var textCandidates = new List<string>();
+        var allStrings = new List<(int Index, string Text)>();
+        var labelIndexMap = new Dictionary<int, string>();
+        var labelIndexList = new List<(int Index, string Label)>();
+        var numericCandidates = new List<(int Index, int Value)>();
+
+        for (var i = 0; i < count; i++)
+        {
+            var value = addon->AtkValues[i];
+            var text = ExtractString(value);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var sanitized = SanitizeAddonText(text);
+            if (string.IsNullOrWhiteSpace(sanitized))
+            {
+                continue;
+            }
+
+            allStrings.Add((i, sanitized));
+
+            if (!TryExtractColorantLabel(sanitized, out var label))
+            {
+                if (textCandidates.Count < 20)
+                {
+                    textCandidates.Add($"[{i}] {value.Type} {sanitized}");
+                }
+                continue;
+            }
+
+            if (labelCandidates.Count < 20)
+            {
+                labelCandidates.Add($"[{i}] {label}");
+            }
+
+            if (!labelIndexMap.ContainsKey(i))
+            {
+                labelIndexMap[i] = label;
+            }
+
+            labelIndexList.Add((i, label));
+        }
+
+        CaptureColorantNumericDiff(addon, count, numericCandidates);
+
+        if (TryFindSelectedColorantLabelFromUsageSection(allStrings, out var selectedLabel))
+        {
+            var selectedId = _shopDataCache.GetItemIdFromName(selectedLabel);
+            if (selectedId != 0)
+            {
+                _pluginLog.Information($"ColorantAddon使用中ラベル経由でItemId取得: {selectedId} (Text={selectedLabel})");
+                return selectedId;
+            }
+        }
+
+        if (TryFindSelectedColorantLabelByIndex(addon, count, labelIndexMap, labelIndexList, out var indexedLabel))
+        {
+            var indexedId = _shopDataCache.GetItemIdFromName(indexedLabel);
+            if (indexedId != 0)
+            {
+                _pluginLog.Information($"ColorantAddon選択Index経由でItemId取得: {indexedId} (Text={indexedLabel})");
+                return indexedId;
+            }
+        }
+
+        if (numericCandidates.Count > 0)
+        {
+            var summary = string.Join(", ", numericCandidates.Take(12).Select(c => $"[{c.Index}]={c.Value}"));
+            _pluginLog.Information($"[ColorantDebug] 数値候補: {summary}");
+        }
+
+        foreach (var candidate in labelCandidates.Select(c => c[(c.IndexOf(']') + 1)..].Trim()))
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+
+            var itemId = _shopDataCache.GetItemIdFromName(candidate);
+            if (itemId != 0)
+            {
+                _pluginLog.Information($"ColorantAddon文字列経由でItemId取得: {itemId} (Text={candidate})");
+                return itemId;
+            }
+        }
+
+        if (!_loggedColorantTextDebug)
+        {
+            _loggedColorantTextDebug = true;
+            if (labelCandidates.Count > 0)
+            {
+                _pluginLog.Information($"[ColorantDebug] カララント文字列候補: {string.Join(", ", labelCandidates)}");
+            }
+            else if (textCandidates.Count > 0)
+            {
+                _pluginLog.Information($"[ColorantDebug] 文字列候補: {string.Join(", ", textCandidates)}");
+            }
+            else
+            {
+                _pluginLog.Information("[ColorantDebug] 文字列候補なし");
+            }
+        }
+
+        return 0;
+    }
+
+    private static unsafe string ExtractString(AtkValue value)
+    {
+        switch (value.Type)
+        {
+            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String:
+            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.ManagedString:
+            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8:
+                return value.String.ToString();
+            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.WideString:
+                return Marshal.PtrToStringUni((nint)value.WideString) ?? string.Empty;
+            default:
+                return string.Empty;
+        }
+    }
+
+    private static string SanitizeAddonText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var buffer = new char[text.Length];
+        var length = 0;
+        foreach (var ch in text)
+        {
+            if (char.IsControl(ch))
+            {
+                continue;
+            }
+
+            buffer[length] = ch;
+            length++;
+        }
+
+        return length == 0 ? string.Empty : new string(buffer, 0, length).Trim();
+    }
+
+    private static bool IsLikelyColorantLabel(string text)
+    {
+        return text.Contains("カララント", StringComparison.Ordinal)
+            || text.Contains("Colorant", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("Dye", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryExtractColorantLabel(string text, out string label)
+    {
+        label = string.Empty;
+        if (!IsLikelyColorantLabel(text))
+        {
+            return false;
+        }
+
+        var prefixIndex = text.IndexOf("カララント:", StringComparison.Ordinal);
+        if (prefixIndex < 0)
+        {
+            prefixIndex = text.IndexOf("Colorant:", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (prefixIndex >= 0)
+        {
+            var candidate = text[prefixIndex..];
+            label = TrimNonLabelSuffix(candidate);
+            return !string.IsNullOrWhiteSpace(label);
+        }
+
+        label = TrimNonLabelSuffix(text);
+        return !string.IsNullOrWhiteSpace(label);
+    }
+
+    private static string TrimNonLabelSuffix(string text)
+    {
+        var end = text.Length - 1;
+        while (end >= 0)
+        {
+            var ch = text[end];
+            if (char.IsLetterOrDigit(ch)
+                || ch == ':'
+                || ch == ' '
+                || ch == '・'
+                || ch == 'ー'
+                || ch == '－'
+                || ch == '-')
+            {
+                break;
+            }
+
+            end--;
+        }
+
+        if (end < 0)
+        {
+            return string.Empty;
+        }
+
+        var trimmed = text[..(end + 1)].Trim();
+        if (trimmed.StartsWith("カララント:", StringComparison.Ordinal))
+        {
+            trimmed = TrimTrailingAsciiTag(trimmed);
+        }
+
+        return trimmed;
+    }
+
+    private static string TrimTrailingAsciiTag(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var end = text.Length - 1;
+        var removed = 0;
+        while (end >= 0 && removed < 3)
+        {
+            var ch = text[end];
+            if (ch >= 'A' && ch <= 'Z')
+            {
+                end--;
+                removed++;
+                continue;
+            }
+
+            break;
+        }
+
+        return end < 0 ? string.Empty : text[..(end + 1)].Trim();
+    }
+
+    private static bool TryFindSelectedColorantLabelFromUsageSection(
+        List<(int Index, string Text)> allStrings,
+        out string label)
+    {
+        label = string.Empty;
+        if (allStrings.Count == 0)
+        {
+            return false;
+        }
+
+        var usageIndex = allStrings.FindIndex(entry =>
+            entry.Text.Contains("染色1の使用カララント", StringComparison.Ordinal)
+            || entry.Text.Contains("染色2の使用カララント", StringComparison.Ordinal));
+
+        if (usageIndex < 0)
+        {
+            return false;
+        }
+
+        var start = usageIndex + 1;
+        var end = Math.Min(allStrings.Count - 1, usageIndex + 8);
+
+        for (var i = start; i <= end; i++)
+        {
+            var text = allStrings[i].Text;
+            if (TryExtractColorantLabel(text, out var extracted))
+            {
+                label = extracted;
+                return true;
+            }
+        }
+
+        for (var i = start; i <= end; i++)
+        {
+            var text = allStrings[i].Text;
+            if (text.Contains("カララント", StringComparison.Ordinal)
+                || text.Contains("使用", StringComparison.Ordinal)
+                || text.Contains("適用", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            label = $"カララント:{text}";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static unsafe bool TryFindSelectedColorantLabelByIndex(
+        AtkUnitBase* addon,
+        ushort count,
+        Dictionary<int, string> labelIndexMap,
+        List<(int Index, string Label)> labelIndexList,
+        out string label)
+    {
+        label = string.Empty;
+        if (labelIndexMap.Count == 0 || addon == null || count == 0)
+        {
+            return false;
+        }
+
+        if (labelIndexList.Count > 0)
+        {
+            labelIndexList.Sort((a, b) => a.Index.CompareTo(b.Index));
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            var value = addon->AtkValues[i];
+            int candidate;
+            if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int)
+            {
+                candidate = value.Int;
+            }
+            else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+            {
+                if (value.UInt > int.MaxValue)
+                {
+                    continue;
+                }
+                candidate = (int)value.UInt;
+            }
+            else
+            {
+                continue;
+            }
+
+            if (labelIndexList.Count > 0 && candidate >= 0 && candidate < labelIndexList.Count)
+            {
+                // 実測ログで、Index=22が右クリックした染色と連動して変化するため優先する
+                if (i == 22)
+                {
+                    label = labelIndexList[candidate].Label;
+                    return true;
+                }
+            }
+
+            if (labelIndexMap.TryGetValue(candidate, out var indexedLabel))
+            {
+                label = indexedLabel;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private unsafe void CaptureColorantNumericDiff(
+        AtkUnitBase* addon,
+        ushort count,
+        List<(int Index, int Value)> numericCandidates)
+    {
+        if (addon == null || count == 0)
+        {
+            return;
+        }
+
+        var snapshot = new Dictionary<int, int>();
+        for (var i = 0; i < count; i++)
+        {
+            var value = addon->AtkValues[i];
+            int candidate;
+            if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int)
+            {
+                candidate = value.Int;
+            }
+            else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+            {
+                if (value.UInt > int.MaxValue)
+                {
+                    continue;
+                }
+                candidate = (int)value.UInt;
+            }
+            else
+            {
+                continue;
+            }
+
+            snapshot[i] = candidate;
+            if (candidate >= 0 && candidate <= 128)
+            {
+                numericCandidates.Add((i, candidate));
+            }
+        }
+
+        if (_lastColorantNumericSnapshot == null)
+        {
+            _lastColorantNumericSnapshot = snapshot;
+            return;
+        }
+
+        var diffs = new List<string>();
+        foreach (var (index, value) in snapshot)
+        {
+            if (_lastColorantNumericSnapshot.TryGetValue(index, out var previous) && previous == value)
+            {
+                continue;
+            }
+
+            diffs.Add($"[{index}] {(_lastColorantNumericSnapshot.TryGetValue(index, out previous) ? previous : 0)} -> {value}");
+            if (diffs.Count >= 12)
+            {
+                break;
+            }
+        }
+
+        if (diffs.Count > 0)
+        {
+            _pluginLog.Information($"[ColorantDebug] 数値差分: {string.Join(", ", diffs)}");
+        }
+
+        _lastColorantNumericSnapshot = snapshot;
     }
 
     private static uint ExtractItemId(AtkValue value)
