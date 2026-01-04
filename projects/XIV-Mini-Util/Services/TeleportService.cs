@@ -199,15 +199,6 @@ public sealed class TeleportService
         return entries[0];
     }
 
-    private static float ConvertToMapCoordinate(short rawPosition, short offset, ushort sizeFactor)
-    {
-        // エーテライトの座標はshort型で格納されている
-        var scale = sizeFactor / 100f;
-        var c = 41f / scale;
-        var adjusted = (rawPosition * scale + 1024f) / 2048f;
-        return c * adjusted + 1f;
-    }
-
     private void EnsureAetheryteCache()
     {
         if (_aetheryteCacheReady)
@@ -245,8 +236,8 @@ public sealed class TeleportService
                 continue;
             }
 
-            var mapX = ConvertToMapCoordinate(aetheryte.AetherstreamX, aetheryteMap.Value.OffsetX, aetheryteMap.Value.SizeFactor);
-            var mapY = ConvertToMapCoordinate(aetheryte.AetherstreamY, aetheryteMap.Value.OffsetY, aetheryteMap.Value.SizeFactor);
+            var mapX = MapCoordinateConverter.ConvertFromShort(aetheryte.AetherstreamX, aetheryteMap.Value.OffsetX, aetheryteMap.Value.SizeFactor);
+            var mapY = MapCoordinateConverter.ConvertFromShort(aetheryte.AetherstreamY, aetheryteMap.Value.OffsetY, aetheryteMap.Value.SizeFactor);
             var name = aetheryte.PlaceName.ValueNullable?.Name.ToString() ?? "不明";
 
             if (!_aetheryteByTerritory.TryGetValue(territoryId, out var list))
