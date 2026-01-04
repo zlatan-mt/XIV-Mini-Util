@@ -442,6 +442,13 @@ public sealed class MainWindow : Window, IDisposable
             _configuration.Save();
         }
 
+        var verboseLogging = _configuration.ShopDataVerboseLogging;
+        if (ImGui.Checkbox("ショップデータ詳細ログを有効化", ref verboseLogging))
+        {
+            _configuration.ShopDataVerboseLogging = verboseLogging;
+            _configuration.Save();
+        }
+
         ImGui.Separator();
         DrawShopSearchPriorityList();
         ImGui.Separator();

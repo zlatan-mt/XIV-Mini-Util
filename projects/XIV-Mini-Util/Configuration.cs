@@ -33,6 +33,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool ShopSearchWindowEnabled { get; set; } = true;
     public bool ShopSearchAutoTeleportEnabled { get; set; } = false;
     public List<uint> ShopSearchAreaPriority { get; set; } = new();
+    public bool ShopDataVerboseLogging { get; set; } = false;
 
     private IDalamudPluginInterface? _pluginInterface;
 
@@ -146,6 +147,7 @@ public sealed class Configuration : IPluginConfiguration
         ShopSearchWindowEnabled = source.ShopSearchWindowEnabled;
         ShopSearchAutoTeleportEnabled = source.ShopSearchAutoTeleportEnabled;
         ShopSearchAreaPriority = source.ShopSearchAreaPriority?.ToList() ?? DefaultShopSearchAreaPriority.ToList();
+        ShopDataVerboseLogging = source.ShopDataVerboseLogging;
     }
 
     private Configuration BuildExportSnapshot()
