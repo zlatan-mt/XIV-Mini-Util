@@ -25,6 +25,8 @@ public sealed class MainWindow : Window, IDisposable
     private readonly DesynthService _desynthService;
     private readonly ShopDataCache _shopDataCache;
     private readonly ShopSearchService _shopSearchService;
+    private readonly SubmarineDataStorage _submarineDataStorage;
+    private readonly DiscordService _discordService;
     private readonly bool _materiaFeatureEnabled;
     private readonly bool _desynthFeatureEnabled;
 
@@ -51,6 +53,10 @@ public sealed class MainWindow : Window, IDisposable
     private string? _searchStatusMessage;
     private CancellationTokenSource? _searchCts;
     private readonly object _searchLock = new();
+    
+    // Submarine Tab State
+    private string _webhookUrlMasked = "****";
+    private bool _showWebhookUrl = false;
 
     public MainWindow(
         Configuration configuration,
@@ -58,6 +64,8 @@ public sealed class MainWindow : Window, IDisposable
         DesynthService desynthService,
         ShopDataCache shopDataCache,
         ShopSearchService shopSearchService,
+        SubmarineDataStorage submarineDataStorage,
+        DiscordService discordService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
         : base("XIV Mini Util")
@@ -67,6 +75,8 @@ public sealed class MainWindow : Window, IDisposable
         _desynthService = desynthService;
         _shopDataCache = shopDataCache;
         _shopSearchService = shopSearchService;
+        _submarineDataStorage = submarineDataStorage;
+        _discordService = discordService;
         _materiaFeatureEnabled = materiaFeatureEnabled;
         _desynthFeatureEnabled = desynthFeatureEnabled;
 
@@ -103,6 +113,12 @@ public sealed class MainWindow : Window, IDisposable
             if (ImGui.BeginTabItem("Search"))
             {
                 DrawSearchTab();
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Submarines"))
+            {
+                DrawSubmarineTab();
                 ImGui.EndTabItem();
             }
 
@@ -257,6 +273,7 @@ public sealed class MainWindow : Window, IDisposable
             _materiaFeatureEnabled ? "General & Materia" : "General & Materia (無効中)",
             _desynthFeatureEnabled ? "Desynthesis" : "Desynthesis (無効中)",
             "Shop Search",
+            "Submarines",
         };
 
         if (ImGui.BeginChild("SettingsCategories", new Vector2(0, 0), true))
@@ -287,6 +304,9 @@ public sealed class MainWindow : Window, IDisposable
                 break;
             case 2:
                 DrawShopSearchSettings();
+                break;
+            case 3:
+                DrawSubmarineSettings();
                 break;
             default:
                 DrawGeneralSettings();
@@ -409,6 +429,60 @@ public sealed class MainWindow : Window, IDisposable
         }
 
         if (!_desynthFeatureEnabled)
+        {
+            ImGui.EndDisabled();
+        }
+    }
+
+    private void DrawSubmarineSettings()
+    {
+        ImGui.Text("潜水艦探索管理");
+        ImGui.Separator();
+
+        var trackerEnabled = _configuration.SubmarineTrackerEnabled;
+        if (ImGui.Checkbox("機能を有効化", ref trackerEnabled))
+        {
+            _configuration.SubmarineTrackerEnabled = trackerEnabled;
+            _configuration.Save();
+        }
+
+        if (!trackerEnabled)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("通知設定 (Discord Webhook)");
+
+        var notificationEnabled = _configuration.SubmarineNotificationEnabled;
+        if (ImGui.Checkbox("通知を有効化", ref notificationEnabled))
+        {
+            _configuration.SubmarineNotificationEnabled = notificationEnabled;
+            _configuration.Save();
+        }
+
+        ImGui.Spacing();
+        
+        var url = _configuration.DiscordWebhookUrl;
+        var displayUrl = _showWebhookUrl ? url : (string.IsNullOrEmpty(url) ? "" : _webhookUrlMasked);
+        
+        // パスワード入力フィールドのように振る舞うが、表示切り替えボタンをつけたいので
+        // InputTextではなく、表示用文字列を操作する
+        
+        if (ImGui.InputText("Webhook URL", ref url, 200, ImGuiInputTextFlags.Password))
+        {
+            _configuration.DiscordWebhookUrl = url;
+            _configuration.Save();
+        }
+        ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), "※URLは慎重に管理してください。通知にはキャラクター名が含まれます。");
+
+        ImGui.Spacing();
+        if (ImGui.Button("テスト通知を送信"))
+        {
+            _ = _discordService.SendTestNotificationAsync();
+        }
+
+        if (!trackerEnabled)
         {
             ImGui.EndDisabled();
         }
@@ -920,5 +994,121 @@ public sealed class MainWindow : Window, IDisposable
         return names;
     }
 
-    
+    private void DrawSubmarineTab()
+    {
+        ImGui.Text("潜水艦探索状況");
+        ImGui.Separator();
+
+        if (!_configuration.SubmarineTrackerEnabled)
+        {
+            ImGui.Text("この機能は現在無効化されています。設定タブで有効にしてください。");
+            return;
+        }
+
+        var allData = _submarineDataStorage.GetAll();
+        if (allData.Count == 0)
+        {
+            ImGui.Text("潜水艦情報がありません。FCハウスに入室してください。");
+            return;
+        }
+
+        if (ImGui.BeginTabBar("SubmarineChars"))
+        {
+            foreach (var kvp in allData)
+            {
+                var charInfo = kvp.Value;
+                var charName = string.IsNullOrEmpty(charInfo.CharacterName) ? $"ID: {kvp.Key}" : charInfo.CharacterName;
+
+                if (ImGui.BeginTabItem($"{charName}##{kvp.Key}"))
+                {
+                    DrawSubmarineList(charInfo.Submarines);
+                    ImGui.EndTabItem();
+                }
+            }
+            ImGui.EndTabBar();
+        }
+    }
+
+    private void DrawSubmarineList(List<XivMiniUtil.Models.Submarine.SubmarineData> submarines)
+    {
+        if (submarines.Count == 0)
+        {
+            ImGui.Text("登録されている潜水艦がありません。");
+            return;
+        }
+
+        if (ImGui.BeginTable("SubmarineTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        {
+            ImGui.TableSetupColumn("名称");
+            ImGui.TableSetupColumn("ランク", ImGuiTableColumnFlags.WidthFixed, 50f);
+            ImGui.TableSetupColumn("状態", ImGuiTableColumnFlags.WidthFixed, 100f);
+            ImGui.TableSetupColumn("帰還時刻 (Local)");
+            ImGui.TableHeadersRow();
+
+            foreach (var sub in submarines)
+            {
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.Text(sub.Name);
+
+                ImGui.TableSetColumnIndex(1);
+                ImGui.Text(sub.Rank.ToString());
+
+                ImGui.TableSetColumnIndex(2);
+                var statusText = sub.Status switch
+                {
+                    XivMiniUtil.Models.Submarine.SubmarineStatus.Exploring => "探索中",
+                    XivMiniUtil.Models.Submarine.SubmarineStatus.Completed => "完了",
+                    _ => "不明"
+                };
+                
+                // 探索中でも時間が過ぎていれば完了扱い（メモリ上のステータス更新がまだの場合など）
+                // ただしStatusプロパティはメモリ読み取り時に判定されているはず
+                var now = DateTime.UtcNow;
+                if (sub.Status == XivMiniUtil.Models.Submarine.SubmarineStatus.Exploring && sub.ReturnTime <= now)
+                {
+                    statusText = "完了 (未更新)";
+                    ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f), statusText);
+                }
+                else if (sub.Status == XivMiniUtil.Models.Submarine.SubmarineStatus.Completed)
+                {
+                    ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f), statusText);
+                }
+                else
+                {
+                    ImGui.Text(statusText);
+                }
+
+                ImGui.TableSetColumnIndex(3);
+                if (sub.ReturnTime > DateTime.UnixEpoch.AddSeconds(1))
+                {
+                    var localTime = sub.ReturnTime.ToLocalTime();
+                    var timeStr = localTime.ToString("MM/dd HH:mm");
+                    var remaining = sub.ReturnTime - now;
+                    
+                    if (remaining.TotalSeconds > 0)
+                    {
+                        ImGui.Text($"{timeStr} (あと {FormatTimeSpan(remaining)})");
+                    }
+                    else
+                    {
+                        ImGui.Text(timeStr);
+                    }
+                }
+                else
+                {
+                    ImGui.Text("-");
+                }
+            }
+
+            ImGui.EndTable();
+        }
+    }
+
+    private string FormatTimeSpan(TimeSpan ts)
+    {
+        if (ts.TotalDays >= 1) return $"{ts.Days}日{ts.Hours}時間";
+        if (ts.TotalHours >= 1) return $"{ts.Hours}時間{ts.Minutes}分";
+        return $"{ts.Minutes}分";
+    }
 }

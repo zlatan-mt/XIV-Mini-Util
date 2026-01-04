@@ -35,6 +35,12 @@ public sealed class Configuration : IPluginConfiguration
     public List<uint> ShopSearchAreaPriority { get; set; } = new();
     public bool ShopDataVerboseLogging { get; set; } = false;
 
+    // 潜水艦探索管理設定
+    public bool SubmarineTrackerEnabled { get; set; } = true;
+    public string DiscordWebhookUrl { get; set; } = string.Empty;
+    public bool SubmarineNotificationEnabled { get; set; } = false;
+    public int NotificationRateLimitRetryMax { get; set; } = 3;
+
     private IDalamudPluginInterface? _pluginInterface;
 
     public void Initialize(IDalamudPluginInterface pluginInterface)
@@ -148,6 +154,10 @@ public sealed class Configuration : IPluginConfiguration
         ShopSearchAutoTeleportEnabled = source.ShopSearchAutoTeleportEnabled;
         ShopSearchAreaPriority = source.ShopSearchAreaPriority?.ToList() ?? DefaultShopSearchAreaPriority.ToList();
         ShopDataVerboseLogging = source.ShopDataVerboseLogging;
+        SubmarineTrackerEnabled = source.SubmarineTrackerEnabled;
+        DiscordWebhookUrl = source.DiscordWebhookUrl;
+        SubmarineNotificationEnabled = source.SubmarineNotificationEnabled;
+        NotificationRateLimitRetryMax = Math.Clamp(source.NotificationRateLimitRetryMax, 0, 10);
     }
 
     private Configuration BuildExportSnapshot()

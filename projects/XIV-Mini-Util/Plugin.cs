@@ -35,6 +35,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ShopSearchService _shopSearchService;
     private readonly ContextMenuService _contextMenuService;
     private readonly TeleportService _teleportService;
+    private readonly SubmarineDataStorage _submarineDataStorage;
+    private readonly DiscordService _discordService;
+    private readonly SubmarineService _submarineService;
     private readonly MainWindow _mainWindow;
     private readonly ShopSearchResultWindow _shopSearchResultWindow;
 
@@ -66,6 +69,17 @@ public sealed class Plugin : IDalamudPlugin
         var inventoryService = new InventoryService(clientState, dataManager, pluginLog);
         var jobService = new JobService(playerState, pluginLog);
         var gameUiService = new GameUiService(gameGui, pluginLog);
+
+        _submarineDataStorage = new SubmarineDataStorage(pluginInterface);
+        _discordService = new DiscordService(_configuration, pluginLog, chatGui);
+        _submarineService = new SubmarineService(
+            framework,
+            clientState,
+            playerState,
+            pluginLog,
+            _configuration,
+            _submarineDataStorage,
+            _discordService);
 
         _materiaService = new MateriaExtractService(
             framework,
@@ -106,6 +120,8 @@ public sealed class Plugin : IDalamudPlugin
             _desynthService,
             _shopDataCache,
             _shopSearchService,
+            _submarineDataStorage,
+            _discordService,
             MateriaFeatureEnabled,
             DesynthFeatureEnabled);
         _shopSearchResultWindow = new ShopSearchResultWindow(_mapService, _teleportService, _configuration);
@@ -148,6 +164,8 @@ public sealed class Plugin : IDalamudPlugin
         _materiaService.Dispose();
         _desynthService.Dispose();
         _contextMenuService.Dispose();
+        _submarineService.Dispose();
+        _discordService.Dispose();
         _shopSearchService.OnSearchCompleted -= OnShopSearchCompleted;
     }
 
