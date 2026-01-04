@@ -27,6 +27,9 @@ public sealed class ShopSearchResultWindow : Window, IDisposable
     private readonly Dictionary<int, AetheryteInfo?> _aetheryteInfoCache = new();
     private readonly Dictionary<int, bool> _aetheryteUnlockCache = new();
     private int _selectedIndex = -1;
+    private string _priceSummary = string.Empty;
+    private bool _priceSummaryDisabled;
+    private int _locationCount;
 
     public ShopSearchResultWindow(MapService mapService, TeleportService teleportService, Configuration configuration)
         : base("販売場所検索")
@@ -46,6 +49,8 @@ public sealed class ShopSearchResultWindow : Window, IDisposable
     {
         _result = result;
         _displayLocations = result.Locations.Take(MaxDisplayResults).ToList();
+        _locationCount = result.Locations.Count;
+        _priceSummary = BuildPriceSummary(result.Locations, out _priceSummaryDisabled);
         _aetheryteInfoCache.Clear();
         _aetheryteUnlockCache.Clear();
         _selectedIndex = -1;
@@ -85,33 +90,46 @@ public sealed class ShopSearchResultWindow : Window, IDisposable
     {
         ImGui.Text($"アイテム: {result.ItemName}");
 
-        // 価格情報を集計
-        var prices = result.Locations
+        ImGui.SameLine();
+        if (_priceSummaryDisabled)
+        {
+            ImGui.TextDisabled(_priceSummary);
+        }
+        else
+        {
+            ImGui.Text(_priceSummary);
+        }
+
+        ImGui.Text($"販売店舗: {_locationCount}件");
+        if (_locationCount > MaxDisplayResults)
+        {
+            ImGui.TextDisabled($"表示: 上位{MaxDisplayResults}件のみ");
+        }
+    }
+
+    private static string BuildPriceSummary(IReadOnlyList<ShopLocationInfo> locations, out bool isDisabled)
+    {
+        var prices = locations
             .Where(l => l.Price > 0)
             .Select(l => l.Price)
             .Distinct()
             .OrderBy(p => p)
             .ToList();
 
-        ImGui.SameLine();
         if (prices.Count == 0)
         {
-            ImGui.TextDisabled("(価格情報なし)");
-        }
-        else if (prices.Count == 1)
-        {
-            ImGui.Text($"  価格: {prices[0]:N0} ギル");
-        }
-        else
-        {
-            ImGui.Text($"  価格: {prices[0]:N0} ~ {prices[^1]:N0} ギル");
+            isDisabled = true;
+            return "(価格情報なし)";
         }
 
-        ImGui.Text($"販売店舗: {result.Locations.Count}件");
-        if (result.Locations.Count > MaxDisplayResults)
+        if (prices.Count == 1)
         {
-            ImGui.TextDisabled($"表示: 上位{MaxDisplayResults}件のみ");
+            isDisabled = false;
+            return $"  価格: {prices[0]:N0} ギル";
         }
+
+        isDisabled = false;
+        return $"  価格: {prices[0]:N0} ~ {prices[^1]:N0} ギル";
     }
 
     public void Dispose()

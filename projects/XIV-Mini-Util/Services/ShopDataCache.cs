@@ -5,6 +5,7 @@
 using Dalamud.Plugin.Services;
 using Lumina.Excel;
 using Lumina.Excel.Sheets;
+using System.Threading;
 using XivMiniUtil;
 
 namespace XivMiniUtil.Services;
@@ -24,18 +25,28 @@ public sealed class ShopDataCache
     private readonly NpcShopInfoRegistry _npcShopInfoRegistry;
     private readonly ItemNameResolver _itemNameResolver;
     private readonly NpcShopMappingBuilder _npcShopMappingBuilder;
+    private readonly object _buildLock = new();
     private readonly Dictionary<uint, List<ShopLocationInfo>> _itemToLocations = new();
     private readonly Dictionary<uint, string> _itemNames = new();
     private readonly Dictionary<uint, string> _territoryNames = new();
     private readonly Dictionary<byte, uint> _stainToItemId = new();
     private readonly HashSet<byte> _loggedStainDiagnostics = new();
+    private readonly List<ShopTerritoryGroup> _territoryGroups = new();
     private HashSet<uint>? _stainItemIds;
+    private ExcelSheet<Item>? _itemSheet;
+    private ExcelSheet<TerritoryType>? _territorySheet;
+    private ExcelSheet<Stain>? _stainSheet;
 
     private Dictionary<uint, List<NpcShopInfo>> _gilShopNpcInfos = new();
     private Dictionary<uint, List<NpcShopInfo>> _specialShopNpcInfos = new();
 
     private Task? _initializeTask;
+    private CancellationTokenSource? _buildCts;
     private bool _isInitialized;
+    private bool _territoryGroupsDirty = true;
+    private int _buildGeneration;
+    private ShopCacheBuildStatus _buildStatus = ShopCacheBuildStatus.Idle;
+    private const int ProgressUpdateInterval = 500;
 
     public ShopDataCache(
         IDataManager dataManager,
@@ -65,11 +76,25 @@ public sealed class ShopDataCache
 
     public bool IsInitialized => _isInitialized;
     private bool IsVerboseLogging => _configuration.ShopDataVerboseLogging;
+    internal ShopCacheBuildStatus BuildStatus => _buildStatus;
+    internal int BuildVersion => _buildGeneration;
 
     public Task InitializeAsync()
     {
-        _initializeTask ??= Task.Run(BuildCacheSafeAsync);
-        return _initializeTask;
+        return StartBuildAsync(false, "初期化");
+    }
+
+    public Task RebuildAsync(string reason)
+    {
+        return StartBuildAsync(true, reason);
+    }
+
+    public void CancelBuild()
+    {
+        lock (_buildLock)
+        {
+            _buildCts?.Cancel();
+        }
     }
 
     public bool HasShopData(uint itemId)
@@ -120,7 +145,7 @@ public sealed class ShopDataCache
         }
 
         uint itemId = 0;
-        var stainSheet = _dataManager.GetExcelSheet<Stain>();
+        var stainSheet = _stainSheet ??= _dataManager.GetExcelSheet<Stain>();
         if (stainSheet != null)
         {
             var stainRow = stainSheet.GetRow(stainId);
@@ -203,7 +228,7 @@ public sealed class ShopDataCache
             return cached;
         }
 
-        var territorySheet = _dataManager.GetExcelSheet<TerritoryType>();
+        var territorySheet = _territorySheet ??= _dataManager.GetExcelSheet<TerritoryType>();
         if (territorySheet == null)
         {
             return string.Empty;
@@ -239,32 +264,14 @@ public sealed class ShopDataCache
             return Array.Empty<ShopTerritoryGroup>();
         }
 
-        var ids = new HashSet<uint>();
-        CollectTerritoryIds(_gilShopNpcInfos, ids);
-        CollectTerritoryIds(_specialShopNpcInfos, ids);
+        if (_territoryGroupsDirty)
+        {
+            _territoryGroups.Clear();
+            _territoryGroups.AddRange(BuildTerritoryGroups());
+            _territoryGroupsDirty = false;
+        }
 
-        // 同名エリアは代表IDにまとめる（最小IDで固定）
-        return ids
-            .Select(id =>
-            {
-                var name = GetTerritoryName(id);
-                return new { Id = id, Name = name };
-            })
-            .Where(entry => !string.IsNullOrWhiteSpace(entry.Name))
-            .GroupBy(entry => entry.Name, StringComparer.Ordinal)
-            .Select(group =>
-            {
-                var territoryIds = group
-                    .Select(entry => entry.Id)
-                    .OrderBy(id => id)
-                    .ToList();
-                return new ShopTerritoryGroup(
-                    group.Key,
-                    territoryIds[0],
-                    territoryIds);
-            })
-            .OrderBy(group => group.TerritoryName, StringComparer.Ordinal)
-            .ToList();
+        return _territoryGroups;
     }
 
     /// <summary>
@@ -389,7 +396,7 @@ public sealed class ShopDataCache
             return string.Empty;
         }
 
-        var itemSheet = _dataManager.GetExcelSheet<Item>();
+        var itemSheet = _itemSheet ??= _dataManager.GetExcelSheet<Item>();
         if (itemSheet == null)
         {
             return string.Empty;
@@ -406,7 +413,7 @@ public sealed class ShopDataCache
         }
 
         _stainItemIds = new HashSet<uint>();
-        var stainSheet = _dataManager.GetExcelSheet<Stain>();
+        var stainSheet = _stainSheet ??= _dataManager.GetExcelSheet<Stain>();
         if (stainSheet == null)
         {
             return;
@@ -539,20 +546,59 @@ public sealed class ShopDataCache
             ShopLocationValidator.IsValid);
     }
 
-    private async Task BuildCacheSafeAsync()
+    private Task StartBuildAsync(bool rebuild, string reason)
+    {
+        lock (_buildLock)
+        {
+            if (!rebuild && _initializeTask != null)
+            {
+                return _initializeTask;
+            }
+
+            _buildCts?.Cancel();
+            _buildCts?.Dispose();
+            _buildCts = new CancellationTokenSource();
+
+            var generation = ++_buildGeneration;
+            var token = _buildCts.Token;
+            _initializeTask = Task.Run(() => BuildCacheSafeAsync(generation, token, reason), token);
+            return _initializeTask;
+        }
+    }
+
+    private async Task BuildCacheSafeAsync(int generation, CancellationToken cancellationToken, string reason)
     {
         try
         {
-            await BuildCacheAsync();
+            UpdateBuildStatus(ShopCacheBuildState.Running, "Start", $"ショップデータ構築開始({reason})...");
+            ResetCaches();
+            await BuildCacheAsync(cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                UpdateBuildStatus(ShopCacheBuildState.Canceled, "Canceled", "ショップデータ構築をキャンセルしました。");
+                return;
+            }
+
+            if (generation != _buildGeneration)
+            {
+                return;
+            }
+
             _isInitialized = true;
+            UpdateBuildStatus(ShopCacheBuildState.Completed, "Complete", "ショップデータ構築完了");
+        }
+        catch (OperationCanceledException)
+        {
+            UpdateBuildStatus(ShopCacheBuildState.Canceled, "Canceled", "ショップデータ構築をキャンセルしました。");
         }
         catch (Exception ex)
         {
             _pluginLog.Error(ex, "ショップデータの初期化に失敗しました。");
+            UpdateBuildStatus(ShopCacheBuildState.Failed, "Failed", "ショップデータの初期化に失敗しました。");
         }
     }
 
-    private Task BuildCacheAsync()
+    private Task BuildCacheAsync(CancellationToken cancellationToken)
     {
         LogBuildPhase("Start", "ショップデータ構築開始...");
 
@@ -561,22 +607,28 @@ public sealed class ShopDataCache
             return Task.CompletedTask;
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _itemSheet = sheets.ItemSheet;
+        _territorySheet = sheets.TerritorySheet;
+        _stainSheet = _dataManager.GetExcelSheet<Stain>();
         var questSheet = _dataManager.GetExcelSheet<Quest>();
 
         LogBuildPhase("NpcMapping", "NPC-Shop マッピング構築開始...");
 
-        var mappings = BuildNpcMappings(sheets);
+        var mappings = BuildNpcMappings(sheets, cancellationToken);
         _gilShopNpcInfos = mappings.GilShopInfos;
         _specialShopNpcInfos = mappings.SpecialShopInfos;
 
         LogBuildPhase("NpcMapping", $"NPC-Shop マッピング構築完了: GilShop={_gilShopNpcInfos.Count}件, SpecialShop={_specialShopNpcInfos.Count}件");
 
         CacheTerritoryNames(sheets.TerritorySheet);
+        _territoryGroupsDirty = true;
 
-        var stats = ProcessGilShopItems(sheets.ItemSheet, _gilShopNpcInfos, questSheet);
+        var stats = ProcessGilShopItems(sheets.ItemSheet, _gilShopNpcInfos, questSheet, cancellationToken);
 
         // Step 3: SpecialShop → Item の関係を構築し、逆引きインデックスに追加
-        var specialShopAdded = ProcessSpecialShops(sheets.ItemSheet, _specialShopNpcInfos);
+        var specialShopAdded = ProcessSpecialShops(sheets.ItemSheet, _specialShopNpcInfos, cancellationToken);
         stats.AddProcessed(specialShopAdded);
 
         var emptyItems = RemoveEmptyItemLocations();
@@ -585,7 +637,9 @@ public sealed class ShopDataCache
         return Task.CompletedTask;
     }
 
-    private (Dictionary<uint, List<NpcShopInfo>> GilShopInfos, Dictionary<uint, List<NpcShopInfo>> SpecialShopInfos) BuildNpcMappings(ShopDataSheets sheets)
+    private (Dictionary<uint, List<NpcShopInfo>> GilShopInfos, Dictionary<uint, List<NpcShopInfo>> SpecialShopInfos) BuildNpcMappings(
+        ShopDataSheets sheets,
+        CancellationToken cancellationToken)
     {
         // Step 1: ENpcBaseを走査してNPC → Shop（GilShop + SpecialShop）のマッピングを構築
         return _npcShopMappingBuilder.Build(
@@ -595,13 +649,15 @@ public sealed class ShopDataCache
             sheets.SpecialShopSheet,
             sheets.LevelSheet,
             sheets.TerritorySheet,
-            sheets.MapSheet);
+            sheets.MapSheet,
+            cancellationToken);
     }
 
     private GilShopProcessStats ProcessGilShopItems(
         ExcelSheet<Item> itemSheet,
         Dictionary<uint, List<NpcShopInfo>> npcShopInfos,
-        ExcelSheet<Quest>? questSheet)
+        ExcelSheet<Quest>? questSheet,
+        CancellationToken cancellationToken)
     {
         var stats = new GilShopProcessStats();
 
@@ -619,6 +675,7 @@ public sealed class ShopDataCache
         var loggedFirstItem = false;
         foreach (var subrowCollection in gilShopItemSheet)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var shopId = subrowCollection.RowId;
 
             // 最初のショップの情報をログ出力
@@ -630,7 +687,17 @@ public sealed class ShopDataCache
 
             foreach (var shopItem in subrowCollection)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 stats.IncrementTotal();
+                if (stats.TotalShopItems % ProgressUpdateInterval == 0)
+                {
+                    UpdateBuildStatus(
+                        ShopCacheBuildState.Running,
+                        "GilShop",
+                        $"GilShopItem走査中... {stats.TotalShopItems}件",
+                        stats.TotalShopItems,
+                        0);
+                }
 
                 // 最初のアイテムの型情報をログ出力
                 if (IsVerboseLogging)
@@ -703,7 +770,8 @@ public sealed class ShopDataCache
 
     private int ProcessSpecialShops(
         ExcelSheet<Item> itemSheet,
-        Dictionary<uint, List<NpcShopInfo>> npcSpecialShopInfos)
+        Dictionary<uint, List<NpcShopInfo>> npcSpecialShopInfos,
+        CancellationToken cancellationToken)
     {
         var specialShopSheet = _dataManager.GetExcelSheet<SpecialShop>();
         if (specialShopSheet == null)
@@ -719,6 +787,7 @@ public sealed class ShopDataCache
 
         foreach (var shop in specialShopSheet)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ProcessSpecialShop(
                 shop,
                 itemSheet,
@@ -727,6 +796,16 @@ public sealed class ShopDataCache
                 ref specialShopItems,
                 ref specialShopSkipped,
                 ref loggedFirst);
+
+            if (processedItems > 0 && processedItems % ProgressUpdateInterval == 0)
+            {
+                UpdateBuildStatus(
+                    ShopCacheBuildState.Running,
+                    "SpecialShop",
+                    $"SpecialShop走査中... {processedItems}件",
+                    processedItems,
+                    0);
+            }
         }
 
         LogBuildPhase("SpecialShop", $"SpecialShop走査完了: 追加={specialShopItems}件, スキップ={specialShopSkipped}件");
@@ -920,6 +999,7 @@ public sealed class ShopDataCache
     private void LogBuildPhase(string phase, string message)
     {
         _pluginLog.Information($"[ShopCache:{phase}] {message}");
+        UpdateBuildStatus(ShopCacheBuildState.Running, phase, message);
     }
 
     private void LogVerbose(string message)
@@ -930,6 +1010,61 @@ public sealed class ShopDataCache
         }
 
         _pluginLog.Information(message);
+    }
+
+    private IReadOnlyList<ShopTerritoryGroup> BuildTerritoryGroups()
+    {
+        var ids = new HashSet<uint>();
+        CollectTerritoryIds(_gilShopNpcInfos, ids);
+        CollectTerritoryIds(_specialShopNpcInfos, ids);
+
+        // 同名エリアは代表IDにまとめる（最小IDで固定）
+        return ids
+            .Select(id =>
+            {
+                var name = GetTerritoryName(id);
+                return new { Id = id, Name = name };
+            })
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Name))
+            .GroupBy(entry => entry.Name, StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var territoryIds = group
+                    .Select(entry => entry.Id)
+                    .OrderBy(id => id)
+                    .ToList();
+                return new ShopTerritoryGroup(
+                    group.Key,
+                    territoryIds[0],
+                    territoryIds);
+            })
+            .OrderBy(group => group.TerritoryName, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private void ResetCaches()
+    {
+        _isInitialized = false;
+        _itemToLocations.Clear();
+        _itemNames.Clear();
+        _territoryNames.Clear();
+        _stainToItemId.Clear();
+        _loggedStainDiagnostics.Clear();
+        _stainItemIds = null;
+        _gilShopNpcInfos = new Dictionary<uint, List<NpcShopInfo>>();
+        _specialShopNpcInfos = new Dictionary<uint, List<NpcShopInfo>>();
+        _itemSheet = null;
+        _territorySheet = null;
+        _stainSheet = null;
+        _territoryGroupsDirty = true;
+        _territoryGroups.Clear();
+        _nameIndex.Reset();
+        _diagnostics.Reset();
+    }
+
+    private void UpdateBuildStatus(ShopCacheBuildState state, string phase, string message, int processed = 0, int total = 0)
+    {
+        _buildStatus = new ShopCacheBuildStatus(state, phase, message, processed, total);
     }
 
 }

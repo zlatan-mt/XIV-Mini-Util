@@ -7,6 +7,7 @@ using Lumina.Excel;
 using Lumina.Excel.Sheets;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 namespace XivMiniUtil.Services;
 
@@ -44,7 +45,8 @@ internal sealed class NpcShopMappingBuilder
         ExcelSheet<SpecialShop> specialShopSheet,
         ExcelSheet<Level> levelSheet,
         ExcelSheet<TerritoryType> territorySheet,
-        ExcelSheet<Map> mapSheet)
+        ExcelSheet<Map> mapSheet,
+        CancellationToken cancellationToken)
     {
         var gilShopResult = new Dictionary<uint, List<NpcShopInfo>>();
         var specialShopResult = new Dictionary<uint, List<NpcShopInfo>>();
@@ -62,6 +64,7 @@ internal sealed class NpcShopMappingBuilder
         var gilShopNames = new Dictionary<uint, string>();
         foreach (var shop in gilShopSheet)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (shop.RowId != 0)
             {
                 gilShopIds.Add(shop.RowId);
@@ -82,6 +85,7 @@ internal sealed class NpcShopMappingBuilder
         var specialShopIds = new HashSet<uint>();
         foreach (var shop in specialShopSheet)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (shop.RowId != 0)
             {
                 specialShopIds.Add(shop.RowId);
@@ -103,6 +107,7 @@ internal sealed class NpcShopMappingBuilder
 
         foreach (var npcBase in npcBaseSheet)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             scannedNpcCount++;
 
             if (npcBase.RowId == 0)

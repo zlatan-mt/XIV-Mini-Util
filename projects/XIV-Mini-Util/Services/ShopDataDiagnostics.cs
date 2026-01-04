@@ -42,6 +42,13 @@ internal sealed class ShopDataDiagnostics
 
     public int UnmatchedShopCount => _unmatchedShopItems.Count;
 
+    public void Reset()
+    {
+        _excludedNpcs.Clear();
+        _unmatchedShopItems.Clear();
+        _loggedMissingItems.Clear();
+    }
+
     public void RecordExcludedNpc(NpcShopInfo npcInfo)
     {
         if (!_excludedNpcs.Any(e => e.NpcId == npcInfo.NpcId && e.ShopId == npcInfo.ShopId))

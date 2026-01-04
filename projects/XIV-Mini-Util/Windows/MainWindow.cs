@@ -34,6 +34,10 @@ public sealed class MainWindow : Window, IDisposable
     private bool _selectSettingsTab;
     private int _settingsCategoryIndex;
     private string _shopAreaFilter = string.Empty;
+    private string _cachedShopAreaFilter = string.Empty;
+    private int _cachedPriorityHash;
+    private int _cachedTerritoryGroupsVersion = -1;
+    private List<ShopTerritoryGroup> _cachedFilteredTerritories = new();
     private string _importBase64 = string.Empty;
     private bool _showImportConfirm;
     private Configuration? _pendingImportConfig;
@@ -421,6 +425,8 @@ public sealed class MainWindow : Window, IDisposable
             ImGui.Text("ショップデータを準備中です。");
         }
 
+        DrawShopDataCacheStatus();
+
         var echoEnabled = _configuration.ShopSearchEchoEnabled;
         if (ImGui.Checkbox("チャットに検索結果を表示", ref echoEnabled))
         {
@@ -463,6 +469,49 @@ public sealed class MainWindow : Window, IDisposable
         {
             ImGui.EndDisabled();
         }
+    }
+
+    private void DrawShopDataCacheStatus()
+    {
+        var status = _shopDataCache.BuildStatus;
+        if (status.State == ShopCacheBuildState.Running)
+        {
+            ImGui.Text($"構築中: {status.Phase}");
+            if (!string.IsNullOrWhiteSpace(status.Message))
+            {
+                ImGui.TextDisabled(status.Message);
+            }
+
+            if (status.Processed > 0)
+            {
+                ImGui.TextDisabled($"処理件数: {status.Processed:N0}");
+            }
+
+            if (ImGui.Button("構築をキャンセル"))
+            {
+                _shopDataCache.CancelBuild();
+            }
+        }
+        else
+        {
+            if (ImGui.Button("ショップデータを再構築"))
+            {
+                _ = _shopDataCache.RebuildAsync("手動再構築");
+            }
+
+            if (status.State == ShopCacheBuildState.Canceled)
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled("構築はキャンセルされました。");
+            }
+            else if (status.State == ShopCacheBuildState.Failed)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "構築に失敗しました。");
+            }
+        }
+
+        ImGui.Separator();
     }
 
     private void DrawShopSearchPriorityList()
@@ -536,22 +585,16 @@ public sealed class MainWindow : Window, IDisposable
         ImGui.InputTextWithHint("##ShopAreaFilter", "エリア名で検索", ref _shopAreaFilter, 64);
 
         var priorities = _configuration.ShopSearchAreaPriority;
-        var priorityNames = BuildPriorityTerritoryNames(priorities);
-        var groups = _shopDataCache.GetShopTerritoryGroups();
-        var filtered = groups
-            .Where(group => !priorityNames.Contains(group.TerritoryName))
-            .Where(group => string.IsNullOrWhiteSpace(_shopAreaFilter)
-                || group.TerritoryName.Contains(_shopAreaFilter, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        UpdateFilteredTerritories(priorities);
 
         if (ImGui.BeginCombo("エリア追加", "追加するエリアを選択"))
         {
-            if (filtered.Count == 0)
+            if (_cachedFilteredTerritories.Count == 0)
             {
                 ImGui.Text("候補がありません。");
             }
 
-            foreach (var group in filtered)
+            foreach (var group in _cachedFilteredTerritories)
             {
                 if (ImGui.Selectable(group.TerritoryName))
                 {
@@ -567,6 +610,41 @@ public sealed class MainWindow : Window, IDisposable
 
             ImGui.EndCombo();
         }
+    }
+
+    private void UpdateFilteredTerritories(IReadOnlyList<uint> priorities)
+    {
+        var priorityHash = ComputePriorityHash(priorities);
+        var cacheVersion = _shopDataCache.BuildVersion;
+
+        if (_cachedShopAreaFilter == _shopAreaFilter
+            && _cachedPriorityHash == priorityHash
+            && _cachedTerritoryGroupsVersion == cacheVersion)
+        {
+            return;
+        }
+
+        var priorityNames = BuildPriorityTerritoryNames(priorities);
+        var groups = _shopDataCache.GetShopTerritoryGroups();
+        _cachedFilteredTerritories = groups
+            .Where(group => !priorityNames.Contains(group.TerritoryName))
+            .Where(group => string.IsNullOrWhiteSpace(_shopAreaFilter)
+                || group.TerritoryName.Contains(_shopAreaFilter, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        _cachedShopAreaFilter = _shopAreaFilter;
+        _cachedPriorityHash = priorityHash;
+        _cachedTerritoryGroupsVersion = cacheVersion;
+    }
+
+    private static int ComputePriorityHash(IReadOnlyList<uint> priorities)
+    {
+        var hash = new HashCode();
+        foreach (var priority in priorities)
+        {
+            hash.Add(priority);
+        }
+        return hash.ToHashCode();
     }
 
     private void DrawConfigIoSection()

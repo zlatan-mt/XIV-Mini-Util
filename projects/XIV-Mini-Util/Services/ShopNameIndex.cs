@@ -39,6 +39,14 @@ internal sealed class ShopNameIndex
         return _itemNameNormalizedToId.TryGetValue(normalized, out var normalizedId) ? normalizedId : 0;
     }
 
+    public void Reset()
+    {
+        _itemNameToId.Clear();
+        _itemNameNormalizedToId.Clear();
+        _stainNameToItemId.Clear();
+        _stainNameNormalizedToItemId.Clear();
+    }
+
     public uint GetItemIdFromStainName(string stainName)
     {
         if (string.IsNullOrWhiteSpace(stainName))
