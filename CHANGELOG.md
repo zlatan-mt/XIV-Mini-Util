@@ -4,6 +4,12 @@
 <!-- RELEVANT FILES: projects/XIV-Mini-Util/XivMiniUtil.csproj, README.md -->
 # Changelog
 
+## 0.2.0 - 2026-01-04
+
+- ショップデータの再構築と進捗表示を追加
+- ショップ検索のUI負荷を軽減（価格集計の事前化）
+- シート参照と候補リストのキャッシュ最適化
+
 ## 0.1.0 - 2026-01-02
 
 - マテリア精製の自動実行とオン・オフ
