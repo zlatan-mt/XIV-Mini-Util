@@ -32,13 +32,20 @@ public sealed class Configuration : IPluginConfiguration
     public bool ShopSearchEchoEnabled { get; set; } = true;
     public bool ShopSearchWindowEnabled { get; set; } = true;
     public bool ShopSearchAutoTeleportEnabled { get; set; } = false;
-    public List<uint> ShopSearchAreaPriority { get; set; } = DefaultShopSearchAreaPriority.ToList();
+    public List<uint> ShopSearchAreaPriority { get; set; } = new();
 
     private IDalamudPluginInterface? _pluginInterface;
 
     public void Initialize(IDalamudPluginInterface pluginInterface)
     {
         _pluginInterface = pluginInterface;
+
+        // JSONデシリアライズ後、リストが空の場合のみデフォルト値を設定
+        // (Newtonsoft.Jsonは既存リストに追加するため、初期化子での設定は避ける)
+        if (ShopSearchAreaPriority.Count == 0)
+        {
+            ShopSearchAreaPriority = DefaultShopSearchAreaPriority.ToList();
+        }
     }
 
     public static IReadOnlyList<uint> DefaultShopSearchAreaPriority => new List<uint>

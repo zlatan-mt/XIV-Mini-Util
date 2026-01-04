@@ -724,7 +724,7 @@ public sealed class MainWindow : Window, IDisposable
 
     private void DrawSearchTab()
     {
-        ImGui.Text("アイテム名/ショップ名で販売場所を検索");
+        ImGui.Text("アイテム名で販売場所を検索");
         ImGui.Separator();
 
         if (!_shopDataCache.IsInitialized)
@@ -733,7 +733,7 @@ public sealed class MainWindow : Window, IDisposable
             return;
         }
 
-        var enterPressed = ImGui.InputTextWithHint("##ItemNameSearch", "アイテム名 / ショップ名を入力...", ref _searchQuery, 100, ImGuiInputTextFlags.EnterReturnsTrue);
+        var enterPressed = ImGui.InputTextWithHint("##ItemNameSearch", "アイテム名を入力...", ref _searchQuery, 100, ImGuiInputTextFlags.EnterReturnsTrue);
         ImGui.SameLine();
 
         if ((ImGui.Button("検索") || enterPressed) && !string.IsNullOrWhiteSpace(_searchQuery))
