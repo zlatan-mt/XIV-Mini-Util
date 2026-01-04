@@ -6,7 +6,12 @@ using Dalamud.Game.Command;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Interface.Windowing;
-using XivMiniUtil.Services;
+using XivMiniUtil.Services.Common;
+using XivMiniUtil.Services.Desynth;
+using XivMiniUtil.Services.Materia;
+using XivMiniUtil.Services.Notification;
+using XivMiniUtil.Services.Shop;
+using XivMiniUtil.Services.Submarine;
 using XivMiniUtil.Windows;
 
 namespace XivMiniUtil;
@@ -48,6 +53,7 @@ public sealed class Plugin : IDalamudPlugin
         ICommandManager commandManager,
         IFramework framework,
         IClientState clientState,
+        IObjectTable objectTable,
         IPlayerState playerState,
         IGameGui gameGui,
         ICondition condition,
@@ -75,6 +81,7 @@ public sealed class Plugin : IDalamudPlugin
         _submarineService = new SubmarineService(
             framework,
             clientState,
+            objectTable,
             playerState,
             pluginLog,
             _configuration,

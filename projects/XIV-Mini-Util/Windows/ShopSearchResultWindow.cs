@@ -1,7 +1,7 @@
 // Path: projects/XIV-Mini-Util/Windows/ShopSearchResultWindow.cs
 // Description: 販売場所検索の詳細リストを表示する
 // Reason: 複数件ある場合にユーザーが比較できるようにするため
-// RELEVANT FILES: projects/XIV-Mini-Util/Services/ShopSearchService.cs, projects/XIV-Mini-Util/Services/MapService.cs, projects/XIV-Mini-Util/Models/DomainModels.cs
+// RELEVANT FILES: projects/XIV-Mini-Util/Services/Shop/ShopSearchService.cs, projects/XIV-Mini-Util/Services/Common/MapService.cs, projects/XIV-Mini-Util/Models/Shop/SearchResult.cs
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using System.Numerics;
@@ -10,7 +10,7 @@ using ImGuiSelectableFlags = Dalamud.Bindings.ImGui.ImGuiSelectableFlags;
 using ImGuiTableFlags = Dalamud.Bindings.ImGui.ImGuiTableFlags;
 using ImGuiTableColumnFlags = Dalamud.Bindings.ImGui.ImGuiTableColumnFlags;
 using XivMiniUtil;
-using XivMiniUtil.Services;
+using XivMiniUtil.Services.Common;
 
 namespace XivMiniUtil.Windows;
 
