@@ -71,6 +71,7 @@ _ReSharper*/
 
 # AI tools
 .claude/
+.claude/settings.local.json
 .codex/
 .cursor/
 AGENTS.md
