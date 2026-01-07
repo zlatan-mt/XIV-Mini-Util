@@ -111,6 +111,14 @@ public class SubmarineDataStorage
         }
     }
 
+    public CharacterSubmarines? Get(ulong contentId)
+    {
+        lock (_lock)
+        {
+            return _cache.TryGetValue(contentId, out var charInfo) ? charInfo : null;
+        }
+    }
+
     public void CheckAndSaveIfNeeded()
     {
         if (!_isDirty) return;

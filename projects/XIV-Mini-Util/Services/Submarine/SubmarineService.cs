@@ -21,6 +21,9 @@ public sealed unsafe class SubmarineService : IDisposable
     private DateTime _lastPollTime = DateTime.MinValue;
     private const double PollIntervalSeconds = 5.0;
 
+    // 初回ロード済みキャラクターを追跡（ログイン時の誤通知防止）
+    private readonly HashSet<ulong> _processedInitialLoad = new();
+
     public SubmarineService(
         IFramework framework,
         IClientState clientState,
@@ -59,14 +62,29 @@ public sealed unsafe class SubmarineService : IDisposable
         _lastPollTime = now;
 
         // 3. メモリ読み取り
-        TryReadSubmarineData(now);
+        var data = TryReadSubmarineData(now);
+        if (data == null) return;
 
-        // 4. 通知チェック
-        CheckNotifications(now);
+        var (cid, characterName, world, currentSubs) = data.Value;
+
+        // 4. 出航通知チェック（エラーハンドリング付き）
+        try
+        {
+            CheckAndNotifyDispatch(cid, characterName, world, currentSubs);
+        }
+        catch (Exception ex)
+        {
+            _pluginLog.Error(ex, "Failed to check/notify dispatch.");
+        }
+
+        // 5. ストレージ更新（通知チェック後に実行）
+        _storage.Update(cid, characterName, currentSubs);
     }
 
     private void OnLogout(int type, int code)
     {
+        // キャラクター切り替え時に初回ロードフラグをクリア
+        _processedInitialLoad.Clear();
         _storage.Save();
     }
 
@@ -75,33 +93,42 @@ public sealed unsafe class SubmarineService : IDisposable
         _storage.Save();
     }
 
-    private void TryReadSubmarineData(DateTime nowUtc)
+    /// <summary>
+    /// 潜水艦データをメモリから読み取る
+    /// </summary>
+    /// <returns>読み取り成功時: (ContentId, CharacterName, World, Submarines), 失敗時: null</returns>
+    private (ulong ContentId, string CharacterName, string World, List<SubmarineData> Submarines)? TryReadSubmarineData(DateTime nowUtc)
     {
         // ログインチェック
-        if (!_clientState.IsLoggedIn || _objectTable.LocalPlayer == null) return;
-        
+        var player = _objectTable.LocalPlayer;
+        if (!_clientState.IsLoggedIn || player == null) return null;
+
         var housingManager = HousingManager.Instance();
-        if (housingManager == null) return;
+        if (housingManager == null) return null;
 
         var workshopTerritory = housingManager->WorkshopTerritory;
-        if (workshopTerritory == null) return;
+        if (workshopTerritory == null) return null;
 
         // 潜水艦データへのポインタ (HousingWorkshopSubmersibleData)
         var submersible = &workshopTerritory->Submersible;
-        
+
         // _data は internal なのでポインタキャストでアクセス
         // HousingWorkshopSubmersibleData の先頭 (Offset 0) が _data (FixedSizeArray4<HousingWorkshopSubmersibleSubData>)
         var subDataPtr = (HousingWorkshopSubmersibleSubData*)submersible;
 
         var cid = _playerState.ContentId;
-        var characterName = _objectTable.LocalPlayer!.Name.TextValue;
+        var characterName = player.Name.TextValue;
+        var world = player.HomeWorld.Value.Name.ToString();
         var submarines = new List<SubmarineData>();
+
+        // 既存データを取得（LastNotifiedReturnTime引き継ぎ用）
+        var existingData = _storage.Get(cid);
 
         for (int i = 0; i < 4; i++)
         {
             // ポインタ演算でi番目の要素にアクセス
-            var subData = subDataPtr[i]; 
-            
+            var subData = subDataPtr[i];
+
             // ランク0は未登録とみなす
             if (subData.RankId == 0) continue;
 
@@ -109,7 +136,7 @@ public sealed unsafe class SubmarineService : IDisposable
             // _name は internal (Offset 0x22, FixedSizeArray20<byte>)
             // subDataのアドレス + 0x22
             var namePtr = (byte*)&subData + 0x22;
-            
+
             var nameBytes = new byte[20];
             for (int j = 0; j < 20; j++)
             {
@@ -130,8 +157,6 @@ public sealed unsafe class SubmarineService : IDisposable
             {
                 status = SubmarineStatus.Completed; // or idle?
                 // 帰還時間が0の場合は、未出港か完了後回収済み
-                // RegisterTimeが有効なら回収済み待機中かもしれないが、
-                // ここでは単純にReturnTimeのみで判断
             }
             else if (nowUtc < returnTime)
             {
@@ -152,10 +177,7 @@ public sealed unsafe class SubmarineService : IDisposable
             };
 
             // 既存データから LastNotifiedReturnTime を引き継ぐ
-            var existing = _storage.GetAll().TryGetValue(cid, out var existingChar) 
-                ? existingChar.Submarines.FirstOrDefault(s => s.Name == name) 
-                : null;
-            
+            var existing = existingData?.Submarines.FirstOrDefault(s => s.Name == name);
             if (existing != null)
             {
                 submarine.LastNotifiedReturnTime = existing.LastNotifiedReturnTime;
@@ -164,54 +186,39 @@ public sealed unsafe class SubmarineService : IDisposable
             submarines.Add(submarine);
         }
 
-        // 0隻でもリスト更新（空リストとして保存され、ハウス入室済みフラグ代わりになる）
-        _storage.Update(cid, characterName, submarines);
+        return (cid, characterName, world, submarines);
     }
 
-    private void CheckNotifications(DateTime nowUtc)
+    /// <summary>
+    /// 全艦出航時の通知をチェック・送信する
+    /// </summary>
+    private void CheckAndNotifyDispatch(ulong cid, string characterName, string world, List<SubmarineData> currentSubs)
     {
         if (!_configuration.SubmarineNotificationEnabled) return;
 
-        var allData = _storage.GetAll();
-        foreach (var kvp in allData)
+        // 1. 初回ロードチェック（ログイン直後の誤通知防止）
+        if (!_processedInitialLoad.Contains(cid))
         {
-            var cid = kvp.Key;
-            var charInfo = kvp.Value;
-            var characterName = charInfo.CharacterName;
-            
-            var notifiedSubmarines = new List<string>();
-            bool needsSave = false;
+            _processedInitialLoad.Add(cid);
+            _pluginLog.Debug($"[Submarine] Initial load for CID {cid}, skipping notification check.");
+            return;
+        }
 
-            foreach (var sub in charInfo.Submarines)
-            {
-                // 帰還済み かつ まだ通知していない
-                // ReturnTimeが有効(UnixEpoch+1以上)であること
-                if (sub.ReturnTime > DateTime.UnixEpoch.AddSeconds(1) &&
-                    sub.ReturnTime <= nowUtc &&
-                    sub.LastNotifiedReturnTime != sub.ReturnTime)
-                {
-                    notifiedSubmarines.Add(sub.Name);
-                    sub.LastNotifiedReturnTime = sub.ReturnTime;
-                    needsSave = true;
-                    
-                    // ストレージ内のオブジェクトを更新（参照渡しなら不要だが念のためUpdateSubmarineを呼ぶか、
-                    // ここではメモリ上のオブジェクトを書き換えて一括Updateする）
-                }
-            }
+        // 2. 出航状態の比較
+        int currentExploring = currentSubs.Count(s => s.Status == SubmarineStatus.Exploring);
+        int totalSubs = currentSubs.Count;
 
-            if (notifiedSubmarines.Count > 0)
-            {
-                // 通知送信 (Fire and forget)
-                // ローカル時刻に変換して通知
-                var localReturnTime = notifiedSubmarines.Select(n => charInfo.Submarines.First(s => s.Name == n).ReturnTime).Max().ToLocalTime();
-                
-                _ = _discordService.SendVoyageCompletionAsync(characterName, notifiedSubmarines, localReturnTime);
+        var prevData = _storage.Get(cid);
+        int prevExploring = prevData?.Submarines.Count(s => s.Status == SubmarineStatus.Exploring) ?? 0;
 
-                if (needsSave)
-                {
-                    _storage.Update(cid, characterName, charInfo.Submarines);
-                }
-            }
+        // 3. トリガー条件: 全艦出航（0隻除外）、かつ前回は全艦出航ではなかった
+        if (totalSubs > 0 && currentExploring == totalSubs && prevExploring < totalSubs)
+        {
+            _pluginLog.Info($"[Submarine] All {totalSubs} submarines dispatched for {characterName}@{world}. Sending notification.");
+
+            // 探索中の潜水艦のみを通知（全艦のはずだが念のためフィルタ）
+            var exploringSubs = currentSubs.Where(s => s.Status == SubmarineStatus.Exploring).ToList();
+            _ = _discordService.SendDispatchNotificationAsync(characterName, world, exploringSubs);
         }
     }
 
@@ -220,7 +227,7 @@ public sealed unsafe class SubmarineService : IDisposable
         _framework.Update -= OnUpdate;
         _clientState.Logout -= OnLogout;
         _clientState.TerritoryChanged -= OnTerritoryChanged;
-        
+
         _storage.Save();
     }
 }

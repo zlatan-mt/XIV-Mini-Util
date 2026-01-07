@@ -32,6 +32,9 @@ public class DiscordEmbed
     [JsonPropertyName("color")]
     public int? Color { get; set; }
 
+    [JsonPropertyName("author")]
+    public DiscordAuthor? Author { get; set; }
+
     [JsonPropertyName("fields")]
     public List<DiscordField>? Fields { get; set; }
 
@@ -58,6 +61,18 @@ public class DiscordFooter
 {
     [JsonPropertyName("text")]
     public string Text { get; set; } = string.Empty;
+
+    [JsonPropertyName("icon_url")]
+    public string? IconUrl { get; set; }
+}
+
+public class DiscordAuthor
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
 
     [JsonPropertyName("icon_url")]
     public string? IconUrl { get; set; }
