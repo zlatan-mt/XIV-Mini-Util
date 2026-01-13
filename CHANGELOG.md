@@ -4,6 +4,12 @@
 <!-- RELEVANT FILES: projects/XIV-Mini-Util/XivMiniUtil.csproj, README.md -->
 # Changelog
 
+## 0.3.0 - 2026-01-13
+
+- 潜水艦トラッカーとDiscord通知を追加
+- 通知の整形・残り時間表示を改善
+- 画面構成をタブ分割し、設定項目を整理
+
 ## 0.2.1 - 2026-01-04
 
 - ショップデータの再構築と進捗表示を追加

@@ -19,8 +19,8 @@
     <Punchline>Materia精製と分解を手早く支援します。</Punchline>
     <InternalName>XivMiniUtil</InternalName>
     <AssemblyName>XivMiniUtil</AssemblyName>
-    <AssemblyVersion>0.2.1</AssemblyVersion>
-    <Version>0.2.1</Version>
+    <AssemblyVersion>0.3.0</AssemblyVersion>
+    <Version>0.3.0</Version>
     <PackageProjectUrl>https://github.com/zlatan-mt/XIV-Mini-Util</PackageProjectUrl>
     <RepositoryUrl>https://github.com/zlatan-mt/XIV-Mini-Util</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
