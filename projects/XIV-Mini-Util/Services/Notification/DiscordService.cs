@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using XivMiniUtil.Models.Submarine;
+using XivMiniUtil.Windows;
 
 namespace XivMiniUtil.Services.Notification;
 
@@ -66,8 +67,8 @@ public class DiscordService : IDisposable
                     {
                         Name = "🧪 テスト通知 - TestChar@TestWorld - 4隻出航"
                     },
-                    Description = $"🟠 帰還時間: {maxReturnTime.ToString("M/d(ddd) HH:mm", japaneseCulture)}\n\n" +
-                                  string.Join("\n", submarineLines),
+                    Description = $"🟠 帰還時間: {maxReturnTime.ToString("M/d(ddd) HH:mm", japaneseCulture)}\n```\n" +
+                                  string.Join("\n", submarineLines) + "\n```",
                     Color = 0x808080, // Gray (テスト用)
                     Timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                     Footer = new DiscordFooter { Text = $"🧪 TEST | {relativeTimeText}" }
@@ -134,26 +135,40 @@ public class DiscordService : IDisposable
         // 最大帰還時刻を取得
         var maxReturnTime = submarines.Max(s => s.ReturnTime).ToLocalTime();
 
-        // 各潜水艦の情報をフォーマット
+        // 各潜水艦の情報をフォーマット (コードブロック用に整列)
         var submarineLines = new List<string>();
+        var nowUtc = DateTime.UtcNow;
+
+        // 名前の最大幅を計算 (日本語文字は2幅としてカウント)
+        int GetDisplayWidth(string s) => s.Sum(c => c > 127 ? 2 : 1);
+        var maxNameWidth = submarines.Max(s => GetDisplayWidth(s.Name));
+
         foreach (var sub in submarines.OrderBy(s => s.ReturnTime))
         {
-            var returnTimeLocal = sub.ReturnTime.ToLocalTime();
-            var duration = sub.ReturnTime - sub.RegisterTime;
+            // ReturnTime は UTC として扱う (Kind が Unspecified でも対応)
+            var returnTimeUtc = sub.ReturnTime.Kind == DateTimeKind.Local
+                ? sub.ReturnTime.ToUniversalTime()
+                : DateTime.SpecifyKind(sub.ReturnTime, DateTimeKind.Utc);
+            var returnTimeLocal = returnTimeUtc.ToLocalTime();
+            var remaining = returnTimeUtc - nowUtc;
 
-            // Duration バリデーション: 異常値の場合は "--h" と表示
-            string durationText;
-            if (duration.TotalDays > 30 || duration.TotalHours < 0)
+            // 残り時間: 0時間未満（過去）または異常に長い場合は "--h"
+            string remainingText;
+            if (remaining.TotalHours < 0 || remaining.TotalDays > 7)
             {
-                durationText = "--h";
+                remainingText = "-- h";
             }
             else
             {
-                durationText = $"{duration.TotalHours:F1}h";
+                remainingText = $"{remaining.TotalHours,3:F0} h";
             }
 
+            // 名前をパディング
+            var nameWidth = GetDisplayWidth(sub.Name);
+            var paddedName = sub.Name + new string(' ', maxNameWidth - nameWidth);
+
             var returnTimeText = returnTimeLocal.ToString("M/d(ddd) HH:mm", japaneseCulture);
-            submarineLines.Add($"{sub.Name}  {returnTimeText} ({durationText})");
+            submarineLines.Add($"{paddedName} {returnTimeText} ({remainingText})");
         }
 
         // 相対時間テキストを生成
@@ -170,11 +185,11 @@ public class DiscordService : IDisposable
                     {
                         Name = $"{characterName}@{world} - {submarines.Count}隻出航"
                     },
-                    Description = $"🟠 帰還時間: {maxReturnTime.ToString("M/d(ddd) HH:mm", japaneseCulture)}\n\n" +
-                                  string.Join("\n", submarineLines),
+                    Description = $"🟠 帰還時間: {maxReturnTime.ToString("M/d(ddd) HH:mm", japaneseCulture)}\n```\n" +
+                                  string.Join("\n", submarineLines) + "\n```",
                     Color = 0xFFA500, // Orange
                     Timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                    Footer = new DiscordFooter { Text = relativeTimeText }
+                    Footer = new DiscordFooter { Text = $"{relativeTimeText}•{MainWindow.BuildId}" }
                 }
             }
         };

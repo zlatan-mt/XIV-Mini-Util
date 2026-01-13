@@ -19,6 +19,9 @@ namespace XivMiniUtil.Windows;
 
 public sealed class MainWindow : Window, IDisposable
 {
+    // ビルド識別用 (手動更新)
+    public const string BuildId = "250109b";
+
     private readonly DesynthService _desynthService;
     private readonly HomeTab _homeTab;
     private readonly SearchTab _searchTab;
@@ -39,7 +42,7 @@ public sealed class MainWindow : Window, IDisposable
         DiscordService discordService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
-        : base("XIV Mini Util")
+        : base($"XIV Mini Util [{BuildId}]")
     {
         _desynthService = desynthService;
         _homeTab = new HomeTab(configuration, materiaService, desynthService, materiaFeatureEnabled, desynthFeatureEnabled);
