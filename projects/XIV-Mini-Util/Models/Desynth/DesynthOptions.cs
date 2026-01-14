@@ -5,6 +5,5 @@ namespace XivMiniUtil;
 public sealed record DesynthOptions(
     int MinLevel,
     int MaxLevel,
-    bool SkipHighLevelWarning,
     DesynthTargetMode TargetMode,
     int TargetCount);

@@ -171,6 +171,30 @@ sequenceDiagram
     end
 ```
 
+## UI Structure
+**目的**: 「状態・対象・実行」を同一画面で把握できる構成にする。
+
+- メイン画面は「精選」「分解」の2セクションで構成する
+- セクションはImGuiの `BeginChild` + 見出し（または `CollapsingHeader`）で表現する
+- 各セクションに以下を配置する
+  - 状態（有効/無効）表示とトグル
+  - 対象サマリ（件数・範囲）
+  - 実行/停止ボタン
+
+## Performance & Caching
+- 対象アイテムの計算は毎フレーム行わず、以下のトリガーで再計算する
+  - インベントリ変更イベント
+  - 該当タブの表示
+- 再計算結果はキャッシュし、UI表示と実行前確認に利用する
+
+## Configuration Migration
+- 設定構造が変更される場合、`Configuration` のロード時に旧形式から新形式へ変換する
+- 変換後に保存し、次回以降は新形式を使用する
+
+## Auto Execution Definition
+- 「自動実行」は、条件一致時にユーザー操作なしで実行される挙動を指す
+- 「一括実行」は、ユーザーが実行ボタンを押した時に条件一致分をまとめて処理する挙動を指す
+
 ## Requirements Traceability
 
 | Requirement | Summary | Components | Interfaces | Flows |
@@ -198,6 +222,11 @@ sequenceDiagram
 | DesynthService | Service | アイテム分解ロジック | 6.1-6.5, 7.1-7.5, 10.3 | InventoryService (P0), JobService (P0) | Service |
 | InventoryService | Service | インベントリアクセス | 9.1-9.5 | InventoryManager (P0) | Service |
 | JobService | Service | ジョブ情報取得 | 8.1-8.6, 9.6-9.7 | IObjectTable (P0), PlayerState (P0) | Service |
+
+## Inventory Scope Rules
+- 精製/分解の対象スキャンは所持品のみを対象とする
+- 高IL警告の閾値算出は所持品に加え、アーマリーチェスト/装備中アイテムを参照する
+- スコープ切替はサービス呼び出し側で明示し、既定は所持品のみ
 
 ### Entry Layer
 

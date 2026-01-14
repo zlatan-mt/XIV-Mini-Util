@@ -34,6 +34,20 @@ public sealed class GameUiService
         return addon->IsVisible;
     }
 
+    public unsafe bool TryGetAddonInfo(string addonName, out nint addonPtr, out bool isVisible)
+    {
+        addonPtr = _gameGui.GetAddonByName(addonName, 1);
+        if (addonPtr == nint.Zero)
+        {
+            isVisible = false;
+            return false;
+        }
+
+        var addon = (AtkUnitBase*)addonPtr;
+        isVisible = addon->IsVisible;
+        return true;
+    }
+
     public bool TrySelectMaterializeFirstItem()
     {
         return TryFireCallbackWithFallback(

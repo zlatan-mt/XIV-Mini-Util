@@ -23,6 +23,7 @@
 2. When プラグインが起動した時, the Plugin shall 保存された設定を自動的に読み込む
 3. When ユーザーが設定を変更した時, the Plugin shall 変更を設定ファイルに保存する
 4. If 設定ファイルが存在しないか破損している場合, then the Plugin shall デフォルト設定で初期化する
+5. If 設定構造が更新された場合, then the Plugin shall 既存設定を新構造へマイグレーションする
 
 ### Requirement 3: ユーザーインターフェース
 **Objective:** As a プレイヤー, I want ゲーム内でプラグインのUIを操作できる, so that 機能に簡単にアクセスできる
@@ -34,6 +35,8 @@
 4. The Plugin shall マテリア精製機能のオン/オフボタンを表示する
 5. The Plugin shall アイテム分解機能の開始ボタンを表示する
 6. The Plugin shall アイテム分解の設定項目（対象レベル範囲、ジョブ条件）を表示する
+7. The Plugin shall 「状態・対象・実行」を同一画面で確認できるUIを提供する
+8. The Plugin shall 分解/精製の対象件数・条件を要約表示する
 
 ### Requirement 4: コマンドシステム
 **Objective:** As a プレイヤー, I want スラッシュコマンドでプラグインを操作できる, so that キーボードから素早く機能にアクセスできる
@@ -44,35 +47,39 @@
 3. If 無効なサブコマンドが入力された場合, then the Plugin shall 使用可能なコマンド一覧を表示する
 
 ### Requirement 5: マテリア精製機能
-**Objective:** As a プレイヤー, I want 所持品・アーマリーチェスト内のマテリア精製可能アイテムを自動で精製したい, so that 手動操作の手間を省ける
+**Objective:** As a プレイヤー, I want 所持品内のマテリア精製可能アイテムを自動で精製したい, so that 手動操作の手間を省ける
 
 #### Acceptance Criteria
-1. The Plugin shall 所持品およびアーマリーチェスト内のアイテムをスキャンする
+1. The Plugin shall 所持品内のアイテムをスキャンする
 2. The Plugin shall スピリットボンド100%のアイテムを検出する
 3. When マテリア精製機能がオンの状態で精製可能アイテムが検出された時, the Plugin shall 自動的にマテリア精製を実行する
 4. The Plugin shall マテリア精製機能のオン/オフをボタンで切り替え可能とする
 5. While マテリア精製機能がオフの状態の時, the Plugin shall 自動精製を実行しない
 6. When マテリア精製が完了した時, the Plugin shall 次の精製可能アイテムを検索する
+7. The Plugin shall 自動実行の有効/無効をユーザーが明示的に選択できる
 
 ### Requirement 6: アイテム分解機能
 **Objective:** As a プレイヤー, I want 条件を指定してアイテム分解を自動化したい, so that 効率的にアイテムを整理できる
 
 #### Acceptance Criteria
-1. The Plugin shall 所持品およびアーマリーチェスト内の分解可能アイテムをスキャンする
+1. The Plugin shall 所持品内の分解可能アイテムをスキャンする
 2. When 分解開始ボタンが押された時, the Plugin shall 設定条件に合致するアイテムの分解を開始する
 3. The Plugin shall 分解対象のアイテムレベル範囲（最小レベル、最大レベル）を設定可能とする
 4. The Plugin shall 設定されたレベル範囲内かつ分解可能なアイテムのみを分解対象とする
 5. While 分解処理中, the Plugin shall 分解対象アイテムを順次処理する
+6. The Plugin shall 分解対象のプレビュー（件数・範囲）を表示する
 
 ### Requirement 7: アイテム分解の安全機能
 **Objective:** As a プレイヤー, I want 高レベルアイテムの誤分解を防ぎたい, so that 重要なアイテムを失わない
 
 #### Acceptance Criteria
-1. The Plugin shall 所持アイテム（所持品、アーマリーチェスト、装備中アイテム）の最高アイテムレベルを取得する
+1. The Plugin shall 所持アイテム（所持品、アーマリーチェスト、装備中アイテム）の最高アイテムレベルを取得する（警告閾値算出用。分解対象とは別）
 2. When 分解対象アイテムのレベルが（最高レベル - 100）以上の場合, the Plugin shall 警告ダイアログを表示する
 3. If 警告ダイアログで「はい」が選択された場合, then the Plugin shall 分解を実行する
 4. If 警告ダイアログで「いいえ」が選択された場合, then the Plugin shall 分解をキャンセルする
 5. The Plugin shall 警告対象となるアイテムの情報（名前、レベル）を警告メッセージに含める
+6. The Plugin shall 分解対象スコープ（所持品/アーマリーチェスト等）を明示表示する
+7. The Plugin shall 実行前に対象件数と範囲を確認ダイアログに表示する
 
 ### Requirement 8: アイテム分解のジョブ条件
 **Objective:** As a プレイヤー, I want 現在のジョブに応じて分解実行を制御したい, so that 意図しない状況での分解を防げる
@@ -90,12 +97,20 @@
 
 #### Acceptance Criteria
 1. The Plugin shall Dalamud APIを通じてインベントリ（所持品）情報にアクセスする
-2. The Plugin shall Dalamud APIを通じてアーマリーチェスト情報にアクセスする
+2. The Plugin shall Dalamud APIを通じてアーマリーチェスト情報にアクセスする（警告閾値算出に使用）
 3. The Plugin shall アイテムのスピリットボンド値を取得する
 4. The Plugin shall アイテムの分解可否を判定する
 5. The Plugin shall アイテムレベルを取得する
 6. The Plugin shall 現在のプレイヤージョブ情報を取得する
 7. If プレイヤーがログアウト状態の場合, then the Plugin shall ゲームデータ依存の機能を無効化する
+
+### Requirement 11: パフォーマンスと再計算
+**Objective:** As a プレイヤー, I want UI操作が重くならない, so that 快適にゲームを操作できる
+
+#### Acceptance Criteria
+1. The Plugin shall 分解/精製の対象計算を毎フレーム実行しない
+2. The Plugin shall インベントリ変更または対象タブ表示時にのみ再計算を行う
+3. The Plugin shall 再計算結果をキャッシュし、UI表示に使用する
 
 ### Requirement 10: ログ・通知機能
 **Objective:** As a プレイヤー/開発者, I want 処理状況を確認できる, so that 正常動作を確認し問題発生時に原因を特定できる

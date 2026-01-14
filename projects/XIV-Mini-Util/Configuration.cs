@@ -18,6 +18,7 @@ public sealed class Configuration : IPluginConfiguration
 
     // マテリア精製設定
     public bool MateriaExtractEnabled { get; set; } = false;
+    public bool MateriaFeatureEnabled { get; set; } = true;
 
     // アイテム分解設定
     public int DesynthMinLevel { get; set; } = 1;
@@ -27,6 +28,7 @@ public sealed class Configuration : IPluginConfiguration
     public int DesynthWarningThreshold { get; set; } = 100;
     public DesynthTargetMode DesynthTargetMode { get; set; } = DesynthTargetMode.All;
     public int DesynthTargetCount { get; set; } = 1;
+    public bool DesynthFeatureEnabled { get; set; } = true;
 
     // 販売場所検索設定
     public bool ShopSearchEchoEnabled { get; set; } = true;
@@ -142,6 +144,7 @@ public sealed class Configuration : IPluginConfiguration
         // 外部入力の設定値はここで安全な範囲に収める
         Version = source.Version;
         MateriaExtractEnabled = source.MateriaExtractEnabled;
+        MateriaFeatureEnabled = source.MateriaFeatureEnabled;
         DesynthMinLevel = Math.Clamp(source.DesynthMinLevel, 1, 999);
         DesynthMaxLevel = Math.Clamp(source.DesynthMaxLevel, 1, 999);
         DesynthJobCondition = source.DesynthJobCondition;
@@ -149,6 +152,7 @@ public sealed class Configuration : IPluginConfiguration
         DesynthWarningThreshold = Math.Clamp(source.DesynthWarningThreshold, 1, 999);
         DesynthTargetMode = source.DesynthTargetMode;
         DesynthTargetCount = Math.Clamp(source.DesynthTargetCount, 1, 999);
+        DesynthFeatureEnabled = source.DesynthFeatureEnabled;
         ShopSearchEchoEnabled = source.ShopSearchEchoEnabled;
         ShopSearchWindowEnabled = source.ShopSearchWindowEnabled;
         ShopSearchAutoTeleportEnabled = source.ShopSearchAutoTeleportEnabled;

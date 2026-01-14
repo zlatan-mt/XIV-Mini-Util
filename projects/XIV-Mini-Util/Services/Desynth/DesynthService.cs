@@ -1,5 +1,5 @@
 // Path: projects/XIV-Mini-Util/Services/DesynthService.cs
-// Description: 分解対象アイテムを順次処理し警告確認を行う
+// Description: 分解対象アイテムを順次処理する
 // Reason: 分解の安全性とジョブ条件をサービス層で担保するため
 // RELEVANT FILES: projects/XIV-Mini-Util/Services/InventoryService.cs, projects/XIV-Mini-Util/Services/JobService.cs, projects/XIV-Mini-Util/Windows/MainWindow.cs
 using Dalamud.Plugin.Services;
@@ -24,13 +24,10 @@ public sealed class DesynthService : IDisposable
     private Queue<InventoryItemInfo> _pendingItems = new();
     private InventoryItemInfo? _currentItem;
     private int _currentItemRemaining;
-    private InventoryItemInfo? _pendingWarningItem;
-    private DesynthOptions? _options;
     private TaskCompletionSource<DesynthResult>? _completionSource;
     private List<string> _errors = new();
     private int _processedCount;
     private int _skippedCount;
-    private int _maxItemLevel;
     private int _remainingTargetCount;
     private DesynthState _state = DesynthState.Idle;
 
@@ -54,7 +51,6 @@ public sealed class DesynthService : IDisposable
 
     public bool IsProcessing { get; private set; }
 
-    public event Action<DesynthWarningInfo>? OnWarningRequired;
 
     public Task<DesynthResult> StartDesynthAsync(DesynthOptions options)
     {
@@ -73,11 +69,9 @@ public sealed class DesynthService : IDisposable
             return Task.FromResult(new DesynthResult(0, 0, ["ジョブ条件を満たしていません。"]));
         }
 
-        _options = options;
         _processedCount = 0;
         _skippedCount = 0;
         _errors = new List<string>();
-        _maxItemLevel = _inventoryService.GetMaxItemLevel();
         _remainingTargetCount = options.TargetMode == DesynthTargetMode.Count
             ? Math.Clamp(options.TargetCount, 1, 999)
             : int.MaxValue;
@@ -100,28 +94,6 @@ public sealed class DesynthService : IDisposable
         return _completionSource.Task;
     }
 
-    public void ConfirmWarning(bool proceed)
-    {
-        if (!IsProcessing || _pendingWarningItem == null)
-        {
-            return;
-        }
-
-        var item = _pendingWarningItem;
-        _pendingWarningItem = null;
-
-        if (!proceed)
-        {
-            _skippedCount++;
-            _currentItem = null;
-            _currentItemRemaining = 0;
-            _pluginLog.Information($"警告により分解をスキップ: {item.Name}");
-            return;
-        }
-
-        SelectItemForDesynth(item);
-    }
-
     public void Stop()
     {
         if (!IsProcessing)
@@ -140,7 +112,7 @@ public sealed class DesynthService : IDisposable
 
     private void OnFrameworkUpdate(IFramework framework)
     {
-        if (!IsProcessing || _pendingWarningItem != null)
+        if (!IsProcessing)
         {
             return;
         }
@@ -214,14 +186,6 @@ public sealed class DesynthService : IDisposable
         }
 
         _currentItemRemaining = item.Quantity;
-        if (ShouldWarn(item))
-        {
-            _pendingWarningItem = item;
-            _currentItem = item;
-            OnWarningRequired?.Invoke(new DesynthWarningInfo(item.Name, item.ItemLevel, _maxItemLevel));
-            return;
-        }
-
         SelectItemForDesynth(item);
     }
 
@@ -329,29 +293,12 @@ public sealed class DesynthService : IDisposable
         _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
     }
 
-    private bool ShouldWarn(InventoryItemInfo item)
-    {
-        if (_options == null)
-        {
-            return false;
-        }
-
-        if (_options.SkipHighLevelWarning || !_configuration.DesynthWarningEnabled)
-        {
-            return false;
-        }
-
-        var threshold = Math.Max(0, _maxItemLevel - _configuration.DesynthWarningThreshold);
-        return item.ItemLevel >= threshold;
-    }
-
     private void FinishProcessing()
     {
         IsProcessing = false;
         _state = DesynthState.Idle;
         _currentItem = null;
         _currentItemRemaining = 0;
-        _pendingWarningItem = null;
         _pendingItems.Clear();
 
         _completionSource?.TrySetResult(new DesynthResult(_processedCount, _skippedCount, _errors));

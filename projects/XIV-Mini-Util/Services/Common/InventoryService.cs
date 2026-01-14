@@ -7,6 +7,7 @@ using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using Lumina.Excel.Sheets;
 using XivMiniUtil;
+using XivMiniUtil.Models.Common;
 
 namespace XivMiniUtil.Services.Common;
 
@@ -61,8 +62,47 @@ public sealed class InventoryService
             return Array.Empty<InventoryItemInfo>();
         }
 
-        return GetItems(InventoryContainers.Concat(ArmoryContainers))
+        return GetItems(InventoryContainers.Concat(ArmoryContainers).Concat(EquippedContainers))
             .Where(item => item.Spiritbond >= 10000 && item.CanExtractMateria);
+    }
+
+    public MateriaScanSnapshot GetMateriaScanSnapshot()
+    {
+        if (!IsPlayerLoggedIn)
+        {
+            return MateriaScanSnapshot.Empty;
+        }
+
+        var items = GetItems(InventoryContainers.Concat(ArmoryContainers).Concat(EquippedContainers));
+        var spiritbondReady = 0;
+        var slotReady = 0;
+        var eligibleItems = new List<InventoryItemInfo>();
+
+        foreach (var item in items)
+        {
+            if (item.Spiritbond >= 10000)
+            {
+                spiritbondReady++;
+            }
+
+            if (item.CanExtractMateria)
+            {
+                slotReady++;
+            }
+
+            if (item.Spiritbond >= 10000 && item.CanExtractMateria)
+            {
+                eligibleItems.Add(item);
+            }
+        }
+
+        return new MateriaScanSnapshot(
+            true,
+            items.Count,
+            spiritbondReady,
+            slotReady,
+            eligibleItems.Count,
+            eligibleItems);
     }
 
     public IEnumerable<InventoryItemInfo> GetDesynthableItems(int minLevel, int maxLevel)

@@ -2,12 +2,13 @@
 // Description: メイン操作UIを提供しサービスの状態を制御する
 // Reason: ユーザーがゲーム内で機能を操作できるようにするため
 // RELEVANT FILES: projects/XIV-Mini-Util/Services/MateriaExtractService.cs, projects/XIV-Mini-Util/Services/DesynthService.cs, projects/XIV-Mini-Util/Services/ShopDataCache.cs
+using System.Reflection;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using System.Numerics;
 using ImGui = Dalamud.Bindings.ImGui.ImGui;
 using ImGuiTabItemFlags = Dalamud.Bindings.ImGui.ImGuiTabItemFlags;
-using ImGuiWindowFlags = Dalamud.Bindings.ImGui.ImGuiWindowFlags;
+using XivMiniUtil.Services.Common;
 using XivMiniUtil.Services.Desynth;
 using XivMiniUtil.Services.Materia;
 using XivMiniUtil.Services.Notification;
@@ -19,33 +20,29 @@ namespace XivMiniUtil.Windows;
 
 public sealed class MainWindow : Window, IDisposable
 {
-    // ビルド識別用 (手動更新)
-    public const string BuildId = "250109b";
+    public static readonly string BuildInfo = GetBuildInfo();
 
-    private readonly DesynthService _desynthService;
     private readonly HomeTab _homeTab;
     private readonly SearchTab _searchTab;
     private readonly SubmarineTab _submarineTab;
     private readonly SettingsTab _settingsTab;
 
-    private DesynthWarningInfo? _warningInfo;
-    private bool _showWarningDialog;
     private bool _selectSettingsTab;
 
     public MainWindow(
         Configuration configuration,
         MateriaExtractService materiaService,
         DesynthService desynthService,
+        InventoryCacheService inventoryCacheService,
         ShopDataCache shopDataCache,
         ShopSearchService shopSearchService,
         SubmarineDataStorage submarineDataStorage,
         DiscordService discordService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
-        : base($"XIV Mini Util [{BuildId}]")
+        : base($"XIV Mini Util [{BuildInfo}]")
     {
-        _desynthService = desynthService;
-        _homeTab = new HomeTab(configuration, materiaService, desynthService, materiaFeatureEnabled, desynthFeatureEnabled);
+        _homeTab = new HomeTab(configuration, materiaService, desynthService, inventoryCacheService, materiaFeatureEnabled, desynthFeatureEnabled);
         _searchTab = new SearchTab(shopDataCache, shopSearchService);
         _submarineTab = new SubmarineTab(configuration, submarineDataStorage);
         _settingsTab = new SettingsTab(configuration, materiaService, desynthService, shopDataCache, discordService, materiaFeatureEnabled, desynthFeatureEnabled);
@@ -56,7 +53,6 @@ public sealed class MainWindow : Window, IDisposable
             MaximumSize = new Vector2(900, 700),
         };
 
-        _desynthService.OnWarningRequired += ShowWarningDialog;
     }
 
     public new void Toggle()
@@ -74,10 +70,16 @@ public sealed class MainWindow : Window, IDisposable
     {
         if (ImGui.BeginTabBar("MainTabs"))
         {
-            if (ImGui.BeginTabItem("Home"))
+            var homeOpen = ImGui.BeginTabItem("Home");
+            if (homeOpen)
             {
+                _homeTab.SetVisible(true);
                 _homeTab.Draw();
                 ImGui.EndTabItem();
+            }
+            else
+            {
+                _homeTab.SetVisible(false);
             }
 
             if (ImGui.BeginTabItem("Search"))
@@ -103,59 +105,15 @@ public sealed class MainWindow : Window, IDisposable
             ImGui.EndTabBar();
         }
 
-        DrawWarningDialog();
         DrawResult();
     }
 
     public void Dispose()
     {
-        _desynthService.OnWarningRequired -= ShowWarningDialog;
         _homeTab.Dispose();
         _searchTab.Dispose();
         _submarineTab.Dispose();
         _settingsTab.Dispose();
-    }
-
-    public void ShowWarningDialog(DesynthWarningInfo info)
-    {
-        _warningInfo = info;
-        _showWarningDialog = true;
-    }
-
-    private void DrawWarningDialog()
-    {
-        if (_showWarningDialog)
-        {
-            ImGui.OpenPopup("分解警告");
-            _showWarningDialog = false;
-        }
-
-        var dialogOpen = true;
-        if (ImGui.BeginPopupModal("分解警告", ref dialogOpen, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            if (_warningInfo != null)
-            {
-                ImGui.Text("高レベルアイテムの分解を検出しました。");
-                ImGui.Text($"アイテム: {_warningInfo.ItemName}");
-                ImGui.Text($"レベル: {_warningInfo.ItemLevel} / 最高: {_warningInfo.MaxItemLevel}");
-            }
-
-            ImGui.Separator();
-            if (ImGui.Button("はい"))
-            {
-                _desynthService.ConfirmWarning(true);
-                ImGui.CloseCurrentPopup();
-            }
-
-            ImGui.SameLine();
-            if (ImGui.Button("いいえ"))
-            {
-                _desynthService.ConfirmWarning(false);
-                ImGui.CloseCurrentPopup();
-            }
-
-            ImGui.EndPopup();
-        }
     }
 
     private void DrawResult()
@@ -166,5 +124,19 @@ public sealed class MainWindow : Window, IDisposable
             ImGui.Separator();
             ImGui.TextWrapped(resultMessage);
         }
+    }
+
+    private static string GetBuildInfo()
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        var version = assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        var location = assembly.Location;
+        if (string.IsNullOrWhiteSpace(location))
+        {
+            return version;
+        }
+
+        var buildDate = File.GetLastWriteTime(location);
+        return $"{version} / {buildDate:MM-dd HH:mm}";
     }
 }

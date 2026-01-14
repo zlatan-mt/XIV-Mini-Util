@@ -189,7 +189,7 @@ public class DiscordService : IDisposable
                                   string.Join("\n", submarineLines) + "\n```",
                     Color = 0xFFA500, // Orange
                     Timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                    Footer = new DiscordFooter { Text = $"{relativeTimeText}•{MainWindow.BuildId}" }
+                    Footer = new DiscordFooter { Text = $"{relativeTimeText}•{MainWindow.BuildInfo}" }
                 }
             }
         };

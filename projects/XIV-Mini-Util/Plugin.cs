@@ -20,10 +20,6 @@ public sealed class Plugin : IDalamudPlugin
 {
     private const string CommandName = "/xivminiutil";
     private const string CommandAlias = "/xmu";
-    // 公開版で一時的に無効化する機能の切り替え
-    private const bool MateriaFeatureEnabled = false;
-    private const bool DesynthFeatureEnabled = false;
-
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
     private readonly IChatGui _chatGui;
@@ -32,6 +28,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly WindowSystem _windowSystem;
 
     private readonly Configuration _configuration;
+    private readonly AddonStateTracker _addonStateTracker;
     private readonly MateriaExtractService _materiaService;
     private readonly DesynthService _desynthService;
     private readonly ShopDataCache _shopDataCache;
@@ -56,6 +53,7 @@ public sealed class Plugin : IDalamudPlugin
         IObjectTable objectTable,
         IPlayerState playerState,
         IGameGui gameGui,
+        IAddonLifecycle addonLifecycle,
         ICondition condition,
         IPluginLog pluginLog,
         IDataManager dataManager,
@@ -73,8 +71,12 @@ public sealed class Plugin : IDalamudPlugin
         _configuration.Initialize(pluginInterface);
 
         var inventoryService = new InventoryService(clientState, dataManager, pluginLog);
+        var inventoryCacheService = new InventoryCacheService(inventoryService, pluginLog);
         var jobService = new JobService(playerState, pluginLog);
         var gameUiService = new GameUiService(gameGui, pluginLog);
+        _addonStateTracker = new AddonStateTracker(addonLifecycle, pluginLog);
+        _addonStateTracker.Register(GameUiConstants.MaterializeAddonName);
+        _addonStateTracker.Register(GameUiConstants.MaterializeDialogAddonName);
 
         _submarineDataStorage = new SubmarineDataStorage(pluginInterface);
         _discordService = new DiscordService(_configuration, pluginLog, chatGui);
@@ -94,7 +96,8 @@ public sealed class Plugin : IDalamudPlugin
             pluginLog,
             inventoryService,
             gameUiService,
-            _configuration);
+            _configuration,
+            _addonStateTracker);
 
         _desynthService = new DesynthService(
             framework,
@@ -111,12 +114,15 @@ public sealed class Plugin : IDalamudPlugin
         _shopSearchService = new ShopSearchService(_shopDataCache, _mapService, _chatService, _teleportService, _configuration, pluginLog);
         _contextMenuService = new ContextMenuService(contextMenu, gameGui, _shopSearchService, _shopDataCache, pluginLog);
 
-        if (!MateriaFeatureEnabled)
+        var materiaFeatureEnabled = _configuration.MateriaFeatureEnabled;
+        var desynthFeatureEnabled = _configuration.DesynthFeatureEnabled;
+
+        if (!materiaFeatureEnabled)
         {
             _materiaService.Disable();
         }
 
-        if (!DesynthFeatureEnabled)
+        if (!desynthFeatureEnabled)
         {
             _desynthService.Stop();
         }
@@ -125,12 +131,13 @@ public sealed class Plugin : IDalamudPlugin
             _configuration,
             _materiaService,
             _desynthService,
+            inventoryCacheService,
             _shopDataCache,
             _shopSearchService,
             _submarineDataStorage,
             _discordService,
-            MateriaFeatureEnabled,
-            DesynthFeatureEnabled);
+            materiaFeatureEnabled,
+            desynthFeatureEnabled);
         _shopSearchResultWindow = new ShopSearchResultWindow(_mapService, _teleportService, _configuration);
 
         _windowSystem = new WindowSystem("XIV Mini Util");
@@ -170,6 +177,7 @@ public sealed class Plugin : IDalamudPlugin
         _shopSearchResultWindow.Dispose();
         _materiaService.Dispose();
         _desynthService.Dispose();
+        _addonStateTracker.Dispose();
         _contextMenuService.Dispose();
         _submarineService.Dispose();
         _discordService.Dispose();
