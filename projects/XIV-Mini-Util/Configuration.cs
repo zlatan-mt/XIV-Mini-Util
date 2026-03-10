@@ -6,6 +6,7 @@ using Dalamud.Configuration;
 using Dalamud.Plugin;
 using System.Text;
 using System.Text.Json;
+using XivMiniUtil.Models.Checklist;
 
 namespace XivMiniUtil;
 
@@ -43,6 +44,12 @@ public sealed class Configuration : IPluginConfiguration
     public bool SubmarineNotificationEnabled { get; set; } = false;
     public int NotificationRateLimitRetryMax { get; set; } = 3;
 
+    // 日課チェックリスト設定
+    public bool ChecklistFeatureEnabled { get; set; } = true;
+    public bool ChecklistDiscordNotificationEnabled { get; set; } = false;
+    public DayOfWeek ChecklistWeeklyResetDay { get; set; } = DayOfWeek.Tuesday;
+    public List<ChecklistItem> ChecklistItems { get; set; } = new();
+
     private IDalamudPluginInterface? _pluginInterface;
 
     public void Initialize(IDalamudPluginInterface pluginInterface)
@@ -55,6 +62,8 @@ public sealed class Configuration : IPluginConfiguration
         {
             ShopSearchAreaPriority = DefaultShopSearchAreaPriority.ToList();
         }
+
+        ChecklistItems ??= new List<ChecklistItem>();
     }
 
     public static IReadOnlyList<uint> DefaultShopSearchAreaPriority => new List<uint>
@@ -162,6 +171,30 @@ public sealed class Configuration : IPluginConfiguration
         DiscordWebhookUrl = source.DiscordWebhookUrl;
         SubmarineNotificationEnabled = source.SubmarineNotificationEnabled;
         NotificationRateLimitRetryMax = Math.Clamp(source.NotificationRateLimitRetryMax, 0, 10);
+        ChecklistFeatureEnabled = source.ChecklistFeatureEnabled;
+        ChecklistDiscordNotificationEnabled = source.ChecklistDiscordNotificationEnabled;
+        ChecklistWeeklyResetDay = source.ChecklistWeeklyResetDay;
+        ChecklistItems = source.ChecklistItems?
+            .Select(CloneChecklistItem)
+            .ToList() ?? new List<ChecklistItem>();
+    }
+
+    private static ChecklistItem CloneChecklistItem(ChecklistItem source)
+    {
+        return new ChecklistItem
+        {
+            Id = source.Id == Guid.Empty ? Guid.NewGuid() : source.Id,
+            Title = source.Title ?? string.Empty,
+            Frequency = source.Frequency,
+            IsEnabled = source.IsEnabled,
+            IsDone = source.IsDone,
+            NotifyInGame = source.NotifyInGame,
+            NotifyDiscord = source.NotifyDiscord,
+            ReminderHour = Math.Clamp(source.ReminderHour, 0, 23),
+            ReminderMinute = Math.Clamp(source.ReminderMinute, 0, 59),
+            LastResetKey = source.LastResetKey,
+            LastReminderKey = source.LastReminderKey,
+        };
     }
 
     private Configuration BuildExportSnapshot()

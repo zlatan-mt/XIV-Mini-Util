@@ -10,6 +10,7 @@ using ImGuiTableFlags = Dalamud.Bindings.ImGui.ImGuiTableFlags;
 using ImGuiWindowFlags = Dalamud.Bindings.ImGui.ImGuiWindowFlags;
 using XivMiniUtil.Services.Desynth;
 using XivMiniUtil.Services.Materia;
+using XivMiniUtil.Services.Checklist;
 using XivMiniUtil.Services.Notification;
 using XivMiniUtil.Services.Shop;
 
@@ -22,6 +23,7 @@ public sealed class SettingsTab : ITabComponent
     private readonly DesynthService _desynthService;
     private readonly ShopDataCache _shopDataCache;
     private readonly DiscordService _discordService;
+    private readonly ChecklistService _checklistService;
     private readonly bool _materiaFeatureEnabled;
     private readonly bool _desynthFeatureEnabled;
 
@@ -45,6 +47,7 @@ public sealed class SettingsTab : ITabComponent
         DesynthService desynthService,
         ShopDataCache shopDataCache,
         DiscordService discordService,
+        ChecklistService checklistService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
     {
@@ -53,6 +56,7 @@ public sealed class SettingsTab : ITabComponent
         _desynthService = desynthService;
         _shopDataCache = shopDataCache;
         _discordService = discordService;
+        _checklistService = checklistService;
         _materiaFeatureEnabled = materiaFeatureEnabled;
         _desynthFeatureEnabled = desynthFeatureEnabled;
     }
@@ -89,6 +93,7 @@ public sealed class SettingsTab : ITabComponent
             _materiaFeatureEnabled ? "General & Materia" : "General & Materia (無効中)",
             _desynthFeatureEnabled ? "Desynthesis" : "Desynthesis (無効中)",
             "Shop Search",
+            "Checklist",
             "Submarines",
         };
 
@@ -122,6 +127,9 @@ public sealed class SettingsTab : ITabComponent
                 DrawShopSearchSettings();
                 break;
             case 3:
+                DrawChecklistSettings();
+                break;
+            case 4:
                 DrawSubmarineSettings();
                 break;
             default:
@@ -296,6 +304,55 @@ public sealed class SettingsTab : ITabComponent
         if (!trackerEnabled)
         {
             ImGui.EndDisabled();
+        }
+    }
+
+    private void DrawChecklistSettings()
+    {
+        ImGui.Text("日課チェックリスト");
+        ImGui.Separator();
+
+        var checklistEnabled = _configuration.ChecklistFeatureEnabled;
+        if (ImGui.Checkbox("チェックリスト機能を有効化", ref checklistEnabled))
+        {
+            _configuration.ChecklistFeatureEnabled = checklistEnabled;
+            _configuration.Save();
+        }
+
+        var discordEnabled = _configuration.ChecklistDiscordNotificationEnabled;
+        if (ImGui.Checkbox("チェックリストのDiscord通知を有効化", ref discordEnabled))
+        {
+            _configuration.ChecklistDiscordNotificationEnabled = discordEnabled;
+            _configuration.Save();
+        }
+
+        var weeklyResetDay = _configuration.ChecklistWeeklyResetDay;
+        if (ImGui.BeginCombo("週次リセット曜日", weeklyResetDay.ToString()))
+        {
+            foreach (DayOfWeek day in Enum.GetValues(typeof(DayOfWeek)))
+            {
+                var selected = day == weeklyResetDay;
+                if (ImGui.Selectable(day.ToString(), selected))
+                {
+                    _configuration.ChecklistWeeklyResetDay = day;
+                    _configuration.Save();
+                }
+            }
+            ImGui.EndCombo();
+        }
+
+        ImGui.Spacing();
+        ImGui.TextDisabled("Checklistタブで各項目の時刻・通知先を個別設定できます。");
+
+        if (ImGui.Button("Daily項目を全て未完了に戻す"))
+        {
+            _checklistService.ResetItems(Models.Checklist.ChecklistFrequency.Daily);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Weekly項目を全て未完了に戻す"))
+        {
+            _checklistService.ResetItems(Models.Checklist.ChecklistFrequency.Weekly);
         }
     }
 

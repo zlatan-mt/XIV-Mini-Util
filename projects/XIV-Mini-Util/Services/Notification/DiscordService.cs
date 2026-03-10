@@ -197,6 +197,32 @@ public class DiscordService : IDisposable
         await SendPayloadAsync(payload);
     }
 
+    public async Task SendChecklistReminderAsync(string itemTitle, string cycleLabel)
+    {
+        if (string.IsNullOrWhiteSpace(_configuration.DiscordWebhookUrl))
+        {
+            return;
+        }
+
+        var payload = new DiscordNotificationPayload
+        {
+            Username = "XIV Mini Util",
+            Embeds = new List<DiscordEmbed>
+            {
+                new DiscordEmbed
+                {
+                    Title = $"Checklist Reminder ({cycleLabel})",
+                    Description = $"未完了: {itemTitle}",
+                    Color = 0x4CAF50,
+                    Timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    Footer = new DiscordFooter { Text = $"XIV Mini Util • {MainWindow.BuildInfo}" }
+                }
+            }
+        };
+
+        await SendPayloadAsync(payload);
+    }
+
     /// <summary>
     /// 相対時間テキストを生成（今日/明日/日付）
     /// </summary>

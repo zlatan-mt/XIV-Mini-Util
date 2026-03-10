@@ -7,6 +7,7 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Interface.Windowing;
 using XivMiniUtil.Services.Common;
+using XivMiniUtil.Services.Checklist;
 using XivMiniUtil.Services.Desynth;
 using XivMiniUtil.Services.Materia;
 using XivMiniUtil.Services.Notification;
@@ -40,6 +41,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly SubmarineDataStorage _submarineDataStorage;
     private readonly DiscordService _discordService;
     private readonly SubmarineService _submarineService;
+    private readonly ChecklistService _checklistService;
     private readonly MainWindow _mainWindow;
     private readonly ShopSearchResultWindow _shopSearchResultWindow;
 
@@ -89,6 +91,12 @@ public sealed class Plugin : IDalamudPlugin
             _configuration,
             _submarineDataStorage,
             _discordService);
+        _checklistService = new ChecklistService(
+            framework,
+            _configuration,
+            chatGui,
+            _discordService,
+            pluginLog);
 
         _materiaService = new MateriaExtractService(
             framework,
@@ -134,6 +142,7 @@ public sealed class Plugin : IDalamudPlugin
             inventoryCacheService,
             _shopDataCache,
             _shopSearchService,
+            _checklistService,
             _submarineDataStorage,
             _discordService,
             materiaFeatureEnabled,
@@ -180,6 +189,7 @@ public sealed class Plugin : IDalamudPlugin
         _addonStateTracker.Dispose();
         _contextMenuService.Dispose();
         _submarineService.Dispose();
+        _checklistService.Dispose();
         _discordService.Dispose();
         _shopSearchService.OnSearchCompleted -= OnShopSearchCompleted;
     }

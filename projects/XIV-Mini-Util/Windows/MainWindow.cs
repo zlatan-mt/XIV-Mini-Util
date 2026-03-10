@@ -9,6 +9,7 @@ using System.Numerics;
 using ImGui = Dalamud.Bindings.ImGui.ImGui;
 using ImGuiTabItemFlags = Dalamud.Bindings.ImGui.ImGuiTabItemFlags;
 using XivMiniUtil.Services.Common;
+using XivMiniUtil.Services.Checklist;
 using XivMiniUtil.Services.Desynth;
 using XivMiniUtil.Services.Materia;
 using XivMiniUtil.Services.Notification;
@@ -24,6 +25,7 @@ public sealed class MainWindow : Window, IDisposable
 
     private readonly HomeTab _homeTab;
     private readonly SearchTab _searchTab;
+    private readonly ChecklistTab _checklistTab;
     private readonly SubmarineTab _submarineTab;
     private readonly SettingsTab _settingsTab;
 
@@ -36,6 +38,7 @@ public sealed class MainWindow : Window, IDisposable
         InventoryCacheService inventoryCacheService,
         ShopDataCache shopDataCache,
         ShopSearchService shopSearchService,
+        ChecklistService checklistService,
         SubmarineDataStorage submarineDataStorage,
         DiscordService discordService,
         bool materiaFeatureEnabled,
@@ -44,8 +47,9 @@ public sealed class MainWindow : Window, IDisposable
     {
         _homeTab = new HomeTab(configuration, materiaService, desynthService, inventoryCacheService, materiaFeatureEnabled, desynthFeatureEnabled);
         _searchTab = new SearchTab(shopDataCache, shopSearchService);
+        _checklistTab = new ChecklistTab(configuration, checklistService);
         _submarineTab = new SubmarineTab(configuration, submarineDataStorage);
-        _settingsTab = new SettingsTab(configuration, materiaService, desynthService, shopDataCache, discordService, materiaFeatureEnabled, desynthFeatureEnabled);
+        _settingsTab = new SettingsTab(configuration, materiaService, desynthService, shopDataCache, discordService, checklistService, materiaFeatureEnabled, desynthFeatureEnabled);
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -88,6 +92,12 @@ public sealed class MainWindow : Window, IDisposable
                 ImGui.EndTabItem();
             }
 
+            if (ImGui.BeginTabItem("Checklist"))
+            {
+                _checklistTab.Draw();
+                ImGui.EndTabItem();
+            }
+
             if (ImGui.BeginTabItem("Submarines"))
             {
                 _submarineTab.Draw();
@@ -112,6 +122,7 @@ public sealed class MainWindow : Window, IDisposable
     {
         _homeTab.Dispose();
         _searchTab.Dispose();
+        _checklistTab.Dispose();
         _submarineTab.Dispose();
         _settingsTab.Dispose();
     }

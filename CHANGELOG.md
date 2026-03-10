@@ -4,6 +4,12 @@
 <!-- RELEVANT FILES: projects/XIV-Mini-Util/XivMiniUtil.csproj, README.md -->
 # Changelog
 
+## Unreleased
+
+- 日課チェックリスト機能を追加（Daily/Weekly）
+- Checklistタブから完了管理、通知先（ゲーム内/Discord）、通知時刻を設定可能に
+- 設定タブにチェックリスト設定（有効化、週次リセット曜日、一括リセット）を追加
+
 ## 0.3.0 - 2026-01-13
 
 - 潜水艦トラッカーとDiscord通知を追加

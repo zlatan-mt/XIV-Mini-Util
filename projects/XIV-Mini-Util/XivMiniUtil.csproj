@@ -9,6 +9,7 @@
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources>
+    <NuGetAudit>false</NuGetAudit>
     <DalamudPluginInternalName>XivMiniUtil</DalamudPluginInternalName>
     <DalamudPluginName>XIV Mini Util</DalamudPluginName>
     <DalamudPluginAuthor>zlatan-mt</DalamudPluginAuthor>
@@ -29,6 +30,11 @@
     <Tags>utility;materia;desynth;automation</Tags>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(OS)' != 'Windows_NT'">
+    <!-- WSL/Linux 上の Dalamud Hook 環境では一部バインディング DLL が配布されないため抑制 -->
+    <NoWarn>$(NoWarn);MSB3245</NoWarn>
+  </PropertyGroup>
+
   <ItemGroup>
     <Reference Include="Dalamud.Bindings.ImGui">
       <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
@@ -37,7 +43,8 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <DevPluginOutputDir>$(APPDATA)\XIVLauncher\devPlugins\XivMiniUtil\</DevPluginOutputDir>
+    <DevPluginOutputDir Condition="'$(APPDATA)' != ''">$(APPDATA)\XIVLauncher\devPlugins\XivMiniUtil\</DevPluginOutputDir>
+    <DevPluginOutputDir Condition="'$(APPDATA)' == ''">/tmp/XivMiniUtil/</DevPluginOutputDir>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
@@ -45,10 +52,11 @@
     <DalamudPluginName>XIV Mini Util (Dev)</DalamudPluginName>
     <InternalName>XivMiniUtil.Dev</InternalName>
     <AssemblyName>XivMiniUtil.Dev</AssemblyName>
-    <DevPluginOutputDir>$(APPDATA)\XIVLauncher\devPlugins\XivMiniUtil.Dev\</DevPluginOutputDir>
+    <DevPluginOutputDir Condition="'$(APPDATA)' != ''">$(APPDATA)\XIVLauncher\devPlugins\XivMiniUtil.Dev\</DevPluginOutputDir>
+    <DevPluginOutputDir Condition="'$(APPDATA)' == ''">/tmp/XivMiniUtil.Dev/</DevPluginOutputDir>
   </PropertyGroup>
 
-  <Target Name="CopyDevPluginOutput" AfterTargets="Build">
+  <Target Name="CopyDevPluginOutput" AfterTargets="Build" Condition="'$(DevPluginOutputDir)' != ''">
     <MakeDir Directories="$(DevPluginOutputDir)" Condition="!Exists('$(DevPluginOutputDir)')" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DevPluginOutputDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(TargetDir)$(AssemblyName).json"
