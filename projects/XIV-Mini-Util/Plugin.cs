@@ -80,7 +80,7 @@ public sealed class Plugin : IDalamudPlugin
         _addonStateTracker.Register(GameUiConstants.MaterializeAddonName);
         _addonStateTracker.Register(GameUiConstants.MaterializeDialogAddonName);
 
-        _submarineDataStorage = new SubmarineDataStorage(pluginInterface);
+        _submarineDataStorage = new SubmarineDataStorage(pluginInterface, pluginLog);
         _discordService = new DiscordService(_configuration, pluginLog, chatGui);
         _submarineService = new SubmarineService(
             framework,
@@ -189,6 +189,7 @@ public sealed class Plugin : IDalamudPlugin
         _addonStateTracker.Dispose();
         _contextMenuService.Dispose();
         _submarineService.Dispose();
+        _submarineDataStorage.Dispose();
         _checklistService.Dispose();
         _discordService.Dispose();
         _shopSearchService.OnSearchCompleted -= OnShopSearchCompleted;
