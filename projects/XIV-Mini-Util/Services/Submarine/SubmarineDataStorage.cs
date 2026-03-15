@@ -61,18 +61,12 @@ public sealed class SubmarineDataStorage : IDisposable
 
             try
             {
-                using var fileLock = AcquireFileLock();
-                var mergedCache = ReadCacheFromDiskUnsafe();
-
-                foreach (var contentId in _dirtyContentIds)
+                var mergedCache = ExecuteWithFileLock(() =>
                 {
-                    if (_cache.TryGetValue(contentId, out var charInfo))
-                    {
-                        mergedCache[contentId] = CloneCharacterSubmarines(charInfo);
-                    }
-                }
-
-                WriteCacheToDiskUnsafe(mergedCache);
+                    var cache = BuildMergedCacheUnsafe();
+                    WriteCacheToDiskUnsafe(cache);
+                    return cache;
+                });
                 _cache = mergedCache;
                 _dirtyContentIds.Clear();
                 _lastDirtyTime = DateTime.MinValue;
@@ -160,22 +154,29 @@ public sealed class SubmarineDataStorage : IDisposable
 
         try
         {
-            using var fileLock = AcquireFileLock();
-            var mergedCache = ReadCacheFromDiskUnsafe();
-
-            foreach (var contentId in _dirtyContentIds)
-            {
-                if (_cache.TryGetValue(contentId, out var charInfo))
-                {
-                    mergedCache[contentId] = CloneCharacterSubmarines(charInfo);
-                }
-            }
-
-            _cache = mergedCache;
+            _cache = ExecuteWithFileLock(BuildMergedCacheUnsafe);
         }
         catch (Exception ex)
         {
             _pluginLog.Warning(ex, "Failed to reload submarine data from disk. Keeping the in-memory cache.");
+        }
+    }
+
+    private Dictionary<ulong, CharacterSubmarines> BuildMergedCacheUnsafe()
+    {
+        var mergedCache = ReadCacheFromDiskUnsafe();
+        MergeDirtyEntriesUnsafe(mergedCache);
+        return mergedCache;
+    }
+
+    private void MergeDirtyEntriesUnsafe(Dictionary<ulong, CharacterSubmarines> mergedCache)
+    {
+        foreach (var contentId in _dirtyContentIds)
+        {
+            if (_cache.TryGetValue(contentId, out var charInfo))
+            {
+                mergedCache[contentId] = CloneCharacterSubmarines(charInfo);
+            }
         }
     }
 
@@ -207,6 +208,12 @@ public sealed class SubmarineDataStorage : IDisposable
             _lastLoadedWriteTimeUtc = DateTime.MinValue;
             return new Dictionary<ulong, CharacterSubmarines>();
         }
+    }
+
+    private T ExecuteWithFileLock<T>(Func<T> action)
+    {
+        using var fileLock = AcquireFileLock();
+        return action();
     }
 
     private void WriteCacheToDiskUnsafe(Dictionary<ulong, CharacterSubmarines> cache)
