@@ -1,55 +1,52 @@
 // Path: projects/XIV-Mini-Util/Services/SubmarineDataStorage.cs
 using Dalamud.Plugin;
+using Dalamud.Plugin.Services;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using XivMiniUtil.Models.Submarine;
 
 namespace XivMiniUtil.Services.Submarine;
 
-public class SubmarineDataStorage
+public sealed class SubmarineDataStorage : IDisposable
 {
-    private readonly IDalamudPluginInterface _pluginInterface;
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+    };
+
     private readonly string _storagePath;
+    private readonly string _tempStoragePath;
+    private readonly IPluginLog _pluginLog;
     private readonly object _lock = new();
+    private readonly Mutex _fileMutex;
 
     private Dictionary<ulong, CharacterSubmarines> _cache = new();
-    private bool _isDirty = false;
+    private readonly HashSet<ulong> _dirtyContentIds = new();
     private DateTime _lastDirtyTime = DateTime.MinValue;
+    private DateTime _lastLoadedWriteTimeUtc = DateTime.MinValue;
+
     private const int SaveDebounceSeconds = 30;
 
-    public SubmarineDataStorage(IDalamudPluginInterface pluginInterface)
+    public SubmarineDataStorage(IDalamudPluginInterface pluginInterface, IPluginLog pluginLog)
     {
-        _pluginInterface = pluginInterface;
-        _storagePath = Path.Combine(_pluginInterface.ConfigDirectory.FullName, "submarine_data.json");
+        _pluginLog = pluginLog;
+        _storagePath = Path.Combine(pluginInterface.ConfigDirectory.FullName, "submarine_data.json");
+        _tempStoragePath = $"{_storagePath}.{Environment.ProcessId}.tmp";
+        _fileMutex = new Mutex(false, BuildMutexName(_storagePath));
         Load();
+    }
+
+    public void Dispose()
+    {
+        _fileMutex.Dispose();
     }
 
     public void Load()
     {
         lock (_lock)
         {
-            if (!File.Exists(_storagePath))
-            {
-                _cache = new Dictionary<ulong, CharacterSubmarines>();
-                return;
-            }
-
-            try
-            {
-                var json = File.ReadAllText(_storagePath);
-                if (string.IsNullOrWhiteSpace(json))
-                {
-                    _cache = new Dictionary<ulong, CharacterSubmarines>();
-                    return;
-                }
-
-                _cache = JsonSerializer.Deserialize<Dictionary<ulong, CharacterSubmarines>>(json) 
-                         ?? new Dictionary<ulong, CharacterSubmarines>();
-            }
-            catch
-            {
-                // エラー時は空で初期化（ログ出力推奨）
-                _cache = new Dictionary<ulong, CharacterSubmarines>();
-            }
+            LoadLatestCacheUnsafe(force: true);
         }
     }
 
@@ -57,15 +54,32 @@ public class SubmarineDataStorage
     {
         lock (_lock)
         {
+            if (_dirtyContentIds.Count == 0)
+            {
+                return;
+            }
+
             try
             {
-                var json = JsonSerializer.Serialize(_cache, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(_storagePath, json);
-                _isDirty = false;
+                using var fileLock = AcquireFileLock();
+                var mergedCache = ReadCacheFromDiskUnsafe();
+
+                foreach (var contentId in _dirtyContentIds)
+                {
+                    if (_cache.TryGetValue(contentId, out var charInfo))
+                    {
+                        mergedCache[contentId] = CloneCharacterSubmarines(charInfo);
+                    }
+                }
+
+                WriteCacheToDiskUnsafe(mergedCache);
+                _cache = mergedCache;
+                _dirtyContentIds.Clear();
+                _lastDirtyTime = DateTime.MinValue;
             }
-            catch
+            catch (Exception ex)
             {
-                // 保存失敗時は次回リトライ
+                _pluginLog.Warning(ex, "Failed to save submarine data. The current process will retry later.");
             }
         }
     }
@@ -74,29 +88,30 @@ public class SubmarineDataStorage
     {
         lock (_lock)
         {
+            LoadLatestCacheUnsafe();
+
             _cache[contentId] = new CharacterSubmarines
             {
                 CharacterName = characterName,
-                Submarines = submarines
+                Submarines = submarines.Select(CloneSubmarineData).ToList(),
             };
-            _isDirty = true;
-            _lastDirtyTime = DateTime.UtcNow;
+            MarkDirty(contentId);
         }
     }
-    
-    // 通知時刻のみ更新する場合など
+
     public void UpdateSubmarine(ulong contentId, SubmarineData updatedSubmarine)
     {
         lock (_lock)
         {
+            LoadLatestCacheUnsafe();
+
             if (_cache.TryGetValue(contentId, out var charInfo))
             {
-                var index = charInfo.Submarines.FindIndex(s => s.Name == updatedSubmarine.Name);
+                var index = charInfo.Submarines.FindIndex(submarine => submarine.Name == updatedSubmarine.Name);
                 if (index >= 0)
                 {
-                    charInfo.Submarines[index] = updatedSubmarine;
-                    _isDirty = true;
-                    _lastDirtyTime = DateTime.UtcNow;
+                    charInfo.Submarines[index] = CloneSubmarineData(updatedSubmarine);
+                    MarkDirty(contentId);
                 }
             }
         }
@@ -106,8 +121,8 @@ public class SubmarineDataStorage
     {
         lock (_lock)
         {
-            // ディープコピーまではしないが、参照渡し
-            return new Dictionary<ulong, CharacterSubmarines>(_cache);
+            LoadLatestCacheUnsafe();
+            return CloneCache(_cache);
         }
     }
 
@@ -115,17 +130,186 @@ public class SubmarineDataStorage
     {
         lock (_lock)
         {
-            return _cache.TryGetValue(contentId, out var charInfo) ? charInfo : null;
+            LoadLatestCacheUnsafe();
+            return _cache.TryGetValue(contentId, out var charInfo)
+                ? CloneCharacterSubmarines(charInfo)
+                : null;
         }
     }
 
     public void CheckAndSaveIfNeeded()
     {
-        if (!_isDirty) return;
+        if (_dirtyContentIds.Count == 0)
+        {
+            return;
+        }
 
         if ((DateTime.UtcNow - _lastDirtyTime).TotalSeconds >= SaveDebounceSeconds)
         {
             Save();
+        }
+    }
+
+    private void LoadLatestCacheUnsafe(bool force = false)
+    {
+        var currentWriteTimeUtc = GetStorageWriteTimeUtc();
+        if (!force && currentWriteTimeUtc <= _lastLoadedWriteTimeUtc)
+        {
+            return;
+        }
+
+        try
+        {
+            using var fileLock = AcquireFileLock();
+            var mergedCache = ReadCacheFromDiskUnsafe();
+
+            foreach (var contentId in _dirtyContentIds)
+            {
+                if (_cache.TryGetValue(contentId, out var charInfo))
+                {
+                    mergedCache[contentId] = CloneCharacterSubmarines(charInfo);
+                }
+            }
+
+            _cache = mergedCache;
+        }
+        catch (Exception ex)
+        {
+            _pluginLog.Warning(ex, "Failed to reload submarine data from disk. Keeping the in-memory cache.");
+        }
+    }
+
+    private Dictionary<ulong, CharacterSubmarines> ReadCacheFromDiskUnsafe()
+    {
+        try
+        {
+            if (!File.Exists(_storagePath))
+            {
+                _lastLoadedWriteTimeUtc = DateTime.MinValue;
+                return new Dictionary<ulong, CharacterSubmarines>();
+            }
+
+            var json = File.ReadAllText(_storagePath);
+            _lastLoadedWriteTimeUtc = GetStorageWriteTimeUtc();
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return new Dictionary<ulong, CharacterSubmarines>();
+            }
+
+            var diskCache = JsonSerializer.Deserialize<Dictionary<ulong, CharacterSubmarines>>(json)
+                ?? new Dictionary<ulong, CharacterSubmarines>();
+            return CloneCache(diskCache);
+        }
+        catch (Exception ex)
+        {
+            _pluginLog.Warning(ex, "Failed to read submarine data from disk. Using an empty cache instead.");
+            _lastLoadedWriteTimeUtc = DateTime.MinValue;
+            return new Dictionary<ulong, CharacterSubmarines>();
+        }
+    }
+
+    private void WriteCacheToDiskUnsafe(Dictionary<ulong, CharacterSubmarines> cache)
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(cache, JsonOptions);
+            File.WriteAllText(_tempStoragePath, json);
+            File.Move(_tempStoragePath, _storagePath, true);
+            _lastLoadedWriteTimeUtc = GetStorageWriteTimeUtc();
+        }
+        finally
+        {
+            if (File.Exists(_tempStoragePath))
+            {
+                File.Delete(_tempStoragePath);
+            }
+        }
+    }
+
+    private void MarkDirty(ulong contentId)
+    {
+        _dirtyContentIds.Add(contentId);
+        _lastDirtyTime = DateTime.UtcNow;
+    }
+
+    private IDisposable AcquireFileLock()
+    {
+        try
+        {
+            if (!_fileMutex.WaitOne(TimeSpan.FromSeconds(5)))
+            {
+                throw new TimeoutException("Timed out while waiting for the submarine storage file lock.");
+            }
+        }
+        catch (AbandonedMutexException)
+        {
+            _pluginLog.Warning("Recovered an abandoned submarine storage file lock.");
+        }
+
+        return new MutexScope(_fileMutex);
+    }
+
+    private static string BuildMutexName(string storagePath)
+    {
+        var pathBytes = Encoding.UTF8.GetBytes(storagePath.ToLowerInvariant());
+        var hash = Convert.ToHexString(SHA256.HashData(pathBytes));
+        return $"Local\\XivMiniUtil.SubmarineStorage.{hash}";
+    }
+
+    private DateTime GetStorageWriteTimeUtc()
+    {
+        return File.Exists(_storagePath)
+            ? File.GetLastWriteTimeUtc(_storagePath)
+            : DateTime.MinValue;
+    }
+
+    private static Dictionary<ulong, CharacterSubmarines> CloneCache(Dictionary<ulong, CharacterSubmarines> source)
+    {
+        return source.ToDictionary(pair => pair.Key, pair => CloneCharacterSubmarines(pair.Value));
+    }
+
+    private static CharacterSubmarines CloneCharacterSubmarines(CharacterSubmarines source)
+    {
+        return new CharacterSubmarines
+        {
+            CharacterName = source.CharacterName,
+            Submarines = source.Submarines.Select(CloneSubmarineData).ToList(),
+        };
+    }
+
+    private static SubmarineData CloneSubmarineData(SubmarineData source)
+    {
+        return new SubmarineData
+        {
+            Name = source.Name,
+            Rank = source.Rank,
+            ReturnTime = source.ReturnTime,
+            RegisterTime = source.RegisterTime,
+            LastNotifiedReturnTime = source.LastNotifiedReturnTime,
+            Status = source.Status,
+        };
+    }
+
+    private sealed class MutexScope : IDisposable
+    {
+        private readonly Mutex _mutex;
+        private bool _disposed;
+
+        public MutexScope(Mutex mutex)
+        {
+            _mutex = mutex;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _mutex.ReleaseMutex();
+            _disposed = true;
         }
     }
 }
