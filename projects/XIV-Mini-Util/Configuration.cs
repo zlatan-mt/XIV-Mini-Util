@@ -14,8 +14,9 @@ namespace XivMiniUtil;
 public sealed class Configuration : IPluginConfiguration
 {
     public const int ExportVersion = 1;
+    public const int CurrentVersion = 2;
 
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = CurrentVersion;
 
     // マテリア精製設定
     public bool MateriaExtractEnabled { get; set; } = false;
@@ -58,12 +59,10 @@ public sealed class Configuration : IPluginConfiguration
 
         // JSONデシリアライズ後、リストが空の場合のみデフォルト値を設定
         // (Newtonsoft.Jsonは既存リストに追加するため、初期化子での設定は避ける)
-        if (ShopSearchAreaPriority.Count == 0)
+        if (NormalizeAndMigrate())
         {
-            ShopSearchAreaPriority = DefaultShopSearchAreaPriority.ToList();
+            Save();
         }
-
-        ChecklistItems ??= new List<ChecklistItem>();
     }
 
     public static IReadOnlyList<uint> DefaultShopSearchAreaPriority => new List<uint>
@@ -128,7 +127,7 @@ public sealed class Configuration : IPluginConfiguration
             }
 
             imported = envelope.Config;
-            imported.ShopSearchAreaPriority ??= DefaultShopSearchAreaPriority.ToList();
+            imported.NormalizeAndMigrate();
             return true;
         }
         catch (FormatException)
@@ -151,7 +150,7 @@ public sealed class Configuration : IPluginConfiguration
     public void ApplyFrom(Configuration source)
     {
         // 外部入力の設定値はここで安全な範囲に収める
-        Version = source.Version;
+        Version = CurrentVersion;
         MateriaExtractEnabled = source.MateriaExtractEnabled;
         MateriaFeatureEnabled = source.MateriaFeatureEnabled;
         DesynthMinLevel = Math.Clamp(source.DesynthMinLevel, 1, 999);
@@ -177,6 +176,69 @@ public sealed class Configuration : IPluginConfiguration
         ChecklistItems = source.ChecklistItems?
             .Select(CloneChecklistItem)
             .ToList() ?? new List<ChecklistItem>();
+        NormalizeAndMigrate();
+    }
+
+    private bool NormalizeAndMigrate()
+    {
+        var changed = false;
+
+        if (Version != CurrentVersion)
+        {
+            Version = CurrentVersion;
+            changed = true;
+        }
+
+        DesynthMinLevel = Clamp(DesynthMinLevel, 1, 999, out var minLevelChanged);
+        DesynthMaxLevel = Clamp(DesynthMaxLevel, 1, 999, out var maxLevelChanged);
+        DesynthWarningThreshold = Clamp(DesynthWarningThreshold, 1, 999, out var warningThresholdChanged);
+        DesynthTargetCount = Clamp(DesynthTargetCount, 1, 999, out var targetCountChanged);
+        NotificationRateLimitRetryMax = Clamp(NotificationRateLimitRetryMax, 0, 10, out var retryCountChanged);
+        changed |= minLevelChanged;
+        changed |= maxLevelChanged;
+        changed |= warningThresholdChanged;
+        changed |= targetCountChanged;
+        changed |= retryCountChanged;
+
+        if (DesynthMinLevel > DesynthMaxLevel)
+        {
+            (DesynthMinLevel, DesynthMaxLevel) = (DesynthMaxLevel, DesynthMinLevel);
+            changed = true;
+        }
+
+        if (ShopSearchAreaPriority == null || ShopSearchAreaPriority.Count == 0)
+        {
+            ShopSearchAreaPriority = DefaultShopSearchAreaPriority.ToList();
+            changed = true;
+        }
+
+        if (ChecklistItems == null)
+        {
+            ChecklistItems = new List<ChecklistItem>();
+            changed = true;
+        }
+        else
+        {
+            var normalizedItems = ChecklistItems
+                .Select(CloneChecklistItem)
+                .ToList();
+
+            if (ChecklistItems.Count != normalizedItems.Count
+                || ChecklistItems.Where((item, index) => !ChecklistItemEquals(item, normalizedItems[index])).Any())
+            {
+                ChecklistItems = normalizedItems;
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    private static int Clamp(int value, int min, int max, out bool changed)
+    {
+        var clamped = Math.Clamp(value, min, max);
+        changed = clamped != value;
+        return clamped;
     }
 
     private static ChecklistItem CloneChecklistItem(ChecklistItem source)
@@ -195,6 +257,21 @@ public sealed class Configuration : IPluginConfiguration
             LastResetKey = source.LastResetKey,
             LastReminderKey = source.LastReminderKey,
         };
+    }
+
+    private static bool ChecklistItemEquals(ChecklistItem left, ChecklistItem right)
+    {
+        return left.Id == right.Id
+            && (left.Title ?? string.Empty) == right.Title
+            && left.Frequency == right.Frequency
+            && left.IsEnabled == right.IsEnabled
+            && left.IsDone == right.IsDone
+            && left.NotifyInGame == right.NotifyInGame
+            && left.NotifyDiscord == right.NotifyDiscord
+            && left.ReminderHour == right.ReminderHour
+            && left.ReminderMinute == right.ReminderMinute
+            && left.LastResetKey == right.LastResetKey
+            && left.LastReminderKey == right.LastReminderKey;
     }
 
     private Configuration BuildExportSnapshot()
