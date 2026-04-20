@@ -24,7 +24,7 @@ FFXIV用のDalamudプラグインです。
 
 3. `XivMiniUtil.zip` をGitHub Releasesに添付して配布します。
 
-配布手順の詳細は `docs/custom-plugin-distribution.md` を参照してください。
+配布手順の詳細は `docs/release/custom-plugin-distribution.md` を参照してください。
 
 ## 使い方（基本）
 

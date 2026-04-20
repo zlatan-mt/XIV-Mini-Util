@@ -1,4 +1,4 @@
-<!-- Path: docs/implementation_summary.md -->
+<!-- Path: docs/notes/implementation_summary.md -->
 <!-- Description: 現状までの実装内容と調査結果をまとめたメモ -->
 <!-- Reason: 検証や次の修正判断の前提を共有するため -->
 <!-- RELEVANT FILES: projects/XIV-Mini-Util/Services/ContextMenuService.cs, projects/XIV-Mini-Util/Services/ShopDataCache.cs, plans/feature_implementation_plan.md -->
@@ -49,4 +49,3 @@
 ## 影響ファイル
 - `projects/XIV-Mini-Util/Services/ContextMenuService.cs` が主な変更対象。
 - `ShopDataCache` と `ShopSearchService` は参照先として使用。
-
