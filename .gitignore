@@ -83,6 +83,7 @@ CLAUDE.md
 # Local environment
 .dotnet_home/
 .devplugins/
+mp3/
 
 # External dependencies (managed separately)
 projects/FFXIVClientStructs/
