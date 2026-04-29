@@ -8,6 +8,14 @@ namespace ShopDataSnapshot.Core;
 
 public sealed class ShopSnapshotBuilder
 {
+    private const int StainItem1ColumnIndex = 3;
+    private const int StainItem2ColumnIndex = 4;
+    private const int TerritoryPlaceNameColumnIndex = 5;
+    private const int MapSubPlaceNameColumnIndex = 2;
+    private const int MapSizeFactorColumnIndex = 7;
+    private const int MapOffsetXColumnIndex = 8;
+    private const int MapOffsetYColumnIndex = 9;
+
     public ShopSnapshotDocument Build(SnapshotOptions options)
     {
         var language = ParseLanguage(options.Language);
@@ -17,8 +25,9 @@ public sealed class ShopSnapshotBuilder
             DefaultExcelLanguage = language,
         });
 
+        var stats = new RawSheetLoadStats(0, 0);
         var itemSheet = RequireSheet<Item>(gameData, language, "Item");
-        var stainItemIds = LoadStainItemIds(gameData, language);
+        var stainItemIds = LoadStainItemIds(gameData, language, out var stainRawFallbackUsed);
         var gilShopSheet = RequireSheet<GilShop>(gameData, language, "GilShop");
         var specialShopSheet = RequireSheet<SpecialShop>(gameData, language, "SpecialShop");
         var npcBaseSheet = RequireSheet<ENpcBase>(gameData, language, "ENpcBase");
@@ -28,8 +37,8 @@ public sealed class ShopSnapshotBuilder
             ?? throw new InvalidOperationException("Required sheet was not found: GilShopItem");
 
         var itemNames = BuildItemNameIndex(itemSheet);
-        var colorantDetections = BuildColorantDetectionIndex(stainItemIds, itemNames);
-        var npcLocations = BuildNpcLocationIndex(gameData, language, levelSheet);
+        var colorantDetections = BuildColorantDetectionIndex(stainItemIds, stainRawFallbackUsed, itemNames);
+        var npcLocations = BuildNpcLocationIndex(gameData, language, levelSheet, ref stats);
         var mappings = BuildNpcShopMappings(
             npcBaseSheet,
             npcResidentSheet,
@@ -38,8 +47,8 @@ public sealed class ShopSnapshotBuilder
             npcLocations);
 
         var records = new List<ShopSnapshotRecord>();
-        ProcessGilShopItems(gilShopItemSheet, mappings.GilShopInfos, itemNames, colorantDetections, records);
-        ProcessSpecialShops(specialShopSheet, mappings.SpecialShopInfos, itemNames, colorantDetections, records);
+        ProcessGilShopItems(gilShopItemSheet, mappings.GilShopInfos, itemNames, colorantDetections.Detections, records);
+        ProcessSpecialShops(specialShopSheet, mappings.SpecialShopInfos, itemNames, colorantDetections.Detections, records);
 
         var sorted = records
             .OrderBy(record => record.ItemId)
@@ -47,15 +56,46 @@ public sealed class ShopSnapshotBuilder
             .ThenBy(record => record.ShopId)
             .ThenBy(record => record.NpcName, StringComparer.Ordinal)
             .ThenBy(record => record.TerritoryId)
+            .ThenBy(record => record.ShopName, StringComparer.Ordinal)
+            .ThenBy(record => record.MapId ?? 0)
+            .ThenBy(record => record.MapX)
+            .ThenBy(record => record.MapY)
             .ToList();
 
+        var missingLocationRecords = sorted
+            .Where(record => record.TerritoryId == 0 || record.MapX == 0 || record.MapY == 0)
+            .ToList();
         var summary = new ShopSnapshotSummary(
             sorted.Count,
             sorted.Select(record => record.ItemId).Distinct().Count(),
             sorted.Where(record => record.IsColorant).Select(record => record.ItemId).Distinct().Count(),
+            colorantDetections.StainSheetItemIds,
+            colorantDetections.StainRawFallbackUsed,
+            sorted
+                .Where(record => record.ColorantDetection == "nameFallback")
+                .Select(record => record.ItemId)
+                .Distinct()
+                .Count(),
             sorted.Count(record => record.ShopType == "gil"),
             sorted.Count(record => record.ShopType == "special"),
-            sorted.Count(record => record.TerritoryId == 0 || record.MapX == 0 || record.MapY == 0));
+            missingLocationRecords.Count,
+            missingLocationRecords.Select(record => record.NpcName).Distinct(StringComparer.Ordinal).Count(),
+            missingLocationRecords.Select(record => (record.ShopType, record.ShopId)).Distinct().Count(),
+            missingLocationRecords
+                .GroupBy(record => record.ShopType, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal),
+            stats.MapInfoLoadedCount,
+            stats.TerritoryNameLoadedCount,
+            missingLocationRecords
+                .Take(20)
+                .Select(record => new MissingNpcLocationSample(
+                    record.ShopType,
+                    record.ShopId,
+                    record.ShopName,
+                    record.NpcName,
+                    record.ItemId,
+                    record.ItemName))
+                .ToList());
 
         return new ShopSnapshotDocument(
             DateTimeOffset.UtcNow.ToString("O"),
@@ -92,8 +132,28 @@ public sealed class ShopSnapshotBuilder
             ?? throw new InvalidOperationException($"Required sheet was not found: {sheetName}");
     }
 
-    private static IReadOnlySet<uint> LoadStainItemIds(GameData gameData, Language language)
+    private static IReadOnlySet<uint> LoadStainItemIds(
+        GameData gameData,
+        Language language,
+        out bool rawFallbackUsed)
     {
+        var typedSheet = gameData.GetExcelSheet<Stain>(language) ?? gameData.GetExcelSheet<Stain>();
+        if (typedSheet != null)
+        {
+            rawFallbackUsed = false;
+            var typedIds = new HashSet<uint>();
+            foreach (var stain in typedSheet)
+            {
+                AddStainItemIdsFromObject(stain, typedIds);
+            }
+
+            if (typedIds.Count > 0)
+            {
+                return typedIds;
+            }
+        }
+
+        rawFallbackUsed = true;
         // Stain changes frequently around dye updates. Use the raw sheet as a
         // snapshot fallback so colorant detection remains Stain-derived when checksums drift.
         var rawSheet = gameData.Excel.GetRawSheet("Stain", language)
@@ -115,11 +175,29 @@ public sealed class ShopSnapshotBuilder
                 continue;
             }
 
-            AddRawColumnItemId(row, 3, itemIds);
-            AddRawColumnItemId(row, 4, itemIds);
+            AddRawColumnItemId(row, StainItem1ColumnIndex, itemIds);
+            AddRawColumnItemId(row, StainItem2ColumnIndex, itemIds);
         }
 
         return itemIds;
+    }
+
+    private static void AddStainItemIdsFromObject(object stain, HashSet<uint> itemIds)
+    {
+        foreach (var propertyName in new[] { "Item", "ItemId", "ItemID", "Item1", "Item2" })
+        {
+            var property = stain.GetType().GetProperty(propertyName);
+            if (property == null)
+            {
+                continue;
+            }
+
+            var itemId = SnapshotReflection.GetRowId(property.GetValue(stain));
+            if (itemId != 0)
+            {
+                itemIds.Add(itemId);
+            }
+        }
     }
 
     private static void AddRawColumnItemId(RawRow row, int columnIndex, HashSet<uint> itemIds)
@@ -181,8 +259,9 @@ public sealed class ShopSnapshotBuilder
         return result;
     }
 
-    private static Dictionary<uint, string> BuildColorantDetectionIndex(
+    private static ColorantDetectionIndex BuildColorantDetectionIndex(
         IReadOnlySet<uint> stainItemIds,
+        bool stainRawFallbackUsed,
         IReadOnlyDictionary<uint, string> itemNames)
     {
         var result = new Dictionary<uint, string>();
@@ -207,7 +286,8 @@ public sealed class ShopSnapshotBuilder
             }
         }
 
-        return result;
+        var nameFallbackCount = result.Count(kvp => kvp.Value == "nameFallback");
+        return new ColorantDetectionIndex(result, stainItemIds.Count, stainRawFallbackUsed, nameFallbackCount);
     }
 
     private static bool IsLikelyColorantItemName(string name)
@@ -241,13 +321,15 @@ public sealed class ShopSnapshotBuilder
     private static Dictionary<uint, NpcLocationInfo> BuildNpcLocationIndex(
         GameData gameData,
         Language language,
-        ExcelSheet<Level> levelSheet)
+        ExcelSheet<Level> levelSheet,
+        ref RawSheetLoadStats stats)
     {
         var result = new Dictionary<uint, NpcLocationInfo>();
         AddManualNpcLocations(result);
         var placeNames = LoadPlaceNameIndex(gameData, language);
         var territoryNames = LoadTerritoryNameIndex(gameData, language, placeNames);
         var mapInfos = LoadMapInfoIndex(gameData, language);
+        stats = new RawSheetLoadStats(mapInfos.Count, territoryNames.Count);
 
         foreach (var level in levelSheet)
         {
@@ -313,7 +395,7 @@ public sealed class ShopSnapshotBuilder
         var rawSheet = gameData.Excel.GetRawSheet("TerritoryType", language);
         foreach (var row in EnumerateRawRows(rawSheet))
         {
-            var placeNameId = ConvertRawUInt(row.ReadColumn(5));
+            var placeNameId = ConvertRawUInt(row.ReadColumn(TerritoryPlaceNameColumnIndex));
             if (row.RowId != 0 && placeNameId != 0 && placeNames.TryGetValue(placeNameId, out var name))
             {
                 result[row.RowId] = name;
@@ -335,9 +417,9 @@ public sealed class ShopSnapshotBuilder
                 continue;
             }
 
-            var subPlaceNameId = ConvertRawUInt(row.ReadColumn(2));
+            var subPlaceNameId = ConvertRawUInt(row.ReadColumn(MapSubPlaceNameColumnIndex));
             placeNames.TryGetValue(subPlaceNameId, out var subAreaName);
-            var sizeFactor = ConvertRawUShort(row.ReadColumn(7));
+            var sizeFactor = ConvertRawUShort(row.ReadColumn(MapSizeFactorColumnIndex));
             if (sizeFactor == 0)
             {
                 sizeFactor = 100;
@@ -345,8 +427,8 @@ public sealed class ShopSnapshotBuilder
 
             result[row.RowId] = new RawMapInfo(
                 sizeFactor,
-                ConvertRawShort(row.ReadColumn(8)),
-                ConvertRawShort(row.ReadColumn(9)),
+                ConvertRawShort(row.ReadColumn(MapOffsetXColumnIndex)),
+                ConvertRawShort(row.ReadColumn(MapOffsetYColumnIndex)),
                 subAreaName ?? string.Empty);
         }
 

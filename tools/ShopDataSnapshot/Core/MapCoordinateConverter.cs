@@ -6,7 +6,7 @@ internal static class MapCoordinateConverter
     {
         var scale = sizeFactor / 100f;
         var c = 41f / scale;
-        var adjusted = (rawPosition * scale + 1024f) / 2048f;
+        var adjusted = ((rawPosition + offset) * scale + 1024f) / 2048f;
         return MathF.Round(c * adjusted + 1f, 1, MidpointRounding.AwayFromZero);
     }
 }

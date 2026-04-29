@@ -37,9 +37,14 @@ try
     Console.WriteLine($"totalRecords: {snapshot.Summary.TotalRecords}");
     Console.WriteLine($"uniqueItems: {snapshot.Summary.UniqueItems}");
     Console.WriteLine($"colorantItems: {snapshot.Summary.ColorantItems}");
+    Console.WriteLine($"stainSheetItemIds: {snapshot.Summary.StainSheetItemIds}");
+    Console.WriteLine($"stainRawFallbackUsed: {snapshot.Summary.StainRawFallbackUsed}");
+    Console.WriteLine($"nameFallbackColorantItems: {snapshot.Summary.NameFallbackColorantItems}");
     Console.WriteLine($"gilShopRecords: {snapshot.Summary.GilShopRecords}");
     Console.WriteLine($"specialShopRecords: {snapshot.Summary.SpecialShopRecords}");
     Console.WriteLine($"missingNpcLocationRecords: {snapshot.Summary.MissingNpcLocationRecords}");
+    Console.WriteLine($"missingNpcLocationUniqueNpcs: {snapshot.Summary.MissingNpcLocationUniqueNpcs}");
+    Console.WriteLine($"missingNpcLocationUniqueShops: {snapshot.Summary.MissingNpcLocationUniqueShops}");
     return 0;
 }
 catch (Exception ex)

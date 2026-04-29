@@ -13,9 +13,26 @@ public sealed record ShopSnapshotSummary(
     int TotalRecords,
     int UniqueItems,
     int ColorantItems,
+    int StainSheetItemIds,
+    bool StainRawFallbackUsed,
+    int NameFallbackColorantItems,
     int GilShopRecords,
     int SpecialShopRecords,
-    int MissingNpcLocationRecords);
+    int MissingNpcLocationRecords,
+    int MissingNpcLocationUniqueNpcs,
+    int MissingNpcLocationUniqueShops,
+    IReadOnlyDictionary<string, int> MissingNpcLocationByShopType,
+    int MapInfoLoadedCount,
+    int TerritoryNameLoadedCount,
+    IReadOnlyList<MissingNpcLocationSample> MissingNpcLocationSamples);
+
+public sealed record MissingNpcLocationSample(
+    string ShopType,
+    uint ShopId,
+    string ShopName,
+    string NpcName,
+    uint ItemId,
+    string ItemName);
 
 public sealed record ShopSnapshotRecord(
     uint ItemId,
@@ -57,3 +74,13 @@ internal sealed record RawMapInfo(
     short OffsetX,
     short OffsetY,
     string SubAreaName);
+
+internal sealed record ColorantDetectionIndex(
+    IReadOnlyDictionary<uint, string> Detections,
+    int StainSheetItemIds,
+    bool StainRawFallbackUsed,
+    int NameFallbackColorantItems);
+
+internal sealed record RawSheetLoadStats(
+    int MapInfoLoadedCount,
+    int TerritoryNameLoadedCount);
