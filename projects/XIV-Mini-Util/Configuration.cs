@@ -51,6 +51,10 @@ public sealed class Configuration : IPluginConfiguration
     public DayOfWeek ChecklistWeeklyResetDay { get; set; } = DayOfWeek.Tuesday;
     public List<ChecklistItem> ChecklistItems { get; set; } = new();
 
+    // シャキ通知設定
+    public bool DutyReadySoundNotificationEnabled { get; set; } = false;
+    public int DutyReadySoundDurationSeconds { get; set; } = 10;
+
     private IDalamudPluginInterface? _pluginInterface;
 
     public void Initialize(IDalamudPluginInterface pluginInterface)
@@ -176,6 +180,8 @@ public sealed class Configuration : IPluginConfiguration
         ChecklistItems = source.ChecklistItems?
             .Select(CloneChecklistItem)
             .ToList() ?? new List<ChecklistItem>();
+        DutyReadySoundNotificationEnabled = source.DutyReadySoundNotificationEnabled;
+        DutyReadySoundDurationSeconds = Math.Clamp(source.DutyReadySoundDurationSeconds, 3, 30);
         NormalizeAndMigrate();
     }
 
@@ -194,11 +200,13 @@ public sealed class Configuration : IPluginConfiguration
         DesynthWarningThreshold = Clamp(DesynthWarningThreshold, 1, 999, out var warningThresholdChanged);
         DesynthTargetCount = Clamp(DesynthTargetCount, 1, 999, out var targetCountChanged);
         NotificationRateLimitRetryMax = Clamp(NotificationRateLimitRetryMax, 0, 10, out var retryCountChanged);
+        DutyReadySoundDurationSeconds = Clamp(DutyReadySoundDurationSeconds, 3, 30, out var dutyReadyDurationChanged);
         changed |= minLevelChanged;
         changed |= maxLevelChanged;
         changed |= warningThresholdChanged;
         changed |= targetCountChanged;
         changed |= retryCountChanged;
+        changed |= dutyReadyDurationChanged;
 
         if (DesynthMinLevel > DesynthMaxLevel)
         {

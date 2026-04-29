@@ -41,6 +41,7 @@ public sealed class MainWindow : Window, IDisposable
         ChecklistService checklistService,
         SubmarineDataStorage submarineDataStorage,
         DiscordService discordService,
+        DutyReadyNotificationService dutyReadyNotificationService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
         : base($"XIV Mini Util [{BuildInfo}]")
@@ -49,7 +50,7 @@ public sealed class MainWindow : Window, IDisposable
         _searchTab = new SearchTab(shopDataCache, shopSearchService);
         _checklistTab = new ChecklistTab(configuration, checklistService);
         _submarineTab = new SubmarineTab(configuration, submarineDataStorage);
-        _settingsTab = new SettingsTab(configuration, materiaService, desynthService, shopDataCache, discordService, checklistService, materiaFeatureEnabled, desynthFeatureEnabled);
+        _settingsTab = new SettingsTab(configuration, materiaService, desynthService, shopDataCache, discordService, checklistService, dutyReadyNotificationService, materiaFeatureEnabled, desynthFeatureEnabled);
 
         SizeConstraints = new WindowSizeConstraints
         {

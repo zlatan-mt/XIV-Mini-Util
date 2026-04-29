@@ -14,6 +14,11 @@ public static class GameUiConstants
     public const string SalvageResultAddonName = "SalvageResult";
     public const string SalvageItemSelectorAddonName = "SalvageItemSelector";
 
+    public static readonly string[] DutyReadyConfirmAddonNames =
+    {
+        "ContentsFinderConfirm",
+    };
+
     // Materialize: 既存プラグインの参照値（パッチで変化する可能性あり）
     public const int MaterializeSelectCallbackValue0 = 2;
     public const uint MaterializeSelectCallbackValue1 = 0;

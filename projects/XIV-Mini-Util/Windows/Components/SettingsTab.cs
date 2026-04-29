@@ -24,6 +24,7 @@ public sealed class SettingsTab : ITabComponent
     private readonly ShopDataCache _shopDataCache;
     private readonly DiscordService _discordService;
     private readonly ChecklistService _checklistService;
+    private readonly DutyReadyNotificationService _dutyReadyNotificationService;
     private readonly bool _materiaFeatureEnabled;
     private readonly bool _desynthFeatureEnabled;
 
@@ -48,6 +49,7 @@ public sealed class SettingsTab : ITabComponent
         ShopDataCache shopDataCache,
         DiscordService discordService,
         ChecklistService checklistService,
+        DutyReadyNotificationService dutyReadyNotificationService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
     {
@@ -57,6 +59,7 @@ public sealed class SettingsTab : ITabComponent
         _shopDataCache = shopDataCache;
         _discordService = discordService;
         _checklistService = checklistService;
+        _dutyReadyNotificationService = dutyReadyNotificationService;
         _materiaFeatureEnabled = materiaFeatureEnabled;
         _desynthFeatureEnabled = desynthFeatureEnabled;
     }
@@ -94,6 +97,7 @@ public sealed class SettingsTab : ITabComponent
             _desynthFeatureEnabled ? "Desynthesis" : "Desynthesis (無効中)",
             "Shop Search",
             "Checklist",
+            "シャキ通知",
             "Submarines",
         };
 
@@ -130,6 +134,9 @@ public sealed class SettingsTab : ITabComponent
                 DrawChecklistSettings();
                 break;
             case 4:
+                DrawDutyReadySettings();
+                break;
+            case 5:
                 DrawSubmarineSettings();
                 break;
             default:
@@ -304,6 +311,35 @@ public sealed class SettingsTab : ITabComponent
         if (!trackerEnabled)
         {
             ImGui.EndDisabled();
+        }
+    }
+
+    private void DrawDutyReadySettings()
+    {
+        ImGui.Text("シャキ通知");
+        ImGui.Separator();
+
+        var enabled = _configuration.DutyReadySoundNotificationEnabled;
+        if (ImGui.Checkbox("シャキ通知音を有効化", ref enabled))
+        {
+            _configuration.DutyReadySoundNotificationEnabled = enabled;
+            _configuration.Save();
+        }
+
+        var durationSeconds = _configuration.DutyReadySoundDurationSeconds;
+        if (ImGui.InputInt("通知時間 (秒)", ref durationSeconds))
+        {
+            _configuration.DutyReadySoundDurationSeconds = Math.Clamp(durationSeconds, 3, 30);
+            _configuration.Save();
+        }
+
+        ImGui.TextDisabled("3〜30秒。確認画面が消えた場合は設定時間内でも停止します。");
+        ImGui.TextDisabled("Windowsの通知音を使うため、OS側のミュートや出力設定には従います。");
+
+        ImGui.Spacing();
+        if (ImGui.Button("テスト再生"))
+        {
+            _dutyReadyNotificationService.PlayTest();
         }
     }
 

@@ -6,32 +6,41 @@ using Dalamud.Game.Gui.ContextMenu;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using Lumina.Excel.Sheets;
 using System.Reflection;
+using XivMiniUtil.Services.Market;
 
 namespace XivMiniUtil.Services.Shop;
 
 public sealed class ContextMenuService : IDisposable
 {
     private const string SearchLabel = "販売場所を検索";
+    private const string UniversalisSearchLabel = "Universalisで最安値確認";
 
     private readonly IContextMenu _contextMenu;
     private readonly IGameGui _gameGui;
+    private readonly IDataManager _dataManager;
     private readonly ShopSearchService _shopSearchService;
     private readonly ShopDataCache _shopDataCache;
+    private readonly UniversalisMarketService _universalisMarketService;
     private readonly IPluginLog _pluginLog;
     private readonly ColorantItemResolver _colorantItemResolver;
 
     public ContextMenuService(
         IContextMenu contextMenu,
         IGameGui gameGui,
+        IDataManager dataManager,
         ShopSearchService shopSearchService,
         ShopDataCache shopDataCache,
+        UniversalisMarketService universalisMarketService,
         IPluginLog pluginLog)
     {
         _contextMenu = contextMenu;
         _gameGui = gameGui;
+        _dataManager = dataManager;
         _shopSearchService = shopSearchService;
         _shopDataCache = shopDataCache;
+        _universalisMarketService = universalisMarketService;
         _pluginLog = pluginLog;
         _colorantItemResolver = new ColorantItemResolver(gameGui, shopDataCache, pluginLog);
 
@@ -68,6 +77,7 @@ public sealed class ContextMenuService : IDisposable
 
         var isReady = _shopDataCache.IsInitialized;
         var hasData = _shopDataCache.HasShopData(itemId);
+        var isMarketable = IsMarketableItem(itemId);
         var label = BuildMenuLabel(isReady, hasData);
 
         // 販売データがない場合は診断ログを出力
@@ -87,6 +97,16 @@ public sealed class ContextMenuService : IDisposable
 
         SetMenuItemEnabled(menuItem, isReady && hasData);
         args.AddMenuItem(menuItem);
+
+        var universalisMenuItem = new MenuItem
+        {
+            Name = new SeStringBuilder().AddText(isMarketable ? UniversalisSearchLabel : $"{UniversalisSearchLabel} (取引不可)").Build(),
+            OnClicked = OnUniversalisSearchClicked,
+            PrefixChar = 'U',
+        };
+
+        SetMenuItemEnabled(universalisMenuItem, isMarketable);
+        args.AddMenuItem(universalisMenuItem);
     }
 
     private void OnSearchClicked(IMenuItemClickedArgs args)
@@ -105,6 +125,24 @@ public sealed class ContextMenuService : IDisposable
         }
 
         _shopSearchService.Search(itemId);
+    }
+
+    private void OnUniversalisSearchClicked(IMenuItemClickedArgs args)
+    {
+        var addonName = args.AddonName ?? string.Empty;
+        if (args.Target == null || !TryGetItemId(args.Target, addonName, out var itemId))
+        {
+            _pluginLog.Warning("Universalis検索の対象アイテムが取得できませんでした。");
+            return;
+        }
+
+        if (!IsMarketableItem(itemId))
+        {
+            _pluginLog.Information($"Universalis検索対象外アイテム: {itemId}");
+            return;
+        }
+
+        _universalisMarketService.CheckLowestPrice(itemId);
     }
 
     private bool TryGetItemId(object target, string addonName, out uint itemId)
@@ -276,6 +314,12 @@ public sealed class ContextMenuService : IDisposable
         }
 
         return SearchLabel;
+    }
+
+    private bool IsMarketableItem(uint itemId)
+    {
+        var item = _dataManager.Excel.GetSheet<Item>().GetRowOrDefault(itemId);
+        return item.HasValue && item.Value.ItemSearchCategory.RowId != 0;
     }
 
     private static void SetMenuItemEnabled(MenuItem menuItem, bool enabled)

@@ -9,6 +9,7 @@ using Dalamud.Interface.Windowing;
 using XivMiniUtil.Services.Common;
 using XivMiniUtil.Services.Checklist;
 using XivMiniUtil.Services.Desynth;
+using XivMiniUtil.Services.Market;
 using XivMiniUtil.Services.Materia;
 using XivMiniUtil.Services.Notification;
 using XivMiniUtil.Services.Shop;
@@ -37,11 +38,13 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ChatService _chatService;
     private readonly ShopSearchService _shopSearchService;
     private readonly ContextMenuService _contextMenuService;
+    private readonly UniversalisMarketService _universalisMarketService;
     private readonly TeleportService _teleportService;
     private readonly SubmarineDataStorage _submarineDataStorage;
     private readonly DiscordService _discordService;
     private readonly SubmarineService _submarineService;
     private readonly ChecklistService _checklistService;
+    private readonly DutyReadyNotificationService _dutyReadyNotificationService;
     private readonly MainWindow _mainWindow;
     private readonly ShopSearchResultWindow _shopSearchResultWindow;
 
@@ -79,9 +82,18 @@ public sealed class Plugin : IDalamudPlugin
         _addonStateTracker = new AddonStateTracker(addonLifecycle, pluginLog);
         _addonStateTracker.Register(GameUiConstants.MaterializeAddonName);
         _addonStateTracker.Register(GameUiConstants.MaterializeDialogAddonName);
+        foreach (var addonName in GameUiConstants.DutyReadyConfirmAddonNames)
+        {
+            _addonStateTracker.Register(addonName);
+        }
 
         _submarineDataStorage = new SubmarineDataStorage(pluginInterface, pluginLog);
         _discordService = new DiscordService(_configuration, pluginLog, chatGui);
+        _dutyReadyNotificationService = new DutyReadyNotificationService(
+            framework,
+            _configuration,
+            _addonStateTracker,
+            pluginLog);
         _submarineService = new SubmarineService(
             framework,
             clientState,
@@ -120,7 +132,8 @@ public sealed class Plugin : IDalamudPlugin
         _chatService = new ChatService(chatGui, _mapService);
         _teleportService = new TeleportService(dataManager, aetheryteList, pluginLog);
         _shopSearchService = new ShopSearchService(_shopDataCache, _mapService, _chatService, _teleportService, _configuration, pluginLog);
-        _contextMenuService = new ContextMenuService(contextMenu, gameGui, _shopSearchService, _shopDataCache, pluginLog);
+        _universalisMarketService = new UniversalisMarketService(dataManager, objectTable, chatGui, pluginLog);
+        _contextMenuService = new ContextMenuService(contextMenu, gameGui, dataManager, _shopSearchService, _shopDataCache, _universalisMarketService, pluginLog);
 
         var materiaFeatureEnabled = _configuration.MateriaFeatureEnabled;
         var desynthFeatureEnabled = _configuration.DesynthFeatureEnabled;
@@ -145,6 +158,7 @@ public sealed class Plugin : IDalamudPlugin
             _checklistService,
             _submarineDataStorage,
             _discordService,
+            _dutyReadyNotificationService,
             materiaFeatureEnabled,
             desynthFeatureEnabled);
         _shopSearchResultWindow = new ShopSearchResultWindow(_mapService, _teleportService, _configuration);
@@ -184,10 +198,12 @@ public sealed class Plugin : IDalamudPlugin
 
         _mainWindow.Dispose();
         _shopSearchResultWindow.Dispose();
+        _dutyReadyNotificationService.Dispose();
         _materiaService.Dispose();
         _desynthService.Dispose();
         _addonStateTracker.Dispose();
         _contextMenuService.Dispose();
+        _universalisMarketService.Dispose();
         _submarineService.Dispose();
         _submarineDataStorage.Dispose();
         _checklistService.Dispose();
