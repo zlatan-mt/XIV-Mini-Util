@@ -9,6 +9,11 @@
 artifacts/
 publish/
 
+# Local shop snapshot tool outputs
+tools/ShopDataSnapshot/[Bb]in/
+tools/ShopDataSnapshot/[Oo]bj/
+artifacts/shop-snapshot/
+
 # NuGet
 *.nupkg
 *.snupkg
