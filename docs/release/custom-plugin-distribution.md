@@ -27,8 +27,8 @@
 ## 補助スクリプト
 - `scripts/release-build.sh`
   - Release ビルドを行い、`XivMiniUtil.zip` を生成する
-- `.claude/skills/dalamud-release/scripts/release.sh`
-  - GitHub Release 作成と `pluginmaster.json` 更新をまとめて行う補助スクリプト
+- `/dalamud-release`
+  - Claude 利用時に GitHub Release 作成と `pluginmaster.json` 更新をまとめて行う補助スキル
   - 実行前に `gh` CLI の認証状態を確認する
 
 ## 公開URL
@@ -39,4 +39,4 @@
 
 ## 注意
 - リリース前に `pluginmaster.json` のダウンロードURLが対象タグを指しているか確認する
-- `.kiro/` 配下は `.gitignore` 対象のため、仕様メモやローカル検証記録は別途共有手段を考える
+- リリース成果物やローカル検証記録は Git 管理せず、必要に応じて GitHub Releases や外部バックアップで扱う

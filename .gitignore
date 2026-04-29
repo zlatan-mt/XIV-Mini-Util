@@ -1,7 +1,7 @@
 # Path: .gitignore
 # Description: ビルド成果物やローカル環境ファイルを除外する
 # Reason: リポジトリをクリーンに保つため
-# RELEVANT FILES: projects/XIV-Mini-Util/XivMiniUtil.csproj, .kiro/specs/dalamud-utility-plugin/tasks.md, README.md
+# RELEVANT FILES: projects/XIV-Mini-Util/XivMiniUtil.csproj, README.md
 # Build results
 [Bb]in/
 [Oo]bj/
@@ -69,8 +69,9 @@ desktop.ini
 _ReSharper*/
 *.DotSettings.user
 
-# AI tools
+# Local AI tool files
 .claude/
+.codex
 .codex/
 .cursor/
 .gemini/

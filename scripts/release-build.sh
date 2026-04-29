@@ -17,20 +17,16 @@ if [[ -z "$LATEST_HOOKS_DIR" ]]; then
   exit 1
 fi
 
-DOTNET_BIN="$ROOT_DIR/.dotnet_home/.dotnet/dotnet"
-if [[ ! -x "$DOTNET_BIN" ]]; then
-  DOTNET_BIN="dotnet"
-fi
+DOTNET_BIN="${DOTNET_BIN:-dotnet}"
 
 PROJECT="$ROOT_DIR/projects/XIV-Mini-Util/XivMiniUtil.csproj"
-DEV_PLUGIN_OUTPUT_DIR="$ROOT_DIR/.devplugins/XivMiniUtil/"
 BUILD_CONFIG="Release"
 
 echo "Using hooks: $LATEST_HOOKS_DIR"
 
 DALAMUD_HOME="$LATEST_HOOKS_DIR" \
 DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-"$DOTNET_BIN" build "$PROJECT" -c "$BUILD_CONFIG" -p:DevPluginOutputDir="$DEV_PLUGIN_OUTPUT_DIR"
+"$DOTNET_BIN" build "$PROJECT" -c "$BUILD_CONFIG" -p:DevPluginOutputDir=
 
 ZIP_PATH="$ROOT_DIR/XivMiniUtil.zip"
 DLL_PATH="$ROOT_DIR/projects/XIV-Mini-Util/bin/Release/XivMiniUtil.dll"
