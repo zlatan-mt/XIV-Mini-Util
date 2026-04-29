@@ -42,7 +42,8 @@ try
             records.Count(record => record.ShopSaleStatus == "available"),
             records.Count(record => record.ShopSaleStatus == "none"),
             records.Count(record => record.ShopSaleStatus == "unknown"),
-            records.Count(record => record.ParseStatus is "fetch_failed" or "parse_failed")));
+            records.Count(record => record.ParseStatus is "fetch_failed" or "parse_failed"),
+            records.Count(record => record.ParseStatus == "cached")));
 
     var outputPath = Path.GetFullPath(options.OutputPath);
     var outputDirectory = Path.GetDirectoryName(outputPath);
@@ -65,6 +66,7 @@ try
     Console.WriteLine($"noSales: {document.Summary.NoSales}");
     Console.WriteLine($"unknown: {document.Summary.Unknown}");
     Console.WriteLine($"parseFailed: {document.Summary.ParseFailed}");
+    Console.WriteLine($"cachedRecords: {document.Summary.CachedRecords}");
     return 0;
 }
 catch (Exception ex)
@@ -107,6 +109,7 @@ static async Task<LodestoneColorantRecord> FetchAndParseAsync(
                 fetchedAt,
                 "unknown",
                 null,
+                null,
                 "fetch_failed",
                 ex.Message);
         }
@@ -115,8 +118,11 @@ static async Task<LodestoneColorantRecord> FetchAndParseAsync(
     try
     {
         var itemName = ParseItemName(html);
-        var price = ParseShopPrice(html);
-        var saleStatus = price.HasValue ? "available" : HtmlContainsNoShopSale(html) ? "none" : "unknown";
+        var looksLikeItemPage = LooksLikeLodestoneItemPage(html, itemUrl);
+        var priceResult = ParseShopPrice(html);
+        var noSaleEvidence = HtmlContainsExplicitNoShopSale(html);
+        var saleStatus = ResolveShopSaleStatus(looksLikeItemPage, priceResult.Price, noSaleEvidence);
+        var saleEvidence = priceResult.MatchedText ?? noSaleEvidence;
 
         return new LodestoneColorantRecord(
             itemName,
@@ -125,9 +131,10 @@ static async Task<LodestoneColorantRecord> FetchAndParseAsync(
             itemUrl,
             fetchedAt,
             saleStatus,
-            price,
+            priceResult.Price,
+            saleEvidence,
             parseStatus,
-            parseWarning ?? (saleStatus == "unknown" ? "SHOP sale status could not be determined." : null));
+            parseWarning ?? BuildParseWarning(saleStatus, looksLikeItemPage));
     }
     catch (Exception ex)
     {
@@ -138,6 +145,7 @@ static async Task<LodestoneColorantRecord> FetchAndParseAsync(
             itemUrl,
             fetchedAt,
             "unknown",
+            null,
             null,
             "parse_failed",
             ex.Message);
@@ -175,7 +183,20 @@ static string? ParseItemName(string html)
     return null;
 }
 
-static int? ParseShopPrice(string html)
+static bool LooksLikeLodestoneItemPage(string html, string sourceUrl)
+{
+    return Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri)
+        && uri.Host.Equals("jp.finalfantasyxiv.com", StringComparison.OrdinalIgnoreCase)
+        && uri.AbsolutePath.Contains("/lodestone/playguide/db/item/", StringComparison.OrdinalIgnoreCase)
+        && html.Contains("エオルゼアデータベース", StringComparison.Ordinal)
+        && html.Contains("playguide/db/item", StringComparison.OrdinalIgnoreCase)
+        && Regex.IsMatch(
+            html,
+            @"<title>\s*エオルゼアデータベース「.+?」",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+}
+
+static ShopPriceParseResult ParseShopPrice(string html)
 {
     var match = Regex.Match(
         html,
@@ -183,17 +204,61 @@ static int? ParseShopPrice(string html)
         RegexOptions.IgnoreCase | RegexOptions.Singleline);
     if (!match.Success)
     {
-        return null;
+        return new ShopPriceParseResult(null, null);
     }
 
+    var matchedText = CleanHtmlText(match.Value);
     return int.TryParse(match.Groups["price"].Value.Replace(",", string.Empty, StringComparison.Ordinal), out var price)
-        ? price
-        : null;
+        ? new ShopPriceParseResult(price, matchedText)
+        : new ShopPriceParseResult(null, matchedText);
 }
 
-static bool HtmlContainsNoShopSale(string html)
+static string? HtmlContainsExplicitNoShopSale(string html)
 {
-    return !html.Contains("SHOP販売価格:", StringComparison.Ordinal);
+    foreach (var pattern in new[]
+             {
+                 "SHOP販売なし",
+                 "SHOP販売価格なし",
+                 "ショップ販売なし",
+                 "販売ショップNPCなし",
+                 "販売ショップNPCはありません",
+                 "ショップで販売されていません",
+             })
+    {
+        if (html.Contains(pattern, StringComparison.Ordinal))
+        {
+            return pattern;
+        }
+    }
+
+    return null;
+}
+
+static string ResolveShopSaleStatus(bool looksLikeItemPage, int? shopPrice, string? noSaleEvidence)
+{
+    if (!looksLikeItemPage)
+    {
+        return "unknown";
+    }
+
+    if (shopPrice.HasValue)
+    {
+        return "available";
+    }
+
+    return noSaleEvidence == null ? "unknown" : "none";
+}
+
+static string? BuildParseWarning(string saleStatus, bool looksLikeItemPage)
+{
+    if (!looksLikeItemPage)
+    {
+        return "HTML did not look like a Lodestone item page.";
+    }
+
+    return saleStatus == "unknown"
+        ? "SHOP sale status could not be determined from explicit evidence."
+        : null;
 }
 
 static string CleanHtmlText(string value)
@@ -324,6 +389,7 @@ internal sealed record LodestoneColorantRecord(
     string FetchedAt,
     string ShopSaleStatus,
     int? ShopPrice,
+    string? SaleEvidence,
     string ParseStatus,
     string? ParseWarning);
 
@@ -332,4 +398,7 @@ internal sealed record LodestoneColorantSummary(
     int AvailableSales,
     int NoSales,
     int Unknown,
-    int ParseFailed);
+    int ParseFailed,
+    int CachedRecords);
+
+internal sealed record ShopPriceParseResult(int? Price, string? MatchedText);

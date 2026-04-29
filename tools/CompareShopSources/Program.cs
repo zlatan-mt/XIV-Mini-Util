@@ -46,8 +46,10 @@ try
     Console.WriteLine($"p0LodestoneAvailableSnapshotMissing: {result.Summary.P0LodestoneAvailableSnapshotMissing}");
     Console.WriteLine($"p1LodestoneItemUnmapped: {result.Summary.P1LodestoneItemUnmapped}");
     Console.WriteLine($"p2SnapshotAvailableLodestoneNone: {result.Summary.P2SnapshotAvailableLodestoneNone}");
+    Console.WriteLine($"p2SnapshotAvailableLodestoneNoneDistinctItems: {result.Summary.P2SnapshotAvailableLodestoneNoneDistinctItems}");
     Console.WriteLine($"p3NameFallbackReference: {result.Summary.P3NameFallbackReference}");
     Console.WriteLine($"p4AvailableButLocationMissing: {result.Summary.P4AvailableButLocationMissing}");
+    Console.WriteLine($"p4AvailableButLocationMissingDistinctItems: {result.Summary.P4AvailableButLocationMissingDistinctItems}");
     return 0;
 }
 catch (Exception ex)
@@ -201,9 +203,21 @@ static CompareDocument Compare(SnapshotInput snapshot, LodestoneInput lodestone)
             orderedIssues.Count(issue => issue.Priority == "P0"),
             orderedIssues.Count(issue => issue.Priority == "P1"),
             orderedIssues.Count(issue => issue.Priority == "P2"),
+            CountDistinctItems(orderedIssues, "P2"),
             orderedIssues.Count(issue => issue.Priority == "P3"),
-            orderedIssues.Count(issue => issue.Priority == "P4")),
+            orderedIssues.Count(issue => issue.Priority == "P4"),
+            CountDistinctItems(orderedIssues, "P4")),
         orderedIssues);
+}
+
+static int CountDistinctItems(IEnumerable<CompareIssue> issues, string priority)
+{
+    return issues
+        .Where(issue => issue.Priority == priority)
+        .Select(issue => issue.ItemId?.ToString() ?? issue.ItemName ?? issue.LodestoneItemName ?? string.Empty)
+        .Where(key => !string.IsNullOrWhiteSpace(key))
+        .Distinct(StringComparer.Ordinal)
+        .Count();
 }
 
 static IReadOnlyList<SnapshotRecord> FindSnapshotMatches(
@@ -241,8 +255,10 @@ static string BuildMarkdown(CompareDocument result)
     builder.AppendLine($"- P0 Lodestone販売あり / snapshot stainSheet販売なし: {result.Summary.P0LodestoneAvailableSnapshotMissing}");
     builder.AppendLine($"- P1 Lodestone item名を snapshot itemId へ逆引き不可: {result.Summary.P1LodestoneItemUnmapped}");
     builder.AppendLine($"- P2 snapshot stainSheet販売あり / Lodestone販売なし: {result.Summary.P2SnapshotAvailableLodestoneNone}");
+    builder.AppendLine($"- P2 distinct items: {result.Summary.P2SnapshotAvailableLodestoneNoneDistinctItems}");
     builder.AppendLine($"- P3 snapshot nameFallback販売あり / Lodestone照合未確認: {result.Summary.P3NameFallbackReference}");
     builder.AppendLine($"- P4 Lodestone販売あり / snapshot販売あり / location missing: {result.Summary.P4AvailableButLocationMissing}");
+    builder.AppendLine($"- P4 distinct items: {result.Summary.P4AvailableButLocationMissingDistinctItems}");
     builder.AppendLine();
     builder.AppendLine("## Issues");
     builder.AppendLine();
@@ -389,8 +405,10 @@ internal sealed record CompareSummary(
     int P0LodestoneAvailableSnapshotMissing,
     int P1LodestoneItemUnmapped,
     int P2SnapshotAvailableLodestoneNone,
+    int P2SnapshotAvailableLodestoneNoneDistinctItems,
     int P3NameFallbackReference,
-    int P4AvailableButLocationMissing);
+    int P4AvailableButLocationMissing,
+    int P4AvailableButLocationMissingDistinctItems);
 
 internal sealed record CompareIssue(
     string Priority,
