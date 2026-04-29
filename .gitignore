@@ -2,7 +2,7 @@
 # Description: ビルド成果物やローカル環境ファイルを除外する
 # Reason: リポジトリをクリーンに保つため
 # RELEVANT FILES: projects/XIV-Mini-Util/XivMiniUtil.csproj, README.md
-# Build results
+# Build results and local tool outputs
 [Bb]in/
 [Oo]bj/
 [Oo]ut/

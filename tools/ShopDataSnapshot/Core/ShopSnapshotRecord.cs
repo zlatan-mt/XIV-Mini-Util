@@ -14,6 +14,7 @@ public sealed record ShopSnapshotSummary(
     int TotalRecords,
     int UniqueItems,
     int ColorantItems,
+    int StainSheetColorantItemsInSnapshot,
     int StainSheetItemIds,
     bool StainRawFallbackUsed,
     int NameFallbackColorantItems,

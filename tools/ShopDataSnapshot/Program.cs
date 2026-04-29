@@ -37,6 +37,7 @@ try
     Console.WriteLine($"totalRecords: {snapshot.Summary.TotalRecords}");
     Console.WriteLine($"uniqueItems: {snapshot.Summary.UniqueItems}");
     Console.WriteLine($"colorantItems: {snapshot.Summary.ColorantItems}");
+    Console.WriteLine($"stainSheetColorantItemsInSnapshot: {snapshot.Summary.StainSheetColorantItemsInSnapshot}");
     Console.WriteLine($"stainSheetItemIds: {snapshot.Summary.StainSheetItemIds}");
     Console.WriteLine($"stainRawFallbackUsed: {snapshot.Summary.StainRawFallbackUsed}");
     Console.WriteLine($"nameFallbackColorantItems: {snapshot.Summary.NameFallbackColorantItems}");

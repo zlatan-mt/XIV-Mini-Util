@@ -69,6 +69,11 @@ public sealed class ShopSnapshotBuilder
             sorted.Count,
             sorted.Select(record => record.ItemId).Distinct().Count(),
             sorted.Where(record => record.IsColorant).Select(record => record.ItemId).Distinct().Count(),
+            sorted
+                .Where(record => record.ColorantDetection == "stainSheet")
+                .Select(record => record.ItemId)
+                .Distinct()
+                .Count(),
             colorantDetections.StainSheetItemIds,
             colorantDetections.StainRawFallbackUsed,
             sorted
