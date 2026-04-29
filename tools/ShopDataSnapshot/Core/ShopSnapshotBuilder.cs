@@ -8,13 +8,13 @@ namespace ShopDataSnapshot.Core;
 
 public sealed class ShopSnapshotBuilder
 {
-    private const int StainItem1ColumnIndex = 3;
-    private const int StainItem2ColumnIndex = 4;
-    private const int TerritoryPlaceNameColumnIndex = 5;
-    private const int MapSubPlaceNameColumnIndex = 2;
-    private const int MapSizeFactorColumnIndex = 7;
-    private const int MapOffsetXColumnIndex = 8;
-    private const int MapOffsetYColumnIndex = 9;
+    private const int StainItem1ColumnIndex = 3; // Stain -> primary Item reference candidate.
+    private const int StainItem2ColumnIndex = 4; // Stain -> secondary Item reference candidate.
+    private const int TerritoryPlaceNameColumnIndex = 5; // TerritoryType -> PlaceName.
+    private const int MapSubPlaceNameColumnIndex = 2; // Map -> PlaceNameSub.
+    private const int MapSizeFactorColumnIndex = 7; // Map -> SizeFactor.
+    private const int MapOffsetXColumnIndex = 8; // Map -> OffsetX.
+    private const int MapOffsetYColumnIndex = 9; // Map -> OffsetY.
 
     public ShopSnapshotDocument Build(SnapshotOptions options)
     {
@@ -100,6 +100,7 @@ public sealed class ShopSnapshotBuilder
         return new ShopSnapshotDocument(
             DateTimeOffset.UtcNow.ToString("O"),
             Path.GetFullPath(options.GamePath),
+            dataPath,
             LanguageToOption(language),
             typeof(GameData).Assembly.GetName().Version?.ToString() ?? "unknown",
             sorted.Count,
@@ -286,8 +287,7 @@ public sealed class ShopSnapshotBuilder
             }
         }
 
-        var nameFallbackCount = result.Count(kvp => kvp.Value == "nameFallback");
-        return new ColorantDetectionIndex(result, stainItemIds.Count, stainRawFallbackUsed, nameFallbackCount);
+        return new ColorantDetectionIndex(result, stainItemIds.Count, stainRawFallbackUsed);
     }
 
     private static bool IsLikelyColorantItemName(string name)

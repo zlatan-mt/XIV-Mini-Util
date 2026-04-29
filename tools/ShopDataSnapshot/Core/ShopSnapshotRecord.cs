@@ -3,6 +3,7 @@ namespace ShopDataSnapshot.Core;
 public sealed record ShopSnapshotDocument(
     string GeneratedAt,
     string GamePath,
+    string ResolvedDataPath,
     string Language,
     string LuminaVersion,
     int RecordCount,
@@ -78,8 +79,7 @@ internal sealed record RawMapInfo(
 internal sealed record ColorantDetectionIndex(
     IReadOnlyDictionary<uint, string> Detections,
     int StainSheetItemIds,
-    bool StainRawFallbackUsed,
-    int NameFallbackColorantItems);
+    bool StainRawFallbackUsed);
 
 internal sealed record RawSheetLoadStats(
     int MapInfoLoadedCount,
