@@ -51,6 +51,7 @@ HTML は `artifacts/shop-snapshot/cache/lodestone/` にキャッシュする。
 
 `shop-snapshot.json` と `lodestone-colorants.json` を比較し、P0-P4 の分類で `colorant-diff.json` と `colorant-diff.md` を出力する。
 P0 判定では `colorantDetection == "stainSheet"` のみを公式候補として扱い、`nameFallback` は P3 の参考候補に分離する。
+Lodestone側の `unknown` / `cached` 件数も summary に出し、P2 が 0 の場合でも「販売なし矛盾なし」なのか「未判定に逃がした」のかを読めるようにする。
 
 ### CLI
 
@@ -220,6 +221,9 @@ p2SnapshotAvailableLodestoneNoneDistinctItems: 0
 p3NameFallbackReference: 1
 p4AvailableButLocationMissing: 2
 p4AvailableButLocationMissingDistinctItems: 1
+lodestoneUnknownRecords: 2
+lodestoneUnknownDistinctItems: 2
+lodestoneCachedRecords: 0
 ```
 
 ## 現時点の評価
@@ -256,7 +260,9 @@ Lodestone の最新検索結果を公式検算ソースとして取得し、snap
 - HTMLキャッシュを `artifacts/shop-snapshot/cache/lodestone/` に保存できるようにする。
 - 取得失敗は snapshot 生成とは独立させ、warning 扱いにする。
 - Lodestone結果には `sourceUrl`、`fetchedAt`、`parseStatus`、`saleEvidence`、`parseWarning` を持たせる。
-- `SHOP販売価格` も明示的な販売なし表記も取れない場合は `unknown` とする。
+- `SHOP販売価格` が取れた場合は `available` とし、`SHOP販売価格` も明示的な販売なし表記も取れない場合は `unknown` とする。
+- `saleEvidence` は `available` / `none` の根拠だけを入れ、`unknown` では `null` とする。
+- fetch/cache 警告と販売状態の判定不能理由は、どちらか一方で上書きせず結合して `parseWarning` に残す。
 
 seed URL:
 

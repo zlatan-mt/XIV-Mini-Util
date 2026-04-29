@@ -122,7 +122,13 @@ static async Task<LodestoneColorantRecord> FetchAndParseAsync(
         var priceResult = ParseShopPrice(html);
         var noSaleEvidence = HtmlContainsExplicitNoShopSale(html);
         var saleStatus = ResolveShopSaleStatus(looksLikeItemPage, priceResult.Price, noSaleEvidence);
-        var saleEvidence = priceResult.MatchedText ?? noSaleEvidence;
+        var saleEvidence = saleStatus switch
+        {
+            "available" => priceResult.MatchedText,
+            "none" => noSaleEvidence,
+            _ => null,
+        };
+        var statusWarning = BuildParseWarning(saleStatus, looksLikeItemPage);
 
         return new LodestoneColorantRecord(
             itemName,
@@ -134,7 +140,7 @@ static async Task<LodestoneColorantRecord> FetchAndParseAsync(
             priceResult.Price,
             saleEvidence,
             parseStatus,
-            parseWarning ?? BuildParseWarning(saleStatus, looksLikeItemPage));
+            CombineWarnings(parseWarning, statusWarning));
     }
     catch (Exception ex)
     {
@@ -236,14 +242,14 @@ static string? HtmlContainsExplicitNoShopSale(string html)
 
 static string ResolveShopSaleStatus(bool looksLikeItemPage, int? shopPrice, string? noSaleEvidence)
 {
-    if (!looksLikeItemPage)
-    {
-        return "unknown";
-    }
-
     if (shopPrice.HasValue)
     {
         return "available";
+    }
+
+    if (!looksLikeItemPage)
+    {
+        return "unknown";
     }
 
     return noSaleEvidence == null ? "unknown" : "none";
@@ -259,6 +265,16 @@ static string? BuildParseWarning(string saleStatus, bool looksLikeItemPage)
     return saleStatus == "unknown"
         ? "SHOP sale status could not be determined from explicit evidence."
         : null;
+}
+
+static string? CombineWarnings(params string?[] warnings)
+{
+    var values = warnings
+        .Where(warning => !string.IsNullOrWhiteSpace(warning))
+        .Select(warning => warning!.Trim())
+        .ToArray();
+
+    return values.Length == 0 ? null : string.Join(" ", values);
 }
 
 static string CleanHtmlText(string value)

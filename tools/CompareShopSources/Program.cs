@@ -50,6 +50,9 @@ try
     Console.WriteLine($"p3NameFallbackReference: {result.Summary.P3NameFallbackReference}");
     Console.WriteLine($"p4AvailableButLocationMissing: {result.Summary.P4AvailableButLocationMissing}");
     Console.WriteLine($"p4AvailableButLocationMissingDistinctItems: {result.Summary.P4AvailableButLocationMissingDistinctItems}");
+    Console.WriteLine($"lodestoneUnknownRecords: {result.Summary.LodestoneUnknownRecords}");
+    Console.WriteLine($"lodestoneUnknownDistinctItems: {result.Summary.LodestoneUnknownDistinctItems}");
+    Console.WriteLine($"lodestoneCachedRecords: {result.Summary.LodestoneCachedRecords}");
     return 0;
 }
 catch (Exception ex)
@@ -206,7 +209,10 @@ static CompareDocument Compare(SnapshotInput snapshot, LodestoneInput lodestone)
             CountDistinctItems(orderedIssues, "P2"),
             orderedIssues.Count(issue => issue.Priority == "P3"),
             orderedIssues.Count(issue => issue.Priority == "P4"),
-            CountDistinctItems(orderedIssues, "P4")),
+            CountDistinctItems(orderedIssues, "P4"),
+            lodestone.Records.Count(record => record.ShopSaleStatus == "unknown"),
+            CountDistinctLodestoneItems(lodestone.Records, "unknown"),
+            lodestone.Records.Count(record => record.ParseStatus == "cached")),
         orderedIssues);
 }
 
@@ -215,6 +221,16 @@ static int CountDistinctItems(IEnumerable<CompareIssue> issues, string priority)
     return issues
         .Where(issue => issue.Priority == priority)
         .Select(issue => issue.ItemId?.ToString() ?? issue.ItemName ?? issue.LodestoneItemName ?? string.Empty)
+        .Where(key => !string.IsNullOrWhiteSpace(key))
+        .Distinct(StringComparer.Ordinal)
+        .Count();
+}
+
+static int CountDistinctLodestoneItems(IEnumerable<LodestoneRecord> records, string shopSaleStatus)
+{
+    return records
+        .Where(record => record.ShopSaleStatus == shopSaleStatus)
+        .Select(record => record.NormalizedItemName ?? record.ItemName ?? record.ItemPageUrl)
         .Where(key => !string.IsNullOrWhiteSpace(key))
         .Distinct(StringComparer.Ordinal)
         .Count();
@@ -259,6 +275,9 @@ static string BuildMarkdown(CompareDocument result)
     builder.AppendLine($"- P3 snapshot nameFallback販売あり / Lodestone照合未確認: {result.Summary.P3NameFallbackReference}");
     builder.AppendLine($"- P4 Lodestone販売あり / snapshot販売あり / location missing: {result.Summary.P4AvailableButLocationMissing}");
     builder.AppendLine($"- P4 distinct items: {result.Summary.P4AvailableButLocationMissingDistinctItems}");
+    builder.AppendLine($"- Lodestone unknown records: {result.Summary.LodestoneUnknownRecords}");
+    builder.AppendLine($"- Lodestone unknown distinct items: {result.Summary.LodestoneUnknownDistinctItems}");
+    builder.AppendLine($"- Lodestone cached records: {result.Summary.LodestoneCachedRecords}");
     builder.AppendLine();
     builder.AppendLine("## Issues");
     builder.AppendLine();
@@ -408,7 +427,10 @@ internal sealed record CompareSummary(
     int P2SnapshotAvailableLodestoneNoneDistinctItems,
     int P3NameFallbackReference,
     int P4AvailableButLocationMissing,
-    int P4AvailableButLocationMissingDistinctItems);
+    int P4AvailableButLocationMissingDistinctItems,
+    int LodestoneUnknownRecords,
+    int LodestoneUnknownDistinctItems,
+    int LodestoneCachedRecords);
 
 internal sealed record CompareIssue(
     string Priority,
