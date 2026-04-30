@@ -6,10 +6,10 @@
     "Description": "マテリア精製とアイテム分解、NPC販売場所検索を支援するミニユーティリティです。",
     "InternalName": "XivMiniUtil",
     "AssemblyVersion": "0.3.0",
-    "TestingAssemblyVersion": "0.3.0",
+    "TestingAssemblyVersion": "0.3.1",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 14,
-    "TestingDalamudApiLevel": 14,
+    "TestingDalamudApiLevel": 15,
     "Tags": [
       "utility",
       "materia",
@@ -25,8 +25,8 @@
     "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.0/XivMiniUtil.zip",
     "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.0/XivMiniUtil.zip",
     "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.0/XivMiniUtil.zip",
-    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.0/XivMiniUtil.zip",
-    "Changelog": "潜水艦トラッカーとDiscord通知を追加。通知整形と残り時間表示を改善。設定画面のタブ分割。",
-    "LastUpdate": 1768291034
+    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.1/XivMiniUtil.zip",
+    "Changelog": "Testing: Dalamud API 15 / Dalamud.NET.Sdk 15.0.0 に対応。FFXIVClientStructs の AtkValueType 変更に追従。",
+    "LastUpdate": 1777567671
   }
 ]

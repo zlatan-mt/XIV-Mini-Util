@@ -8,7 +8,7 @@
 - `pluginmaster.json` を GitHub の Raw URL で公開できる
 - GitHub Releases に `XivMiniUtil.zip` を添付できる
 - Stable は `0.3.0 / Dalamud API 14` として扱う
-- Testing API15 は `0.3.1 / Dalamud API 15` のRelease asset作成後に公開用 `pluginmaster.json` を切り替える
+- Testing API15 は `0.3.1 / Dalamud API 15` として公開済み
 
 ## 配布系統
 - Stable
