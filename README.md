@@ -19,6 +19,13 @@ FFXIV用のDalamudプラグインです。
 
 ## インストール（カスタムプラグイン）
 
+現在の配布系統は次の2つです。
+
+- Stable: `0.3.0` / Dalamud API 14
+- Testing準備中: `0.3.1` / Dalamud API 15
+
+API15版はTesting先行の準備中です。`v0.3.1` のGitHub Release assetを公開するまでは、公開中の `pluginmaster.json` はStable/Testingともに既存のAPI14版を指します。
+
 1. `pluginmaster.json` をRawで公開します。  
    例: `https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/pluginmaster.json`
 
@@ -62,15 +69,16 @@ FFXIV用のDalamudプラグインです。
 
 ## 開発者向け（必要な場合のみ）
 
-```bash
+```powershell
 dotnet build projects/XIV-Mini-Util/XivMiniUtil.csproj -c Release
 ```
 
-ビルド後、`%APPDATA%\XIVLauncher\devPlugins\XivMiniUtil\` に出力されます。
+現在のソースツリーはTesting API15版のビルド用です。Stable API14版を再生成する場合は、`v0.3.0` タグなどAPI14設定が残るソースからビルドします。
 
 ## 注意事項
 
-- Dalamud API 14 / .NET 10 向けです。
+- Stableは Dalamud API 14 / .NET 10 向けです。
+- Testing API15版は準備中です。公開用 `pluginmaster.json` のTesting側は、`v0.3.1` のRelease asset公開後に切り替えます。
 - 自動操作は自己責任で使用してください。
 
 ## License

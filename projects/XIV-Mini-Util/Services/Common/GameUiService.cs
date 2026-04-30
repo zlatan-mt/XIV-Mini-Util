@@ -7,7 +7,7 @@ using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
+using AtkValueType = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType;
 
 namespace XivMiniUtil.Services.Common;
 
@@ -326,15 +326,15 @@ public sealed class GameUiService
         switch (value)
         {
             case int intValue:
-                atkValue.Type = ValueType.Int;
+                atkValue.Type = AtkValueType.Int;
                 atkValue.Int = intValue;
                 return true;
             case uint uintValue:
-                atkValue.Type = ValueType.UInt;
+                atkValue.Type = AtkValueType.UInt;
                 atkValue.UInt = uintValue;
                 return true;
             case bool boolValue:
-                atkValue.Type = ValueType.Bool;
+                atkValue.Type = AtkValueType.Bool;
                 atkValue.Byte = (byte)(boolValue ? 1 : 0);
                 return true;
             default:

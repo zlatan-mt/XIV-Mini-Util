@@ -6,6 +6,9 @@
 
 ## Unreleased
 
+- Testing版を Dalamud API 15 / Dalamud.NET.Sdk 15.0.0 に更新
+- FFXIVClientStructs の `AtkValueType` 変更に追従
+- Stable版は 0.3.0 / API14 のまま維持し、Testing版のみ 0.3.1 / API15 として先行配布
 - 日課チェックリスト機能を追加（Daily/Weekly）
 - Checklistタブから完了管理、通知先（ゲーム内/Discord）、通知時刻を設定可能に
 - 設定タブにチェックリスト設定（有効化、週次リセット曜日、一括リセット）を追加

@@ -88,7 +88,7 @@ public sealed unsafe class SubmarineService : IDisposable
         _storage.Save();
     }
 
-    private void OnTerritoryChanged(ushort obj)
+    private void OnTerritoryChanged(uint territoryId)
     {
         _storage.Save();
     }

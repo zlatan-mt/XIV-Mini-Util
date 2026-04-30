@@ -207,11 +207,11 @@ public sealed class ColorantItemResolver
             for (var i = 0; i < limit; i++)
             {
                 var value = addon->AtkValues[i];
-                if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt && value.UInt != 0)
+                if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt && value.UInt != 0)
                 {
                     numericCandidates.Add($"[{i}]=UInt:{value.UInt}");
                 }
-                else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int && value.Int > 0)
+                else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int && value.Int > 0)
                 {
                     numericCandidates.Add($"[{i}]=Int:{value.Int}");
                 }
@@ -863,11 +863,11 @@ public sealed class ColorantItemResolver
     {
         switch (value.Type)
         {
-            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String:
-            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.ManagedString:
-            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.String8:
+            case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String:
+            case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.ManagedString:
+            case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String8:
                 return value.String.ToString();
-            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.WideString:
+            case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.WideString:
                 return Marshal.PtrToStringUni((nint)value.WideString) ?? string.Empty;
             default:
                 return string.Empty;
@@ -1070,11 +1070,11 @@ public sealed class ColorantItemResolver
         {
             var value = addon->AtkValues[i];
             int candidate;
-            if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int)
+            if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int)
             {
                 candidate = value.Int;
             }
-            else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+            else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
             {
                 if (value.UInt > int.MaxValue)
                 {
@@ -1127,11 +1127,11 @@ public sealed class ColorantItemResolver
         {
             var value = addon->AtkValues[i];
             int candidate;
-            if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int)
+            if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int)
             {
                 candidate = value.Int;
             }
-            else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+            else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
             {
                 if (value.UInt > int.MaxValue)
                 {
@@ -1399,11 +1399,11 @@ public sealed class ColorantItemResolver
         {
             var value = addon->AtkValues[i];
             int candidate;
-            if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int)
+            if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int)
             {
                 candidate = value.Int;
             }
-            else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt)
+            else if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
             {
                 if (value.UInt > int.MaxValue)
                 {
@@ -1460,9 +1460,9 @@ public sealed class ColorantItemResolver
     {
         switch (value.Type)
         {
-            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt:
+            case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt:
                 return value.UInt % 500000;
-            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int:
+            case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int:
                 return value.Int > 0 ? (uint)value.Int % 500000 : 0;
             default:
                 return 0;
@@ -1473,9 +1473,9 @@ public sealed class ColorantItemResolver
     {
         switch (value.Type)
         {
-            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.UInt:
+            case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt:
                 return value.UInt <= byte.MaxValue ? (byte)value.UInt : (byte)0;
-            case FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int:
+            case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int:
                 return value.Int > 0 && value.Int <= byte.MaxValue ? (byte)value.Int : (byte)0;
             default:
                 return 0;

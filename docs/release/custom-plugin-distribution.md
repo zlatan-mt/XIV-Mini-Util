@@ -7,26 +7,45 @@
 - `projects/XIV-Mini-Util/XivMiniUtil.csproj` の `Version` と `AssemblyVersion` が配布対象の版になっている
 - `pluginmaster.json` を GitHub の Raw URL で公開できる
 - GitHub Releases に `XivMiniUtil.zip` を添付できる
+- Stable は `0.3.0 / Dalamud API 14` として扱う
+- Testing API15 は `0.3.1 / Dalamud API 15` のRelease asset作成後に公開用 `pluginmaster.json` を切り替える
 
-## 手動手順
+## 配布系統
+- Stable
+  - `pluginmaster.json` の `AssemblyVersion`, `DalamudApiLevel`, `DownloadLink`, `DownloadLinkInstall`, `DownloadLinkUpdate` を使う
+  - 現在は `0.3.0 / API14`
+  - 再生成する場合は `v0.3.0` タグなどAPI14設定が残るソースからビルドする
+- Testing
+  - `pluginmaster.json` の `TestingAssemblyVersion`, `TestingDalamudApiLevel`, `DownloadLinkTesting` を使う
+  - API15 Testing版のビルド元は現在のAPI15設定のソースツリー
+  - `v0.3.1` のGitHub Release assetを作成してから、最後に `pluginmaster.json` を `0.3.1 / API15` へ切り替える
+  - Stable が API15 対応済みに見える説明を書かない
+
+## Testing API15 手動手順
 1. 必要なら `CHANGELOG.md` の `Unreleased` を整理する
 2. `dotnet build projects/XIV-Mini-Util/XivMiniUtil.csproj -c Release` でビルド確認する
-3. `bash scripts/release-build.sh` を実行し、リポジトリ直下に `XivMiniUtil.zip` を生成する
-4. GitHub Releases に対象バージョンのリリースを作成し、`XivMiniUtil.zip` を添付する
-5. `pluginmaster.json` の以下をリリース版に合わせて更新する
-   - `AssemblyVersion`
-   - `TestingAssemblyVersion`
-   - `DownloadLink`
-   - `DownloadLinkInstall`
-   - `DownloadLinkUpdate`
-   - `DownloadLinkTesting`
+3. Release 出力の `XivMiniUtil.dll`, `XivMiniUtil.json`, 追加依存DLL有無を確認する
+4. 追加依存DLLがない場合は PowerShell で `XivMiniUtil.dll` と `XivMiniUtil.json` を zip 化する。追加依存DLLがある場合は成果物に含めるか SDK/packager 生成物を優先する
+5. zip を展開し、`XivMiniUtil.json` の `InternalName`, `AssemblyVersion`, `DalamudApiLevel` が `XivMiniUtil`, `0.3.1.0`, `15` と一致することを確認する
+6. GitHub Releases に対象バージョンのリリースを作成し、`XivMiniUtil.zip` を添付する
+7. Release asset のURLが取得できることを確認してから、公開用 `pluginmaster.json` のTesting側だけを更新する
+   - `TestingAssemblyVersion`: `0.3.1`
+   - `TestingDalamudApiLevel`: `15`
+   - `DownloadLinkTesting`: `https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.1/XivMiniUtil.zip`
    - `Changelog`
    - `LastUpdate`
-6. `pluginmaster.json` を push し、Raw URL で取得できることを確認する
+8. `pluginmaster.json` を push し、Raw URL で取得できることを確認する
+
+## Stable API14 手動手順
+- Stableを再生成する場合は現在のAPI15ソースツリーを使わない。
+- `v0.3.0` タグ、またはAPI14設定の保守ブランチをチェックアウトしてReleaseビルドする。
+- Stable更新時だけ `AssemblyVersion`, `DalamudApiLevel`, `DownloadLink`, `DownloadLinkInstall`, `DownloadLinkUpdate` を更新する。
+- Testing API15 の公開準備が終わっていない場合、Stable更新と同時にTesting側を未公開URLへ切り替えない。
 
 ## 補助スクリプト
 - `scripts/release-build.sh`
-  - Release ビルドを行い、`XivMiniUtil.zip` を生成する
+  - WSL / Linux 互換の Release ビルドと `XivMiniUtil.zip` 生成用
+  - Windows ネイティブ作業では PowerShell で Release 出力と manifest を確認してから zip 化する
 - `/dalamud-release`
   - Claude 利用時に GitHub Release 作成と `pluginmaster.json` 更新をまとめて行う補助スキル
   - 実行前に `gh` CLI の認証状態を確認する
@@ -39,4 +58,6 @@
 
 ## 注意
 - リリース前に `pluginmaster.json` のダウンロードURLが対象タグを指しているか確認する
+- `DownloadLinkTesting` はGitHub Release assetが存在することを確認してから切り替える。先にpushしない
+- Dalamud API 15 以降では zip 内 manifest が repository manifest で上書きされないため、zip 内の `XivMiniUtil.json` を必ず確認する
 - リリース成果物やローカル検証記録は Git 管理せず、必要に応じて GitHub Releases や外部バックアップで扱う

@@ -15,7 +15,7 @@
 ## プラグイン概要
 
 - FFXIV 用 Dalamud プラグイン
-- 技術基盤は `Dalamud API 14` と `.NET 10`
+- 技術基盤は Stable が `Dalamud API 14` / `.NET 10`、Testing が `Dalamud API 15` / `.NET 10`
 - メインコマンドは `/xivminiutil` と `/xmu`
 - メイン UI は `Home`, `Search`, `Checklist`, `Submarines`, `Settings` の 5 タブ構成
 
