@@ -5,10 +5,10 @@
     "Punchline": "Materia精製と分解を手早く支援します。",
     "Description": "マテリア精製とアイテム分解、NPC販売場所検索を支援するミニユーティリティです。",
     "InternalName": "XivMiniUtil",
-    "AssemblyVersion": "0.3.0",
+    "AssemblyVersion": "0.3.1",
     "TestingAssemblyVersion": "0.3.1",
     "ApplicableVersion": "any",
-    "DalamudApiLevel": 14,
+    "DalamudApiLevel": 15,
     "TestingDalamudApiLevel": 15,
     "Tags": [
       "utility",
@@ -22,11 +22,11 @@
     "RepoUrl": "https://github.com/zlatan-mt/XIV-Mini-Util",
     "IconUrl": "https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/images/icon.png",
     "ImageUrls": [],
-    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.0/XivMiniUtil.zip",
-    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.0/XivMiniUtil.zip",
-    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.0/XivMiniUtil.zip",
+    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.1/XivMiniUtil.zip",
+    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.1/XivMiniUtil.zip",
+    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.1/XivMiniUtil.zip",
     "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.1/XivMiniUtil.zip",
-    "Changelog": "Testing: Dalamud API 15 / Dalamud.NET.Sdk 15.0.0 に対応。FFXIVClientStructs の AtkValueType 変更に追従。",
-    "LastUpdate": 1777567671
+    "Changelog": "Dalamud API 15 / Dalamud.NET.Sdk 15.0.0 に対応。FFXIVClientStructs の AtkValueType 変更に追従。",
+    "LastUpdate": 1777567887
   }
 ]
