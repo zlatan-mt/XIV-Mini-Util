@@ -117,6 +117,41 @@ public sealed class InventoryService
             .Where(item => item.CanDesynth && item.ItemLevel >= minLevel && item.ItemLevel <= maxLevel);
     }
 
+    public unsafe bool TryGetItem(InventoryType containerType, int slot, out InventoryItemInfo itemInfo)
+    {
+        itemInfo = null!;
+        if (!IsPlayerLoggedIn)
+        {
+            return false;
+        }
+
+        var manager = InventoryManager.Instance();
+        if (manager == null)
+        {
+            _pluginLog.Error("InventoryManagerが取得できません。");
+            return false;
+        }
+
+        var container = manager->GetInventoryContainer(containerType);
+        if (container == null || slot < 0 || slot >= container->Size)
+        {
+            return false;
+        }
+
+        var item = container->GetInventorySlot(slot);
+        return TryCreateInventoryItemInfo(item, containerType, slot, out itemInfo);
+    }
+
+    public bool IsSameInventoryItemAvailable(InventoryItemInfo expected, out InventoryItemInfo current)
+    {
+        if (!TryGetItem(expected.Container, expected.Slot, out current))
+        {
+            return false;
+        }
+
+        return current.ItemId == expected.ItemId && current.Quantity > 0;
+    }
+
     public int GetMaxItemLevel()
     {
         if (!IsPlayerLoggedIn)
@@ -169,30 +204,72 @@ public sealed class InventoryService
                     continue;
                 }
 
-                var row = itemSheet.GetRow(item->ItemId);
-                if (row.RowId == 0)
+                if (TryCreateInventoryItemInfo(item, containerType, slot, itemSheet, out var info))
                 {
-                    continue;
+                    results.Add(info);
                 }
-                // itemRow.Desynthは分解可否の簡易判定として利用する
-                var canDesynth = row.Desynth > 0;
-                var itemLevel = (int)(row.LevelItem.ValueNullable?.RowId ?? 0);
-                var canExtractMateria = row.MateriaSlotCount > 0;
-                var name = row.Name.ToString();
-
-                results.Add(new InventoryItemInfo(
-                    item->ItemId,
-                    name,
-                    itemLevel,
-                    item->GetSpiritbondOrCollectability(),
-                    item->Quantity,
-                    containerType,
-                    slot,
-                    canExtractMateria,
-                    canDesynth));
             }
         }
 
         return results;
+    }
+
+    private unsafe bool TryCreateInventoryItemInfo(
+        InventoryItem* item,
+        InventoryType containerType,
+        int slot,
+        out InventoryItemInfo itemInfo)
+    {
+        itemInfo = null!;
+        if (item == null || item->ItemId == 0)
+        {
+            return false;
+        }
+
+        var itemSheet = _dataManager.GetExcelSheet<Item>();
+        if (itemSheet == null)
+        {
+            _pluginLog.Error("Itemシートが取得できません。");
+            return false;
+        }
+
+        return TryCreateInventoryItemInfo(item, containerType, slot, itemSheet, out itemInfo);
+    }
+
+    private static unsafe bool TryCreateInventoryItemInfo(
+        InventoryItem* item,
+        InventoryType containerType,
+        int slot,
+        Lumina.Excel.ExcelSheet<Item> itemSheet,
+        out InventoryItemInfo itemInfo)
+    {
+        itemInfo = null!;
+        if (item == null || item->ItemId == 0)
+        {
+            return false;
+        }
+
+        var row = itemSheet.GetRow(item->ItemId);
+        if (row.RowId == 0)
+        {
+            return false;
+        }
+
+        var canDesynth = row.Desynth > 0;
+        var itemLevel = (int)(row.LevelItem.ValueNullable?.RowId ?? 0);
+        var canExtractMateria = row.MateriaSlotCount > 0 && !item->IsCollectable();
+        var name = row.Name.ToString();
+
+        itemInfo = new InventoryItemInfo(
+            item->ItemId,
+            name,
+            itemLevel,
+            item->GetSpiritbondOrCollectability(),
+            item->Quantity,
+            containerType,
+            slot,
+            canExtractMateria,
+            canDesynth);
+        return true;
     }
 }

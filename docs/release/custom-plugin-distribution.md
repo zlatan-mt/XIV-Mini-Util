@@ -5,6 +5,8 @@
 
 ## 前提
 - `projects/XIV-Mini-Util/XivMiniUtil.csproj` の `Version` と `AssemblyVersion` が配布対象の版になっている
+  - 人間向けのリリース表記とGitタグは `0.3.1`
+  - .NET / Dalamud が照合する `AssemblyVersion` は4要素の `0.3.1.0`
 - `pluginmaster.json` を GitHub の Raw URL で公開できる
 - GitHub Releases に `XivMiniUtil.zip` を添付できる
 - Stable は `0.3.1 / Dalamud API 15` として扱う
@@ -27,8 +29,8 @@
 5. zip を展開し、`XivMiniUtil.json` の `InternalName`, `AssemblyVersion`, `DalamudApiLevel` が `XivMiniUtil`, `0.3.1.0`, `15` と一致することを確認する
 6. GitHub Releases に対象バージョンのリリースを作成し、`XivMiniUtil.zip` を添付する
 7. Release asset のURLが取得できることを確認してから、公開用 `pluginmaster.json` のStable/Testing側を更新する
-   - `AssemblyVersion`: `0.3.1`
-   - `TestingAssemblyVersion`: `0.3.1`
+  - `AssemblyVersion`: `0.3.1.0`
+  - `TestingAssemblyVersion`: `0.3.1.0`
    - `DalamudApiLevel`: `15`
    - `TestingDalamudApiLevel`: `15`
    - `DownloadLink`: `https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.1/XivMiniUtil.zip`

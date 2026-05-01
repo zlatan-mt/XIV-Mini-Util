@@ -94,6 +94,7 @@ public sealed class ChecklistService : IDisposable
             }
 
             item.IsEnabled = isEnabled;
+            SyncDisabledItemId(item);
             _configuration.Save();
         }
     }
@@ -137,6 +138,7 @@ public sealed class ChecklistService : IDisposable
             var removed = _configuration.ChecklistItems.RemoveAll(item => item.Id == itemId);
             if (removed > 0)
             {
+                _configuration.ChecklistDisabledItemIds?.RemoveAll(id => id == itemId);
                 _configuration.Save();
             }
         }
@@ -279,9 +281,30 @@ public sealed class ChecklistService : IDisposable
                 new ChecklistItem { Title = "リテイナーベンチャー回収", Frequency = ChecklistFrequency.Daily, ReminderHour = 21 },
                 new ChecklistItem { Title = "週制限コンテンツ確認", Frequency = ChecklistFrequency.Weekly, ReminderHour = 20 },
             });
+            SyncDisabledItemIds();
 
             _configuration.Save();
         }
+    }
+
+    private void SyncDisabledItemId(ChecklistItem item)
+    {
+        _configuration.ChecklistDisabledItemIds ??= new List<Guid>();
+        _configuration.ChecklistDisabledItemIds.RemoveAll(id => id == item.Id || id == Guid.Empty);
+        if (!item.IsEnabled)
+        {
+            _configuration.ChecklistDisabledItemIds.Add(item.Id);
+        }
+    }
+
+    private void SyncDisabledItemIds()
+    {
+        _configuration.ChecklistDisabledItemIds = _configuration.ChecklistItems
+            .Where(item => !item.IsEnabled)
+            .Select(item => item.Id)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
     }
 
     private static long BuildDailyKey(DateTime now)

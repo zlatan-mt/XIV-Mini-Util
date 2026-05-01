@@ -14,7 +14,7 @@ namespace XivMiniUtil;
 public sealed class Configuration : IPluginConfiguration
 {
     public const int ExportVersion = 1;
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -50,6 +50,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool ChecklistDiscordNotificationEnabled { get; set; } = false;
     public DayOfWeek ChecklistWeeklyResetDay { get; set; } = DayOfWeek.Tuesday;
     public List<ChecklistItem> ChecklistItems { get; set; } = new();
+    public List<Guid> ChecklistDisabledItemIds { get; set; } = new();
 
     // シャキ通知設定
     public bool DutyReadySoundNotificationEnabled { get; set; } = false;
@@ -180,6 +181,10 @@ public sealed class Configuration : IPluginConfiguration
         ChecklistItems = source.ChecklistItems?
             .Select(CloneChecklistItem)
             .ToList() ?? new List<ChecklistItem>();
+        ChecklistDisabledItemIds = source.ChecklistDisabledItemIds?
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList() ?? new List<Guid>();
         DutyReadySoundNotificationEnabled = source.DutyReadySoundNotificationEnabled;
         DutyReadySoundDurationSeconds = Math.Clamp(source.DutyReadySoundDurationSeconds, 3, 30);
         NormalizeAndMigrate();
@@ -237,6 +242,37 @@ public sealed class Configuration : IPluginConfiguration
                 ChecklistItems = normalizedItems;
                 changed = true;
             }
+        }
+
+        var disabledIds = ChecklistDisabledItemIds?
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToHashSet() ?? new HashSet<Guid>();
+        foreach (var item in ChecklistItems)
+        {
+            if (!item.IsEnabled)
+            {
+                disabledIds.Add(item.Id);
+            }
+
+            if (disabledIds.Contains(item.Id) && item.IsEnabled)
+            {
+                item.IsEnabled = false;
+                changed = true;
+            }
+        }
+
+        var normalizedDisabledIds = ChecklistItems
+            .Where(item => !item.IsEnabled)
+            .Select(item => item.Id)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+        if (ChecklistDisabledItemIds == null || !ChecklistDisabledItemIds.OrderBy(id => id).SequenceEqual(normalizedDisabledIds))
+        {
+            ChecklistDisabledItemIds = normalizedDisabledIds;
+            changed = true;
         }
 
         return changed;

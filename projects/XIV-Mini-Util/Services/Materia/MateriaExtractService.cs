@@ -23,12 +23,18 @@ public sealed class MateriaExtractService : IDisposable
 
     private readonly TimeSpan _scanInterval = TimeSpan.FromSeconds(2);
     private readonly TimeSpan _cooldownInterval = TimeSpan.FromSeconds(1);
+    private readonly TimeSpan _failureBackoffInterval = TimeSpan.FromSeconds(10);
+    private readonly TimeSpan _dialogOpenTimeout = TimeSpan.FromSeconds(4);
+    private const int MaxConsecutiveUiFailures = 3;
 
     private DateTime _nextActionAt = DateTime.UtcNow;
+    private DateTime _dialogExpectedBy = DateTime.MinValue;
     private ExtractState _state = ExtractState.Disabled;
     private InventoryItemInfo? _currentItem;
     private long _scanId;
     private long _currentScanId;
+    private int _consecutiveUiFailures;
+    private bool _waitingForMaterializeDialog;
 
     public MateriaExtractService(
         IFramework framework,
@@ -62,6 +68,8 @@ public sealed class MateriaExtractService : IDisposable
     {
         _state = ExtractState.Scanning;
         _configuration.MateriaExtractEnabled = true;
+        _consecutiveUiFailures = 0;
+        _waitingForMaterializeDialog = false;
         _configuration.Save();
     }
 
@@ -69,6 +77,8 @@ public sealed class MateriaExtractService : IDisposable
     {
         _state = ExtractState.Disabled;
         _currentItem = null;
+        _consecutiveUiFailures = 0;
+        _waitingForMaterializeDialog = false;
         _configuration.MateriaExtractEnabled = false;
         _configuration.Save();
     }
@@ -96,6 +106,24 @@ public sealed class MateriaExtractService : IDisposable
         }
 
         var now = DateTime.UtcNow;
+        if (_waitingForMaterializeDialog)
+        {
+            if (_gameUiService.IsAddonVisible(GameUiConstants.MaterializeDialogAddonName))
+            {
+                _waitingForMaterializeDialog = false;
+            }
+            else if (now < _dialogExpectedBy)
+            {
+                _nextActionAt = _dialogExpectedBy;
+                return;
+            }
+            else
+            {
+                HandleUiFailure("マテリア精製の確認ダイアログが開きません。対象がない可能性があります。");
+                return;
+            }
+        }
+
         var isMaterializeOpen =
             _gameUiService.IsAddonVisible(GameUiConstants.MaterializeDialogAddonName)
             || _gameUiService.IsAddonVisible(GameUiConstants.MaterializeAddonName);
@@ -137,6 +165,7 @@ public sealed class MateriaExtractService : IDisposable
         {
             _state = ExtractState.Idle;
             _nextActionAt = now.Add(_scanInterval);
+            _consecutiveUiFailures = 0;
             return;
         }
 
@@ -158,16 +187,29 @@ public sealed class MateriaExtractService : IDisposable
             return;
         }
 
+        if (!_inventoryService.IsSameInventoryItemAvailable(_currentItem, out var currentItem)
+            || currentItem.Spiritbond < 10000
+            || !currentItem.CanExtractMateria)
+        {
+            _pluginLog.Information($"マテリア精製対象がなくなったため停止: {_currentItem.Name}");
+            _currentItem = null;
+            _state = ExtractState.Idle;
+            _nextActionAt = DateTime.UtcNow.Add(_scanInterval);
+            return;
+        }
+
         if (_gameUiService.IsAddonVisible(GameUiConstants.MaterializeDialogAddonName))
         {
             // UI操作はパッチ依存のため、失敗時もループが止まらないようにする
             if (_gameUiService.TryConfirmMaterializeDialog())
             {
                 _pluginLog.Information($"マテリア精製を実行: {_currentItem.Name}");
+                _consecutiveUiFailures = 0;
             }
             else
             {
-                _pluginLog.Warning($"マテリア精製の実行に失敗: {_currentItem.Name}");
+                HandleUiFailure($"マテリア精製の実行に失敗: {_currentItem.Name}");
+                return;
             }
         }
         else if (_gameUiService.IsAddonVisible(GameUiConstants.MaterializeAddonName))
@@ -175,10 +217,16 @@ public sealed class MateriaExtractService : IDisposable
             if (_gameUiService.TrySelectMaterializeFirstItem())
             {
                 _pluginLog.Information($"マテリア精製の選択を実行: {_currentItem.Name}");
+                _waitingForMaterializeDialog = true;
+                _dialogExpectedBy = DateTime.UtcNow.Add(_dialogOpenTimeout);
+                _state = ExtractState.Waiting;
+                _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
+                return;
             }
             else
             {
-                _pluginLog.Warning($"マテリア精製の選択に失敗: {_currentItem.Name}");
+                HandleUiFailure($"マテリア精製の選択に失敗: {_currentItem.Name}");
+                return;
             }
         }
         else
@@ -192,6 +240,24 @@ public sealed class MateriaExtractService : IDisposable
         _currentItem = null;
         _state = ExtractState.Waiting;
         _nextActionAt = DateTime.UtcNow.Add(_cooldownInterval);
+    }
+
+    private void HandleUiFailure(string message)
+    {
+        _consecutiveUiFailures++;
+        _waitingForMaterializeDialog = false;
+        _pluginLog.Warning($"{message} 連続失敗={_consecutiveUiFailures}/{MaxConsecutiveUiFailures}");
+
+        if (_consecutiveUiFailures >= MaxConsecutiveUiFailures)
+        {
+            _pluginLog.Warning("マテリア精製UI操作が連続で失敗したため、自動精製を停止しました。");
+            Disable();
+            return;
+        }
+
+        _currentItem = null;
+        _state = ExtractState.Waiting;
+        _nextActionAt = DateTime.UtcNow.Add(_failureBackoffInterval);
     }
 
     private void LogScan(DateTime now, MateriaScanSnapshot snapshot, string blockedReason, bool isMaterializeOpen, long scanId)
