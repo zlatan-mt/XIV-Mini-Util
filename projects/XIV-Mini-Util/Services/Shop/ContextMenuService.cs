@@ -15,8 +15,9 @@ namespace XivMiniUtil.Services.Shop;
 public sealed class ContextMenuService : IDisposable
 {
     private const ulong ItemIdVariantOffset = 500000;
+    private const ulong HighQualityItemIdOffset = 1000000;
     private const string SearchLabel = "販売場所を検索";
-    private const string UniversalisSearchLabel = "Universalisで最安値確認";
+    private const string UniversalisSearchLabel = "Universalisで価格確認";
 
     private readonly IContextMenu _contextMenu;
     private readonly IGameGui _gameGui;
@@ -71,11 +72,12 @@ public sealed class ContextMenuService : IDisposable
             _colorantItemResolver.ResetNumericDiff("ContextMenuOpened");
         }
 
-        if (args.Target == null || !TryGetItemId(args.Target, addonName, out var itemId))
+        if (args.Target == null || !TryGetItemContext(args.Target, addonName, out var itemContext))
         {
             return;
         }
 
+        var itemId = itemContext.ItemId;
         var isReady = _shopDataCache.IsInitialized;
         var hasData = _shopDataCache.HasShopData(itemId);
         var isMarketable = IsMarketableItem(itemId);
@@ -101,7 +103,7 @@ public sealed class ContextMenuService : IDisposable
 
         var universalisMenuItem = new MenuItem
         {
-            Name = new SeStringBuilder().AddText(isMarketable ? UniversalisSearchLabel : $"{UniversalisSearchLabel} (取引不可)").Build(),
+            Name = new SeStringBuilder().AddText(BuildUniversalisMenuLabel(isMarketable, itemContext.Quality)).Build(),
             OnClicked = OnUniversalisSearchClicked,
             PrefixChar = 'U',
         };
@@ -113,12 +115,13 @@ public sealed class ContextMenuService : IDisposable
     private void OnSearchClicked(IMenuItemClickedArgs args)
     {
         var addonName = args.AddonName ?? string.Empty;
-        if (args.Target == null || !TryGetItemId(args.Target, addonName, out var itemId))
+        if (args.Target == null || !TryGetItemContext(args.Target, addonName, out var itemContext))
         {
             _pluginLog.Warning("販売場所検索の対象アイテムが取得できませんでした。");
             return;
         }
 
+        var itemId = itemContext.ItemId;
         if (!_shopDataCache.IsInitialized)
         {
             _shopSearchService.Search(itemId);
@@ -131,22 +134,35 @@ public sealed class ContextMenuService : IDisposable
     private void OnUniversalisSearchClicked(IMenuItemClickedArgs args)
     {
         var addonName = args.AddonName ?? string.Empty;
-        if (args.Target == null || !TryGetItemId(args.Target, addonName, out var itemId))
+        if (args.Target == null || !TryGetItemContext(args.Target, addonName, out var itemContext))
         {
             _pluginLog.Warning("Universalis検索の対象アイテムが取得できませんでした。");
             return;
         }
 
+        var itemId = itemContext.ItemId;
         if (!IsMarketableItem(itemId))
         {
             _pluginLog.Information($"Universalis検索対象外アイテム: {itemId}");
             return;
         }
 
-        _universalisMarketService.CheckLowestPrice(itemId);
+        _universalisMarketService.CheckLowestPrice(itemId, itemContext.Quality);
     }
 
     private bool TryGetItemId(object target, string addonName, out uint itemId)
+    {
+        if (TryGetItemContext(target, addonName, out var itemContext))
+        {
+            itemId = itemContext.ItemId;
+            return true;
+        }
+
+        itemId = 0;
+        return false;
+    }
+
+    private bool TryGetItemContext(object target, string addonName, out ItemContext itemContext)
     {
         // 染色画面はAddonのAtkValuesからItemIdを取得する
         if (addonName == "ColorantColoring")
@@ -154,8 +170,8 @@ public sealed class ContextMenuService : IDisposable
             var colorantItemId = _colorantItemResolver.TryGetItemIdFromAddon();
             if (colorantItemId != 0)
             {
-                itemId = NormalizeItemId(colorantItemId);
-                _pluginLog.Information($"ColorantAddon経由でItemId取得: {itemId}");
+                itemContext = CreateItemContext(colorantItemId);
+                _pluginLog.Information($"ColorantAddon経由でItemId取得: {itemContext.ItemId}");
                 return true;
             }
         }
@@ -163,16 +179,16 @@ public sealed class ContextMenuService : IDisposable
         // インベントリアイテム
         if (target is MenuTargetInventory inventoryTarget && inventoryTarget.TargetItem is { } inventoryItem)
         {
-            itemId = NormalizeItemId(inventoryItem.ItemId);
-            return itemId != 0;
+            itemContext = CreateItemContext(inventoryItem.ItemId);
+            return itemContext.ItemId != 0;
         }
 
         // Agent経由でItemIdを取得（チャットログ、レシピノートなど）
-        var agentItemId = GetItemIdFromAgent(addonName);
+        var agentItemId = GetRawItemIdFromAgent(addonName);
         if (agentItemId != 0)
         {
-            itemId = agentItemId;
-            _pluginLog.Information($"Agent経由でItemId取得: {itemId} (Addon: {addonName})");
+            itemContext = CreateItemContext(agentItemId);
+            _pluginLog.Information($"Agent経由でItemId取得: {itemContext.ItemId} (Addon: {addonName}, Quality: {itemContext.Quality})");
             return true;
         }
 
@@ -180,11 +196,11 @@ public sealed class ContextMenuService : IDisposable
         var hoveredItem = _gameGui.HoveredItem;
         if (hoveredItem > 0)
         {
-            var hoveredItemId = NormalizeItemId(hoveredItem);
-            if (hoveredItemId != 0)
+            var hoveredItemContext = CreateItemContext(hoveredItem);
+            if (hoveredItemContext.ItemId != 0)
             {
-                itemId = hoveredItemId;
-                _pluginLog.Information($"HoveredItem経由でItemId取得: {itemId}");
+                itemContext = hoveredItemContext;
+                _pluginLog.Information($"HoveredItem経由でItemId取得: {itemContext.ItemId} (Quality: {itemContext.Quality})");
                 return true;
             }
         }
@@ -213,7 +229,7 @@ public sealed class ContextMenuService : IDisposable
             // TargetItemIdから直接取得
             if (TryGetProperty(defaultTarget, "TargetItemId", out var targetItemId) && targetItemId is uint chatItemId && chatItemId != 0)
             {
-                itemId = NormalizeItemId(chatItemId);
+                itemContext = CreateItemContext(chatItemId);
                 return true;
             }
 
@@ -222,9 +238,10 @@ public sealed class ContextMenuService : IDisposable
             {
                 // アイテムIDは下位32ビット
                 var extractedId = (uint)(contentIdVal & 0xFFFFFFFF);
-                if (extractedId != 0 && extractedId < 100000) // 妥当なアイテムID範囲
+                var extractedContext = CreateItemContext(extractedId);
+                if (extractedContext.ItemId != 0 && extractedContext.ItemId < ItemIdVariantOffset)
                 {
-                    itemId = NormalizeItemId(extractedId);
+                    itemContext = extractedContext;
                     return true;
                 }
             }
@@ -232,14 +249,14 @@ public sealed class ContextMenuService : IDisposable
 
         if (TryGetProperty(target, "ItemId", out var rawItemId) && rawItemId is uint directItemId)
         {
-            itemId = NormalizeItemId(directItemId);
-            return itemId != 0;
+            itemContext = CreateItemContext(directItemId);
+            return itemContext.ItemId != 0;
         }
 
         if (TryGetProperty(target, "ItemID", out var rawItemIdAlt) && rawItemIdAlt is uint directItemIdAlt)
         {
-            itemId = NormalizeItemId(directItemIdAlt);
-            return itemId != 0;
+            itemContext = CreateItemContext(directItemIdAlt);
+            return itemContext.ItemId != 0;
         }
 
         if (TryGetProperty(target, "TargetItem", out var targetItem))
@@ -247,16 +264,16 @@ public sealed class ContextMenuService : IDisposable
             var reflectedItemId = TryGetRowId(targetItem);
             if (reflectedItemId is { } candidate && candidate != 0)
             {
-                itemId = NormalizeItemId(candidate);
+                itemContext = CreateItemContext(candidate);
                 return true;
             }
         }
 
-        itemId = 0;
+        itemContext = default;
         return false;
     }
 
-    private unsafe uint GetItemIdFromAgent(string addonName)
+    private unsafe uint GetRawItemIdFromAgent(string addonName)
     {
         try
         {
@@ -292,7 +309,7 @@ public sealed class ContextMenuService : IDisposable
                     break;
             }
 
-            return NormalizeItemId(itemId);
+            return itemId;
         }
         catch (Exception ex)
         {
@@ -316,6 +333,13 @@ public sealed class ContextMenuService : IDisposable
         return SearchLabel;
     }
 
+    private static string BuildUniversalisMenuLabel(bool isMarketable, UniversalisItemQuality quality)
+    {
+        var qualityLabel = quality == UniversalisItemQuality.HighQuality ? "HQ" : "NQ";
+        var label = $"{UniversalisSearchLabel} ({qualityLabel})";
+        return isMarketable ? label : $"{label} (取引不可)";
+    }
+
     private bool IsMarketableItem(uint itemId)
     {
         var normalizedItemId = NormalizeItemId(itemId);
@@ -326,6 +350,11 @@ public sealed class ContextMenuService : IDisposable
     internal static uint NormalizeItemId(uint itemId)
     {
         return NormalizeItemId((ulong)itemId);
+    }
+
+    internal static UniversalisItemQuality GetItemQuality(uint itemId)
+    {
+        return GetItemQuality((ulong)itemId);
     }
 
     private static uint NormalizeItemId(ulong itemId)
@@ -342,6 +371,18 @@ public sealed class ContextMenuService : IDisposable
         }
 
         return itemId <= uint.MaxValue ? (uint)itemId : 0;
+    }
+
+    private static UniversalisItemQuality GetItemQuality(ulong itemId)
+    {
+        return itemId >= HighQualityItemIdOffset && NormalizeItemId(itemId) != 0
+            ? UniversalisItemQuality.HighQuality
+            : UniversalisItemQuality.Normal;
+    }
+
+    private static ItemContext CreateItemContext(ulong rawItemId)
+    {
+        return new ItemContext(NormalizeItemId(rawItemId), GetItemQuality(rawItemId));
     }
 
     private static void SetMenuItemEnabled(MenuItem menuItem, bool enabled)
@@ -412,4 +453,6 @@ public sealed class ContextMenuService : IDisposable
 
         return null;
     }
+
+    private readonly record struct ItemContext(uint ItemId, UniversalisItemQuality Quality);
 }

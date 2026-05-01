@@ -48,9 +48,9 @@ public sealed class UniversalisMarketService : IDisposable
         _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("XivMiniUtil", GetPluginVersion()));
     }
 
-    public void CheckLowestPrice(uint itemId)
+    public void CheckLowestPrice(uint itemId, UniversalisItemQuality quality)
     {
-        _ = RunLowestPriceCheckAsync(itemId);
+        _ = RunLowestPriceCheckAsync(itemId, quality);
     }
 
     public void Dispose()
@@ -65,7 +65,7 @@ public sealed class UniversalisMarketService : IDisposable
         }
     }
 
-    private async Task RunLowestPriceCheckAsync(uint itemId)
+    private async Task RunLowestPriceCheckAsync(uint itemId, UniversalisItemQuality quality)
     {
         string? requestKey = null;
         try
@@ -84,7 +84,7 @@ public sealed class UniversalisMarketService : IDisposable
                 return;
             }
 
-            requestKey = $"{dcName}:{itemId}";
+            requestKey = $"{dcName}:{itemId}:{quality}";
             if (TryGetCachedResult(requestKey, out var cachedResult))
             {
                 PostResult(itemName, cachedResult, fromCache: true);
@@ -100,10 +100,10 @@ public sealed class UniversalisMarketService : IDisposable
             using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
             requestCts.CancelAfter(RequestTimeout);
             var marketData = await FetchMarketDataAsync(dcName, itemId, requestCts.Token).ConfigureAwait(false);
-            var result = BuildLowestPriceResult(marketData);
+            var result = BuildLowestPriceResult(marketData, quality);
             if (result == null)
             {
-                PostError($"{itemName} の出品が見つかりませんでした。");
+                PostError($"{itemName} ({FormatQuality(quality)}) の出品が見つかりませんでした。");
                 return;
             }
 
@@ -193,16 +193,18 @@ public sealed class UniversalisMarketService : IDisposable
 
     private async Task<UniversalisMarketData> FetchMarketDataAsync(string dcName, uint itemId, CancellationToken cancellationToken)
     {
-        var path = $"{Uri.EscapeDataString(dcName)}/{itemId}?listings=20&entries=0";
+        var path = $"{Uri.EscapeDataString(dcName)}/{itemId}?listings=40&entries=20";
         await using var stream = await _httpClient.GetStreamAsync(path, cancellationToken).ConfigureAwait(false);
         return await JsonSerializer.DeserializeAsync<UniversalisMarketData>(stream, cancellationToken: cancellationToken).ConfigureAwait(false)
             ?? throw new JsonException($"Universalis market response was empty for item {itemId}.");
     }
 
-    private LowestPriceResult? BuildLowestPriceResult(UniversalisMarketData marketData)
+    private LowestPriceResult? BuildLowestPriceResult(UniversalisMarketData marketData, UniversalisItemQuality quality)
     {
+        var shouldUseHq = quality == UniversalisItemQuality.HighQuality;
+        var latestSale = FindLatestSale(marketData, quality);
         var listing = marketData.Listings
-            .Where(entry => entry.PricePerUnit > 0)
+            .Where(entry => entry.PricePerUnit > 0 && entry.Hq == shouldUseHq)
             .OrderBy(entry => entry.PricePerUnit)
             .ThenBy(entry => entry.Total)
             .ThenBy(entry => entry.Quantity)
@@ -210,7 +212,9 @@ public sealed class UniversalisMarketService : IDisposable
 
         if (listing == null)
         {
-            return null;
+            return latestSale == null
+                ? null
+                : new LowestPriceResult(null, null, null, marketData.WorldName ?? marketData.DcName ?? "不明", shouldUseHq, null, latestSale);
         }
 
         DateTimeOffset? reviewedAt = null;
@@ -229,7 +233,34 @@ public sealed class UniversalisMarketService : IDisposable
             listing.Quantity,
             listing.WorldName ?? marketData.WorldName ?? marketData.DcName ?? "不明",
             listing.Hq,
-            reviewedAt);
+            reviewedAt,
+            latestSale);
+    }
+
+    private static LatestSaleResult? FindLatestSale(UniversalisMarketData marketData, UniversalisItemQuality quality)
+    {
+        var shouldUseHq = quality == UniversalisItemQuality.HighQuality;
+        var sale = marketData.RecentHistory
+            .Where(entry => entry.PricePerUnit > 0 && entry.Hq == shouldUseHq)
+            .OrderByDescending(entry => entry.Timestamp)
+            .FirstOrDefault();
+
+        if (sale == null)
+        {
+            return null;
+        }
+
+        DateTimeOffset? soldAt = null;
+        if (sale.Timestamp > 0)
+        {
+            soldAt = DateTimeOffset.FromUnixTimeSeconds(sale.Timestamp);
+        }
+
+        return new LatestSaleResult(
+            sale.PricePerUnit,
+            sale.Quantity,
+            sale.WorldName ?? marketData.WorldName ?? marketData.DcName ?? "不明",
+            soldAt);
     }
 
     private string GetItemName(uint itemId)
@@ -266,12 +297,23 @@ public sealed class UniversalisMarketService : IDisposable
     {
         var quality = result.Hq ? "HQ" : "NQ";
         var cacheLabel = fromCache ? " / cache" : string.Empty;
-        var message = $"[Universalis] {itemName}: 単価 {result.PricePerUnit:N0} gil / {result.WorldName} / {quality} / x{result.Quantity:N0} / {FormatReviewAge(result.ReviewedAt)}{cacheLabel}";
+        var listingLabel = result.PricePerUnit.HasValue
+            ? $"最安単価 {result.PricePerUnit.Value:N0} gil / {result.WorldName} / x{result.Quantity.GetValueOrDefault():N0} / {FormatReviewAge(result.ReviewedAt)}"
+            : "出品なし";
+        var saleLabel = result.LatestSale == null
+            ? " / 最終販売なし"
+            : $" / 最終販売 {result.LatestSale.PricePerUnit:N0} gil / {result.LatestSale.WorldName} / x{result.LatestSale.Quantity:N0} / {FormatSaleAge(result.LatestSale.SoldAt)}";
+        var message = $"[Universalis] {itemName} ({quality}): {listingLabel}{saleLabel}{cacheLabel}";
         _chatGui.Print(new XivChatEntry
         {
             Type = XivChatType.Echo,
             Message = new SeStringBuilder().AddText(message).Build(),
         });
+    }
+
+    private static string FormatQuality(UniversalisItemQuality quality)
+    {
+        return quality == UniversalisItemQuality.HighQuality ? "HQ" : "NQ";
     }
 
     private void PostError(string message)
@@ -309,6 +351,32 @@ public sealed class UniversalisMarketService : IDisposable
         return $"約{Math.Max(1, (int)elapsed.TotalDays)}日前確認 / データが古い可能性あり";
     }
 
+    private static string FormatSaleAge(DateTimeOffset? soldAt)
+    {
+        if (soldAt == null)
+        {
+            return "販売時刻不明";
+        }
+
+        var elapsed = DateTimeOffset.UtcNow - soldAt.Value.ToUniversalTime();
+        if (elapsed.TotalMinutes < 1)
+        {
+            return "たった今販売";
+        }
+
+        if (elapsed.TotalHours < 1)
+        {
+            return $"{Math.Max(1, (int)elapsed.TotalMinutes)}分前販売";
+        }
+
+        if (elapsed.TotalDays < 1)
+        {
+            return $"{Math.Max(1, (int)elapsed.TotalHours)}時間前販売";
+        }
+
+        return $"約{Math.Max(1, (int)elapsed.TotalDays)}日前販売";
+    }
+
     private static string GetPluginVersion()
     {
         return Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
@@ -317,12 +385,19 @@ public sealed class UniversalisMarketService : IDisposable
     private sealed record CachedResult(LowestPriceResult Result, DateTimeOffset CachedAt);
 
     private sealed record LowestPriceResult(
-        long PricePerUnit,
-        long Total,
-        long Quantity,
+        long? PricePerUnit,
+        long? Total,
+        long? Quantity,
         string WorldName,
         bool Hq,
-        DateTimeOffset? ReviewedAt);
+        DateTimeOffset? ReviewedAt,
+        LatestSaleResult? LatestSale);
+
+    private sealed record LatestSaleResult(
+        long PricePerUnit,
+        long Quantity,
+        string WorldName,
+        DateTimeOffset? SoldAt);
 
     private sealed class UniversalisDataCenter
     {
@@ -346,6 +421,9 @@ public sealed class UniversalisMarketService : IDisposable
 
         [JsonPropertyName("listings")]
         public List<UniversalisListing> Listings { get; set; } = new();
+
+        [JsonPropertyName("recentHistory")]
+        public List<UniversalisHistoryEntry> RecentHistory { get; set; } = new();
     }
 
     private sealed class UniversalisListing
@@ -368,4 +446,28 @@ public sealed class UniversalisMarketService : IDisposable
         [JsonPropertyName("lastReviewTime")]
         public long LastReviewTime { get; set; }
     }
+
+    private sealed class UniversalisHistoryEntry
+    {
+        [JsonPropertyName("pricePerUnit")]
+        public long PricePerUnit { get; set; }
+
+        [JsonPropertyName("quantity")]
+        public long Quantity { get; set; }
+
+        [JsonPropertyName("hq")]
+        public bool Hq { get; set; }
+
+        [JsonPropertyName("worldName")]
+        public string? WorldName { get; set; }
+
+        [JsonPropertyName("timestamp")]
+        public long Timestamp { get; set; }
+    }
+}
+
+public enum UniversalisItemQuality
+{
+    Normal,
+    HighQuality,
 }
