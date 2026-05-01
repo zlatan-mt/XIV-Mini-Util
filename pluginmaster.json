@@ -5,8 +5,8 @@
     "Punchline": "Materia精製と分解を手早く支援します。",
     "Description": "マテリア精製とアイテム分解、NPC販売場所検索を支援するミニユーティリティです。",
     "InternalName": "XivMiniUtil",
-    "AssemblyVersion": "0.3.4.0",
-    "TestingAssemblyVersion": "0.3.4.0",
+    "AssemblyVersion": "0.3.5.0",
+    "TestingAssemblyVersion": "0.3.5.0",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
     "TestingDalamudApiLevel": 15,
@@ -22,11 +22,11 @@
     "RepoUrl": "https://github.com/zlatan-mt/XIV-Mini-Util",
     "IconUrl": "https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/images/icon.png",
     "ImageUrls": [],
-    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.4/XivMiniUtil.zip",
-    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.4/XivMiniUtil.zip",
-    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.4/XivMiniUtil.zip",
-    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.4/XivMiniUtil.zip",
-    "Changelog": "Universalis価格確認で右クリック元のNQ/HQを区別し、対象品質の最安出品と最終販売価格を表示するよう改善。",
-    "LastUpdate": 1777642600
+    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.5/XivMiniUtil.zip",
+    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.5/XivMiniUtil.zip",
+    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.5/XivMiniUtil.zip",
+    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.5/XivMiniUtil.zip",
+    "Changelog": "シャキ通知音をAlarm05.wavへ変更し、FFXIVウィンドウが裏にある場合だけ鳴るよう改善。5秒後テスト再生と手動停止を追加。",
+    "LastUpdate": 1777643725
   }
 ]

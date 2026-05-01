@@ -334,12 +334,25 @@ public sealed class SettingsTab : ITabComponent
         }
 
         ImGui.TextDisabled("3〜30秒。確認画面が消えた場合は設定時間内でも停止します。");
-        ImGui.TextDisabled("Windowsの通知音を使うため、OS側のミュートや出力設定には従います。");
+        ImGui.TextDisabled("FFXIVウィンドウが前面ではない場合だけAlarm05.wavを鳴らします。");
+        ImGui.TextDisabled("申請をOK/キャンセルした場合、または停止ボタンを押した場合は停止します。");
 
         ImGui.Spacing();
         if (ImGui.Button("テスト再生"))
         {
             _dutyReadyNotificationService.PlayTest();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("5秒後にテスト再生"))
+        {
+            _ = _dutyReadyNotificationService.PlayTestAfterDelayAsync(TimeSpan.FromSeconds(5));
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("通知音を停止"))
+        {
+            _dutyReadyNotificationService.StopNotification();
         }
     }
 
