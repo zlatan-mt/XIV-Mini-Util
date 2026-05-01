@@ -5,38 +5,38 @@
 
 ## 前提
 - `projects/XIV-Mini-Util/XivMiniUtil.csproj` の `Version` と `AssemblyVersion` が配布対象の版になっている
-  - 人間向けのリリース表記とGitタグは `0.3.1`
-  - .NET / Dalamud が照合する `AssemblyVersion` は4要素の `0.3.1.0`
+  - 人間向けのリリース表記とGitタグは `0.3.2`
+  - .NET / Dalamud が照合する `AssemblyVersion` は4要素の `0.3.2.0`
 - `pluginmaster.json` を GitHub の Raw URL で公開できる
 - GitHub Releases に `XivMiniUtil.zip` を添付できる
-- Stable は `0.3.1 / Dalamud API 15` として扱う
-- Testing は Stable と同じ `0.3.1 / Dalamud API 15` を指す
+- Stable は `0.3.2 / Dalamud API 15` として扱う
+- Testing は Stable と同じ `0.3.2 / Dalamud API 15` を指す
 
 ## 配布系統
 - Stable
   - `pluginmaster.json` の `AssemblyVersion`, `DalamudApiLevel`, `DownloadLink`, `DownloadLinkInstall`, `DownloadLinkUpdate` を使う
-  - 現在は `0.3.1 / API15`
+  - 現在は `0.3.2 / API15`
   - 旧 `0.3.0 / API14` を再生成する場合は `v0.3.0` タグなどAPI14設定が残るソースからビルドする
 - Testing
   - `pluginmaster.json` の `TestingAssemblyVersion`, `TestingDalamudApiLevel`, `DownloadLinkTesting` を使う
-  - 現在はStableと同じ `0.3.1 / API15`
+  - 現在はStableと同じ `0.3.2 / API15`
 
 ## Stable API15 手動手順
 1. 必要なら `CHANGELOG.md` の `Unreleased` を整理する
 2. `dotnet build projects/XIV-Mini-Util/XivMiniUtil.csproj -c Release` でビルド確認する
 3. Release 出力の `XivMiniUtil.dll`, `XivMiniUtil.json`, 追加依存DLL有無を確認する
 4. 追加依存DLLがない場合は PowerShell で `XivMiniUtil.dll` と `XivMiniUtil.json` を zip 化する。追加依存DLLがある場合は成果物に含めるか SDK/packager 生成物を優先する
-5. zip を展開し、`XivMiniUtil.json` の `InternalName`, `AssemblyVersion`, `DalamudApiLevel` が `XivMiniUtil`, `0.3.1.0`, `15` と一致することを確認する
+5. zip を展開し、`XivMiniUtil.json` の `InternalName`, `AssemblyVersion`, `DalamudApiLevel` が `XivMiniUtil`, `0.3.2.0`, `15` と一致することを確認する
 6. GitHub Releases に対象バージョンのリリースを作成し、`XivMiniUtil.zip` を添付する
 7. Release asset のURLが取得できることを確認してから、公開用 `pluginmaster.json` のStable/Testing側を更新する
-  - `AssemblyVersion`: `0.3.1.0`
-  - `TestingAssemblyVersion`: `0.3.1.0`
+   - `AssemblyVersion`: `0.3.2.0`
+   - `TestingAssemblyVersion`: `0.3.2.0`
    - `DalamudApiLevel`: `15`
    - `TestingDalamudApiLevel`: `15`
-   - `DownloadLink`: `https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.1/XivMiniUtil.zip`
-   - `DownloadLinkInstall`: `https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.1/XivMiniUtil.zip`
-   - `DownloadLinkUpdate`: `https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.1/XivMiniUtil.zip`
-   - `DownloadLinkTesting`: `https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.1/XivMiniUtil.zip`
+   - `DownloadLink`: `https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.2/XivMiniUtil.zip`
+   - `DownloadLinkInstall`: `https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.2/XivMiniUtil.zip`
+   - `DownloadLinkUpdate`: `https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.2/XivMiniUtil.zip`
+   - `DownloadLinkTesting`: `https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.2/XivMiniUtil.zip`
    - `Changelog`
    - `LastUpdate`
 8. `pluginmaster.json` を push し、Raw URL で取得できることを確認する
