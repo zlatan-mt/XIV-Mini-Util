@@ -14,6 +14,7 @@ namespace XivMiniUtil.Services.Shop;
 
 public sealed class ContextMenuService : IDisposable
 {
+    private const ulong ItemIdVariantOffset = 500000;
     private const string SearchLabel = "販売場所を検索";
     private const string UniversalisSearchLabel = "Universalisで最安値確認";
 
@@ -153,7 +154,7 @@ public sealed class ContextMenuService : IDisposable
             var colorantItemId = _colorantItemResolver.TryGetItemIdFromAddon();
             if (colorantItemId != 0)
             {
-                itemId = colorantItemId;
+                itemId = NormalizeItemId(colorantItemId);
                 _pluginLog.Information($"ColorantAddon経由でItemId取得: {itemId}");
                 return true;
             }
@@ -162,7 +163,7 @@ public sealed class ContextMenuService : IDisposable
         // インベントリアイテム
         if (target is MenuTargetInventory inventoryTarget && inventoryTarget.TargetItem is { } inventoryItem)
         {
-            itemId = inventoryItem.ItemId;
+            itemId = NormalizeItemId(inventoryItem.ItemId);
             return itemId != 0;
         }
 
@@ -179,7 +180,7 @@ public sealed class ContextMenuService : IDisposable
         var hoveredItem = _gameGui.HoveredItem;
         if (hoveredItem > 0)
         {
-            var hoveredItemId = (uint)(hoveredItem % 500000);
+            var hoveredItemId = NormalizeItemId(hoveredItem);
             if (hoveredItemId != 0)
             {
                 itemId = hoveredItemId;
@@ -212,7 +213,7 @@ public sealed class ContextMenuService : IDisposable
             // TargetItemIdから直接取得
             if (TryGetProperty(defaultTarget, "TargetItemId", out var targetItemId) && targetItemId is uint chatItemId && chatItemId != 0)
             {
-                itemId = chatItemId;
+                itemId = NormalizeItemId(chatItemId);
                 return true;
             }
 
@@ -223,7 +224,7 @@ public sealed class ContextMenuService : IDisposable
                 var extractedId = (uint)(contentIdVal & 0xFFFFFFFF);
                 if (extractedId != 0 && extractedId < 100000) // 妥当なアイテムID範囲
                 {
-                    itemId = extractedId;
+                    itemId = NormalizeItemId(extractedId);
                     return true;
                 }
             }
@@ -231,13 +232,13 @@ public sealed class ContextMenuService : IDisposable
 
         if (TryGetProperty(target, "ItemId", out var rawItemId) && rawItemId is uint directItemId)
         {
-            itemId = directItemId;
+            itemId = NormalizeItemId(directItemId);
             return itemId != 0;
         }
 
         if (TryGetProperty(target, "ItemID", out var rawItemIdAlt) && rawItemIdAlt is uint directItemIdAlt)
         {
-            itemId = directItemIdAlt;
+            itemId = NormalizeItemId(directItemIdAlt);
             return itemId != 0;
         }
 
@@ -246,7 +247,7 @@ public sealed class ContextMenuService : IDisposable
             var reflectedItemId = TryGetRowId(targetItem);
             if (reflectedItemId is { } candidate && candidate != 0)
             {
-                itemId = candidate;
+                itemId = NormalizeItemId(candidate);
                 return true;
             }
         }
@@ -291,8 +292,7 @@ public sealed class ContextMenuService : IDisposable
                     break;
             }
 
-            // HQ品のIDを通常品に正規化
-            return itemId % 500000;
+            return NormalizeItemId(itemId);
         }
         catch (Exception ex)
         {
@@ -318,8 +318,30 @@ public sealed class ContextMenuService : IDisposable
 
     private bool IsMarketableItem(uint itemId)
     {
-        var item = _dataManager.Excel.GetSheet<Item>().GetRowOrDefault(itemId);
+        var normalizedItemId = NormalizeItemId(itemId);
+        var item = _dataManager.Excel.GetSheet<Item>().GetRowOrDefault(normalizedItemId);
         return item.HasValue && item.Value.ItemSearchCategory.RowId != 0;
+    }
+
+    internal static uint NormalizeItemId(uint itemId)
+    {
+        return NormalizeItemId((ulong)itemId);
+    }
+
+    private static uint NormalizeItemId(ulong itemId)
+    {
+        if (itemId == 0)
+        {
+            return 0;
+        }
+
+        var normalized = itemId % ItemIdVariantOffset;
+        if (normalized != 0)
+        {
+            return (uint)normalized;
+        }
+
+        return itemId <= uint.MaxValue ? (uint)itemId : 0;
     }
 
     private static void SetMenuItemEnabled(MenuItem menuItem, bool enabled)

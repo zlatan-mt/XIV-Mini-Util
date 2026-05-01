@@ -21,8 +21,8 @@ FFXIV用のDalamudプラグインです。
 
 現在の配布版は次の通りです。
 
-- Stable: `0.3.2` / Dalamud API 15
-- Testing: `0.3.2` / Dalamud API 15
+- Stable: `0.3.3` / Dalamud API 15
+- Testing: `0.3.3` / Dalamud API 15
 
 `0.3.0 / API14` は過去リリースとして残しています。
 
