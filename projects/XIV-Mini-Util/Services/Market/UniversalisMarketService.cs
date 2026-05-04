@@ -318,13 +318,16 @@ public sealed class UniversalisMarketService : IDisposable
     {
         var quality = result.Hq ? "HQ" : "NQ";
         var cacheLabel = fromCache ? " / cache" : string.Empty;
+        var hasMultipleListings = result.Listings.Count > 1;
         var listingLabel = result.Listings.Count > 0
             ? FormatListings(result.Listings)
             : "出品なし";
         var saleLabel = result.LatestSale == null
-            ? " / 最終販売なし"
-            : $" / 最終販売 {result.LatestSale.PricePerUnit:N0} gil / {result.LatestSale.WorldName} / x{result.LatestSale.Quantity:N0} / {FormatSaleAge(result.LatestSale.SoldAt)}";
-        var message = $"[Universalis] {itemName} ({quality} / {result.ScopeName}): {listingLabel}{saleLabel}{cacheLabel}";
+            ? "最終販売なし"
+            : $"最終販売 {result.LatestSale.PricePerUnit:N0} gil / {result.LatestSale.WorldName} / x{result.LatestSale.Quantity:N0} / {FormatSaleAge(result.LatestSale.SoldAt)}";
+        var message = hasMultipleListings
+            ? $"[Universalis] {itemName} ({quality} / {result.ScopeName}):{Environment.NewLine}{listingLabel}{Environment.NewLine}{saleLabel}{cacheLabel}"
+            : $"[Universalis] {itemName} ({quality} / {result.ScopeName}): {listingLabel} / {saleLabel}{cacheLabel}";
         _chatGui.Print(new XivChatEntry
         {
             Type = XivChatType.Echo,
@@ -341,7 +344,7 @@ public sealed class UniversalisMarketService : IDisposable
         }
 
         return string.Join(
-            " | ",
+            Environment.NewLine,
             listings.Select((listing, index) =>
                 $"{index + 1}位 {listing.PricePerUnit:N0} gil / {listing.WorldName} / x{listing.Quantity:N0} / {FormatReviewAge(listing.ReviewedAt)}"));
     }
