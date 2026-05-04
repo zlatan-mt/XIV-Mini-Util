@@ -446,6 +446,23 @@ public sealed class SettingsTab : ITabComponent
             _configuration.Save();
         }
 
+        ImGui.Spacing();
+        ImGui.Text("Universalis検索");
+
+        var showTopThree = _configuration.UniversalisShowTopThreeListings;
+        if (ImGui.Checkbox("3位までの安値を表示", ref showTopThree))
+        {
+            _configuration.UniversalisShowTopThreeListings = showTopThree;
+            _configuration.Save();
+        }
+
+        var searchRegionWide = _configuration.UniversalisSearchRegionWide;
+        if (ImGui.Checkbox("データセンター外も検索", ref searchRegionWide))
+        {
+            _configuration.UniversalisSearchRegionWide = searchRegionWide;
+            _configuration.Save();
+        }
+
         ImGui.Separator();
         DrawShopSearchPriorityList();
         ImGui.Separator();

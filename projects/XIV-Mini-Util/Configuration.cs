@@ -38,6 +38,8 @@ public sealed class Configuration : IPluginConfiguration
     public bool ShopSearchAutoTeleportEnabled { get; set; } = false;
     public List<uint> ShopSearchAreaPriority { get; set; } = new();
     public bool ShopDataVerboseLogging { get; set; } = false;
+    public bool UniversalisShowTopThreeListings { get; set; } = false;
+    public bool UniversalisSearchRegionWide { get; set; } = false;
 
     // 潜水艦探索管理設定
     public bool SubmarineTrackerEnabled { get; set; } = true;
@@ -171,6 +173,8 @@ public sealed class Configuration : IPluginConfiguration
         ShopSearchAutoTeleportEnabled = source.ShopSearchAutoTeleportEnabled;
         ShopSearchAreaPriority = source.ShopSearchAreaPriority?.ToList() ?? DefaultShopSearchAreaPriority.ToList();
         ShopDataVerboseLogging = source.ShopDataVerboseLogging;
+        UniversalisShowTopThreeListings = source.UniversalisShowTopThreeListings;
+        UniversalisSearchRegionWide = source.UniversalisSearchRegionWide;
         SubmarineTrackerEnabled = source.SubmarineTrackerEnabled;
         DiscordWebhookUrl = source.DiscordWebhookUrl;
         SubmarineNotificationEnabled = source.SubmarineNotificationEnabled;

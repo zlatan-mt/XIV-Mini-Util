@@ -13,7 +13,7 @@ FFXIV用のDalamudプラグインです。
 - マテリア精製の自動実行とオン・オフ
 - 分解の条件設定と警告ダイアログ
 - アイテム販売場所の検索（マップピン・テレポ）
-- Universalis APIによる現在DC内のマーケット最安値確認
+- Universalis APIによるマーケット最安値確認
 - 日課チェックリスト（Daily/Weekly、通知設定）
 - コンテンツ突入確認時のWindows通知音
 
@@ -21,8 +21,8 @@ FFXIV用のDalamudプラグインです。
 
 現在の配布版は次の通りです。
 
-- Stable: `0.3.5` / Dalamud API 15
-- Testing: `0.3.5` / Dalamud API 15
+- Stable: `0.3.6` / Dalamud API 15
+- Testing: `0.3.6` / Dalamud API 15
 
 `0.3.0 / API14` は過去リリースとして残しています。
 
@@ -58,6 +58,8 @@ FFXIV用のDalamudプラグインです。
 1. アイテムを右クリックして「Universalisで最安値確認」を選びます。
 
 2. 現在いるDC内の最安出品がチャットに表示されます。表示される価格は税抜の単価です。
+
+3. Settingsタブの「Shop Search」から、安値3位までの表示とデータセンター外検索を切り替えられます。
 
 ## 設定のポイント
 

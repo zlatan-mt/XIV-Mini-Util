@@ -22,6 +22,7 @@ public sealed class UniversalisMarketService : IDisposable
     private readonly IObjectTable _objectTable;
     private readonly IChatGui _chatGui;
     private readonly IPluginLog _pluginLog;
+    private readonly Configuration _configuration;
     private readonly HttpClient _httpClient;
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly ConcurrentDictionary<string, byte> _runningRequests = new(StringComparer.Ordinal);
@@ -34,12 +35,14 @@ public sealed class UniversalisMarketService : IDisposable
         IDataManager dataManager,
         IObjectTable objectTable,
         IChatGui chatGui,
-        IPluginLog pluginLog)
+        IPluginLog pluginLog,
+        Configuration configuration)
     {
         _dataManager = dataManager;
         _objectTable = objectTable;
         _chatGui = chatGui;
         _pluginLog = pluginLog;
+        _configuration = configuration;
         _httpClient = new HttpClient
         {
             BaseAddress = new Uri("https://universalis.app/api/v2/"),
@@ -77,14 +80,15 @@ public sealed class UniversalisMarketService : IDisposable
             }
 
             var itemName = GetItemName(itemId);
-            var dcName = await ResolveCurrentDataCenterNameAsync(_disposeCts.Token).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(dcName))
+            var scope = await ResolveCurrentMarketScopeAsync(_disposeCts.Token).ConfigureAwait(false);
+            if (scope == null)
             {
                 PostError("現在DCを判定できませんでした。");
                 return;
             }
 
-            requestKey = $"{dcName}:{itemId}:{quality}";
+            var listingLimit = _configuration.UniversalisShowTopThreeListings ? 3 : 1;
+            requestKey = $"{scope.TargetName}:{itemId}:{quality}:{listingLimit}";
             if (TryGetCachedResult(requestKey, out var cachedResult))
             {
                 PostResult(itemName, cachedResult, fromCache: true);
@@ -99,8 +103,8 @@ public sealed class UniversalisMarketService : IDisposable
 
             using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
             requestCts.CancelAfter(RequestTimeout);
-            var marketData = await FetchMarketDataAsync(dcName, itemId, requestCts.Token).ConfigureAwait(false);
-            var result = BuildLowestPriceResult(marketData, quality);
+            var marketData = await FetchMarketDataAsync(scope.TargetName, itemId, requestCts.Token).ConfigureAwait(false);
+            var result = BuildLowestPriceResult(marketData, quality, listingLimit, scope.DisplayName);
             if (result == null)
             {
                 PostError($"{itemName} ({FormatQuality(quality)}) の出品が見つかりませんでした。");
@@ -143,27 +147,27 @@ public sealed class UniversalisMarketService : IDisposable
         }
     }
 
-    private async Task<string?> ResolveCurrentDataCenterNameAsync(CancellationToken cancellationToken)
+    private async Task<MarketScope?> ResolveCurrentMarketScopeAsync(CancellationToken cancellationToken)
     {
         var currentWorldId = _objectTable.LocalPlayer?.CurrentWorld.RowId ?? 0;
         if (currentWorldId != 0)
         {
-            var currentDcName = await FindDataCenterNameAsync(currentWorldId, cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(currentDcName))
+            var currentScope = await FindMarketScopeAsync(currentWorldId, cancellationToken).ConfigureAwait(false);
+            if (currentScope != null)
             {
-                _pluginLog.Debug($"Universalis DC resolved from CurrentWorld: {currentWorldId} -> {currentDcName}");
-                return currentDcName;
+                _pluginLog.Debug($"Universalis scope resolved from CurrentWorld: {currentWorldId} -> {currentScope.DisplayName}");
+                return currentScope;
             }
         }
 
         var homeWorldId = _objectTable.LocalPlayer?.HomeWorld.RowId ?? 0;
         if (homeWorldId != 0)
         {
-            var homeDcName = await FindDataCenterNameAsync(homeWorldId, cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(homeDcName))
+            var homeScope = await FindMarketScopeAsync(homeWorldId, cancellationToken).ConfigureAwait(false);
+            if (homeScope != null)
             {
-                _pluginLog.Warning($"Universalis DC resolved from HomeWorld fallback: {homeWorldId} -> {homeDcName}");
-                return homeDcName;
+                _pluginLog.Warning($"Universalis scope resolved from HomeWorld fallback: {homeWorldId} -> {homeScope.DisplayName}");
+                return homeScope;
             }
         }
 
@@ -171,10 +175,21 @@ public sealed class UniversalisMarketService : IDisposable
         return null;
     }
 
-    private async Task<string?> FindDataCenterNameAsync(uint worldId, CancellationToken cancellationToken)
+    private async Task<MarketScope?> FindMarketScopeAsync(uint worldId, CancellationToken cancellationToken)
     {
         var dataCenters = await GetDataCentersAsync(cancellationToken).ConfigureAwait(false);
-        return dataCenters.FirstOrDefault(dc => dc.Worlds.Contains(worldId))?.Name;
+        var dataCenter = dataCenters.FirstOrDefault(dc => dc.Worlds.Contains(worldId));
+        if (dataCenter == null)
+        {
+            return null;
+        }
+
+        if (_configuration.UniversalisSearchRegionWide && !string.IsNullOrWhiteSpace(dataCenter.Region))
+        {
+            return new MarketScope(dataCenter.Region, $"{dataCenter.Region}全体");
+        }
+
+        return new MarketScope(dataCenter.Name, $"{dataCenter.Name} DC");
     }
 
     private async Task<IReadOnlyList<UniversalisDataCenter>> GetDataCentersAsync(CancellationToken cancellationToken)
@@ -191,32 +206,39 @@ public sealed class UniversalisMarketService : IDisposable
         return dataCenters;
     }
 
-    private async Task<UniversalisMarketData> FetchMarketDataAsync(string dcName, uint itemId, CancellationToken cancellationToken)
+    private async Task<UniversalisMarketData> FetchMarketDataAsync(string worldDcOrRegionName, uint itemId, CancellationToken cancellationToken)
     {
-        var path = $"{Uri.EscapeDataString(dcName)}/{itemId}?listings=40&entries=20";
+        var path = $"{Uri.EscapeDataString(worldDcOrRegionName)}/{itemId}?listings=40&entries=20";
         await using var stream = await _httpClient.GetStreamAsync(path, cancellationToken).ConfigureAwait(false);
         return await JsonSerializer.DeserializeAsync<UniversalisMarketData>(stream, cancellationToken: cancellationToken).ConfigureAwait(false)
             ?? throw new JsonException($"Universalis market response was empty for item {itemId}.");
     }
 
-    private LowestPriceResult? BuildLowestPriceResult(UniversalisMarketData marketData, UniversalisItemQuality quality)
+    private LowestPriceResult? BuildLowestPriceResult(UniversalisMarketData marketData, UniversalisItemQuality quality, int listingLimit, string scopeName)
     {
         var shouldUseHq = quality == UniversalisItemQuality.HighQuality;
         var latestSale = FindLatestSale(marketData, quality);
-        var listing = marketData.Listings
+        var listings = marketData.Listings
             .Where(entry => entry.PricePerUnit > 0 && entry.Hq == shouldUseHq)
             .OrderBy(entry => entry.PricePerUnit)
             .ThenBy(entry => entry.Total)
             .ThenBy(entry => entry.Quantity)
-            .FirstOrDefault();
+            .Take(listingLimit)
+            .Select(entry => BuildListingResult(entry, marketData, shouldUseHq))
+            .ToList();
 
-        if (listing == null)
+        if (listings.Count == 0)
         {
             return latestSale == null
                 ? null
-                : new LowestPriceResult(null, null, null, marketData.WorldName ?? marketData.DcName ?? "不明", shouldUseHq, null, latestSale);
+                : new LowestPriceResult(Array.Empty<ListingResult>(), shouldUseHq, scopeName, latestSale);
         }
 
+        return new LowestPriceResult(listings, shouldUseHq, scopeName, latestSale);
+    }
+
+    private static ListingResult BuildListingResult(UniversalisListing listing, UniversalisMarketData marketData, bool hq)
+    {
         DateTimeOffset? reviewedAt = null;
         if (listing.LastReviewTime > 0)
         {
@@ -227,14 +249,13 @@ public sealed class UniversalisMarketService : IDisposable
             reviewedAt = DateTimeOffset.FromUnixTimeMilliseconds(marketData.LastUploadTime);
         }
 
-        return new LowestPriceResult(
+        return new ListingResult(
             listing.PricePerUnit,
             listing.Total,
             listing.Quantity,
             listing.WorldName ?? marketData.WorldName ?? marketData.DcName ?? "不明",
-            listing.Hq,
-            reviewedAt,
-            latestSale);
+            hq,
+            reviewedAt);
     }
 
     private static LatestSaleResult? FindLatestSale(UniversalisMarketData marketData, UniversalisItemQuality quality)
@@ -297,18 +318,32 @@ public sealed class UniversalisMarketService : IDisposable
     {
         var quality = result.Hq ? "HQ" : "NQ";
         var cacheLabel = fromCache ? " / cache" : string.Empty;
-        var listingLabel = result.PricePerUnit.HasValue
-            ? $"最安単価 {result.PricePerUnit.Value:N0} gil / {result.WorldName} / x{result.Quantity.GetValueOrDefault():N0} / {FormatReviewAge(result.ReviewedAt)}"
+        var listingLabel = result.Listings.Count > 0
+            ? FormatListings(result.Listings)
             : "出品なし";
         var saleLabel = result.LatestSale == null
             ? " / 最終販売なし"
             : $" / 最終販売 {result.LatestSale.PricePerUnit:N0} gil / {result.LatestSale.WorldName} / x{result.LatestSale.Quantity:N0} / {FormatSaleAge(result.LatestSale.SoldAt)}";
-        var message = $"[Universalis] {itemName} ({quality}): {listingLabel}{saleLabel}{cacheLabel}";
+        var message = $"[Universalis] {itemName} ({quality} / {result.ScopeName}): {listingLabel}{saleLabel}{cacheLabel}";
         _chatGui.Print(new XivChatEntry
         {
             Type = XivChatType.Echo,
             Message = new SeStringBuilder().AddText(message).Build(),
         });
+    }
+
+    private static string FormatListings(IReadOnlyList<ListingResult> listings)
+    {
+        if (listings.Count == 1)
+        {
+            var listing = listings[0];
+            return $"最安単価 {listing.PricePerUnit:N0} gil / {listing.WorldName} / x{listing.Quantity:N0} / {FormatReviewAge(listing.ReviewedAt)}";
+        }
+
+        return string.Join(
+            " | ",
+            listings.Select((listing, index) =>
+                $"{index + 1}位 {listing.PricePerUnit:N0} gil / {listing.WorldName} / x{listing.Quantity:N0} / {FormatReviewAge(listing.ReviewedAt)}"));
     }
 
     private static string FormatQuality(UniversalisItemQuality quality)
@@ -382,15 +417,22 @@ public sealed class UniversalisMarketService : IDisposable
         return Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
     }
 
+    private sealed record MarketScope(string TargetName, string DisplayName);
+
     private sealed record CachedResult(LowestPriceResult Result, DateTimeOffset CachedAt);
 
-    private sealed record LowestPriceResult(
-        long? PricePerUnit,
-        long? Total,
-        long? Quantity,
+    private sealed record ListingResult(
+        long PricePerUnit,
+        long Total,
+        long Quantity,
         string WorldName,
         bool Hq,
-        DateTimeOffset? ReviewedAt,
+        DateTimeOffset? ReviewedAt);
+
+    private sealed record LowestPriceResult(
+        IReadOnlyList<ListingResult> Listings,
+        bool Hq,
+        string ScopeName,
         LatestSaleResult? LatestSale);
 
     private sealed record LatestSaleResult(
@@ -403,6 +445,9 @@ public sealed class UniversalisMarketService : IDisposable
     {
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("region")]
+        public string Region { get; set; } = string.Empty;
 
         [JsonPropertyName("worlds")]
         public IReadOnlyList<uint> Worlds { get; set; } = Array.Empty<uint>();

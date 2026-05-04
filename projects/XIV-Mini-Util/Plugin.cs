@@ -132,7 +132,7 @@ public sealed class Plugin : IDalamudPlugin
         _chatService = new ChatService(chatGui, _mapService);
         _teleportService = new TeleportService(dataManager, aetheryteList, pluginLog);
         _shopSearchService = new ShopSearchService(_shopDataCache, _mapService, _chatService, _teleportService, _configuration, pluginLog);
-        _universalisMarketService = new UniversalisMarketService(dataManager, objectTable, chatGui, pluginLog);
+        _universalisMarketService = new UniversalisMarketService(dataManager, objectTable, chatGui, pluginLog, _configuration);
         _contextMenuService = new ContextMenuService(contextMenu, gameGui, dataManager, _shopSearchService, _shopDataCache, _universalisMarketService, pluginLog);
 
         var materiaFeatureEnabled = _configuration.MateriaFeatureEnabled;
