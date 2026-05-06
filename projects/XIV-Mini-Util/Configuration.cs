@@ -14,7 +14,7 @@ namespace XivMiniUtil;
 public sealed class Configuration : IPluginConfiguration
 {
     public const int ExportVersion = 1;
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 5;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -57,6 +57,12 @@ public sealed class Configuration : IPluginConfiguration
     // シャキ通知設定
     public bool DutyReadySoundNotificationEnabled { get; set; } = false;
     public int DutyReadySoundDurationSeconds { get; set; } = 10;
+
+    // ログイン/キャラ選択画面設定
+    public bool CharaSelectEmoteEnabled { get; set; } = false;
+    public bool CharaSelectPreloadTerritoryEnabled { get; set; } = false;
+    public Dictionary<ulong, uint> CharaSelectSelectedEmotes { get; set; } = new();
+    public Dictionary<ulong, ushort> CharaSelectVoiceIds { get; set; } = new();
 
     private IDalamudPluginInterface? _pluginInterface;
 
@@ -191,6 +197,16 @@ public sealed class Configuration : IPluginConfiguration
             .ToList() ?? new List<Guid>();
         DutyReadySoundNotificationEnabled = source.DutyReadySoundNotificationEnabled;
         DutyReadySoundDurationSeconds = Math.Clamp(source.DutyReadySoundDurationSeconds, 3, 30);
+        CharaSelectEmoteEnabled = source.CharaSelectEmoteEnabled;
+        CharaSelectPreloadTerritoryEnabled = source.CharaSelectPreloadTerritoryEnabled;
+        CharaSelectSelectedEmotes = source.CharaSelectSelectedEmotes?
+            .Where(pair => pair.Key != 0 && pair.Value != 0)
+            .ToDictionary(pair => pair.Key, pair => pair.Value)
+            ?? new Dictionary<ulong, uint>();
+        CharaSelectVoiceIds = source.CharaSelectVoiceIds?
+            .Where(pair => pair.Key != 0 && pair.Value != 0)
+            .ToDictionary(pair => pair.Key, pair => pair.Value)
+            ?? new Dictionary<ulong, ushort>();
         NormalizeAndMigrate();
     }
 
@@ -277,6 +293,42 @@ public sealed class Configuration : IPluginConfiguration
         {
             ChecklistDisabledItemIds = normalizedDisabledIds;
             changed = true;
+        }
+
+        if (CharaSelectSelectedEmotes == null)
+        {
+            CharaSelectSelectedEmotes = new Dictionary<ulong, uint>();
+            changed = true;
+        }
+        else
+        {
+            var normalizedEmotes = CharaSelectSelectedEmotes
+                .Where(pair => pair.Key != 0 && pair.Value != 0)
+                .ToDictionary(pair => pair.Key, pair => pair.Value);
+
+            if (normalizedEmotes.Count != CharaSelectSelectedEmotes.Count)
+            {
+                CharaSelectSelectedEmotes = normalizedEmotes;
+                changed = true;
+            }
+        }
+
+        if (CharaSelectVoiceIds == null)
+        {
+            CharaSelectVoiceIds = new Dictionary<ulong, ushort>();
+            changed = true;
+        }
+        else
+        {
+            var normalizedVoiceIds = CharaSelectVoiceIds
+                .Where(pair => pair.Key != 0 && pair.Value != 0)
+                .ToDictionary(pair => pair.Key, pair => pair.Value);
+
+            if (normalizedVoiceIds.Count != CharaSelectVoiceIds.Count)
+            {
+                CharaSelectVoiceIds = normalizedVoiceIds;
+                changed = true;
+            }
         }
 
         return changed;

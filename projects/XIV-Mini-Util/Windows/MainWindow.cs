@@ -10,6 +10,7 @@ using ImGui = Dalamud.Bindings.ImGui.ImGui;
 using ImGuiTabItemFlags = Dalamud.Bindings.ImGui.ImGuiTabItemFlags;
 using XivMiniUtil.Services.Common;
 using XivMiniUtil.Services.Checklist;
+using XivMiniUtil.Services.CharaSelect;
 using XivMiniUtil.Services.Desynth;
 using XivMiniUtil.Services.Materia;
 using XivMiniUtil.Services.Notification;
@@ -42,6 +43,7 @@ public sealed class MainWindow : Window, IDisposable
         SubmarineDataStorage submarineDataStorage,
         DiscordService discordService,
         DutyReadyNotificationService dutyReadyNotificationService,
+        CharaSelectService charaSelectService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
         : base($"XIV Mini Util [{BuildInfo}]")
@@ -50,7 +52,7 @@ public sealed class MainWindow : Window, IDisposable
         _searchTab = new SearchTab(shopDataCache, shopSearchService);
         _checklistTab = new ChecklistTab(configuration, checklistService);
         _submarineTab = new SubmarineTab(configuration, submarineDataStorage);
-        _settingsTab = new SettingsTab(configuration, materiaService, desynthService, shopDataCache, discordService, checklistService, dutyReadyNotificationService, materiaFeatureEnabled, desynthFeatureEnabled);
+        _settingsTab = new SettingsTab(configuration, materiaService, desynthService, shopDataCache, discordService, checklistService, dutyReadyNotificationService, charaSelectService, materiaFeatureEnabled, desynthFeatureEnabled);
 
         SizeConstraints = new WindowSizeConstraints
         {

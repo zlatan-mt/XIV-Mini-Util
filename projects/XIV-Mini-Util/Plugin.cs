@@ -6,8 +6,10 @@ using Dalamud.Game.Command;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Interface.Windowing;
+using System.Reflection;
 using XivMiniUtil.Services.Common;
 using XivMiniUtil.Services.Checklist;
+using XivMiniUtil.Services.CharaSelect;
 using XivMiniUtil.Services.Desynth;
 using XivMiniUtil.Services.Market;
 using XivMiniUtil.Services.Materia;
@@ -22,6 +24,10 @@ public sealed class Plugin : IDalamudPlugin
 {
     private const string CommandName = "/xivminiutil";
     private const string CommandAlias = "/xmu";
+    private const string VersionCommandName = "/xmuversion";
+    private const string VersionCommandAlias = "/xmuv";
+    private const string CharaSelectDiagnosticCommandName = "/xmucdiag";
+    private const string CharaSelectDiagnosticCommandAlias = "/xmuc";
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
     private readonly IChatGui _chatGui;
@@ -45,6 +51,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly SubmarineService _submarineService;
     private readonly ChecklistService _checklistService;
     private readonly DutyReadyNotificationService _dutyReadyNotificationService;
+    private readonly CharaSelectService _charaSelectService;
     private readonly MainWindow _mainWindow;
     private readonly ShopSearchResultWindow _shopSearchResultWindow;
 
@@ -59,6 +66,7 @@ public sealed class Plugin : IDalamudPlugin
         IPlayerState playerState,
         IGameGui gameGui,
         IAddonLifecycle addonLifecycle,
+        IGameInteropProvider gameInteropProvider,
         ICondition condition,
         IPluginLog pluginLog,
         IDataManager dataManager,
@@ -109,6 +117,15 @@ public sealed class Plugin : IDalamudPlugin
             chatGui,
             _discordService,
             pluginLog);
+        _charaSelectService = new CharaSelectService(
+            gameInteropProvider,
+            framework,
+            clientState,
+            objectTable,
+            playerState,
+            dataManager,
+            pluginLog,
+            _configuration);
 
         _materiaService = new MateriaExtractService(
             framework,
@@ -159,6 +176,7 @@ public sealed class Plugin : IDalamudPlugin
             _submarineDataStorage,
             _discordService,
             _dutyReadyNotificationService,
+            _charaSelectService,
             materiaFeatureEnabled,
             desynthFeatureEnabled);
         _shopSearchResultWindow = new ShopSearchResultWindow(_mapService, _teleportService, _configuration);
@@ -173,11 +191,27 @@ public sealed class Plugin : IDalamudPlugin
 
         _commandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "メインウィンドウを開きます。サブコマンド: config / help",
+            HelpMessage = "メインウィンドウを開きます。サブコマンド: config / diag / version / help",
         });
         _commandManager.AddHandler(CommandAlias, new CommandInfo(OnCommand)
         {
-            HelpMessage = "メインウィンドウを開きます。サブコマンド: config / help",
+            HelpMessage = "メインウィンドウを開きます。サブコマンド: config / diag / version / help",
+        });
+        _commandManager.AddHandler(VersionCommandName, new CommandInfo(OnVersionCommand)
+        {
+            HelpMessage = "読み込み中のXIV Mini Util DLLとビルド時刻を表示します。",
+        });
+        _commandManager.AddHandler(VersionCommandAlias, new CommandInfo(OnVersionCommand)
+        {
+            HelpMessage = "読み込み中のXIV Mini Util DLLとビルド時刻を表示します。",
+        });
+        _commandManager.AddHandler(CharaSelectDiagnosticCommandName, new CommandInfo(OnCharaSelectDiagnosticCommand)
+        {
+            HelpMessage = "キャラ選択画面のエモート/声診断情報を表示します。",
+        });
+        _commandManager.AddHandler(CharaSelectDiagnosticCommandAlias, new CommandInfo(OnCharaSelectDiagnosticCommand)
+        {
+            HelpMessage = "キャラ選択画面のエモート/声診断情報を表示します。",
         });
         _shopSearchService.OnSearchCompleted += OnShopSearchCompleted;
         _ = InitializeShopDataAsync();
@@ -192,12 +226,17 @@ public sealed class Plugin : IDalamudPlugin
     {
         _commandManager.RemoveHandler(CommandName);
         _commandManager.RemoveHandler(CommandAlias);
+        _commandManager.RemoveHandler(VersionCommandName);
+        _commandManager.RemoveHandler(VersionCommandAlias);
+        _commandManager.RemoveHandler(CharaSelectDiagnosticCommandName);
+        _commandManager.RemoveHandler(CharaSelectDiagnosticCommandAlias);
         _pluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         _pluginInterface.UiBuilder.OpenMainUi -= OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi -= OpenSettingsWindow;
 
         _mainWindow.Dispose();
         _shopSearchResultWindow.Dispose();
+        _charaSelectService.Dispose();
         _dutyReadyNotificationService.Dispose();
         _materiaService.Dispose();
         _desynthService.Dispose();
@@ -213,20 +252,25 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
-        var trimmed = args?.Trim().ToLowerInvariant();
-        if (string.IsNullOrEmpty(trimmed))
+        var subCommand = GetSubCommand(args);
+        if (string.IsNullOrEmpty(subCommand))
         {
             _mainWindow.Toggle();
             return;
         }
 
-        switch (trimmed)
+        switch (subCommand)
         {
             case "config":
                 OpenSettingsWindow();
                 break;
             case "diag":
                 GenerateDiagnosticsReport();
+                break;
+            case "version":
+            case "ver":
+            case "-v":
+                PrintVersionInfo();
                 break;
             case "help":
                 PrintHelp();
@@ -246,6 +290,70 @@ public sealed class Plugin : IDalamudPlugin
         _chatGui.Print($"[XIV Mini Util] 位置情報なしNPC: {_shopDataCache.GetExcludedNpcCount()}件, NPCマッチなしショップ: {_shopDataCache.GetUnmatchedShopCount()}件");
     }
 
+    private void PrintVersionInfo()
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        var assemblyName = assembly.GetName();
+        var assemblyFile = _pluginInterface.AssemblyLocation;
+        var location = assemblyFile.FullName;
+        var displayTimeZone = GetDisplayTimeZone();
+        var writeTime = File.Exists(location)
+            ? TimeZoneInfo.ConvertTimeFromUtc(File.GetLastWriteTimeUtc(location), displayTimeZone)
+            : (DateTime?)null;
+        var loadTime = TimeZoneInfo.ConvertTimeFromUtc(_pluginInterface.LoadTimeUTC, displayTimeZone);
+
+        _chatGui.Print($"[XIV Mini Util] Assembly: {assemblyName.Name}");
+        _chatGui.Print($"[XIV Mini Util] Version: {assemblyName.Version?.ToString(3) ?? "unknown"} / IsDev: {_pluginInterface.IsDev}");
+        _chatGui.Print($"[XIV Mini Util] Loaded: {loadTime:yyyy-MM-dd HH:mm:ss} JST");
+        _chatGui.Print($"[XIV Mini Util] DLL: {location}");
+
+        if (writeTime.HasValue)
+        {
+            _chatGui.Print($"[XIV Mini Util] DLL updated: {writeTime.Value:yyyy-MM-dd HH:mm:ss} JST");
+        }
+    }
+
+    private void OnVersionCommand(string command, string args)
+    {
+        PrintVersionInfo();
+    }
+
+    private void OnCharaSelectDiagnosticCommand(string command, string args)
+    {
+        foreach (var line in _charaSelectService.GetVoiceDiagnosticLines())
+        {
+            _chatGui.Print($"[XIV Mini Util] {line}");
+        }
+    }
+
+    private static string GetSubCommand(string args)
+    {
+        var trimmed = args?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return string.Empty;
+        }
+
+        var separatorIndex = trimmed.IndexOfAny([' ', '\t', '　']);
+        return (separatorIndex < 0 ? trimmed : trimmed[..separatorIndex]).ToLowerInvariant();
+    }
+
+    private static TimeZoneInfo GetDisplayTimeZone()
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("Tokyo Standard Time");
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return TimeZoneInfo.Local;
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return TimeZoneInfo.Local;
+        }
+    }
+
     private void OpenSettingsWindow()
     {
         _mainWindow.OpenSettingsTab();
@@ -261,6 +369,10 @@ public sealed class Plugin : IDalamudPlugin
         _chatGui.Print("/xivminiutil : メインウィンドウを開きます。");
         _chatGui.Print("/xivminiutil config : 設定タブを開きます。");
         _chatGui.Print("/xivminiutil diag : ショップデータ診断レポートを出力します。");
+        _chatGui.Print("/xivminiutil version : 読み込み中のDLLとビルド時刻を表示します。");
+        _chatGui.Print("/xmuv : 読み込み中のDLLとビルド時刻を表示します。");
+        _chatGui.Print("/xmuversion : 読み込み中のDLLとビルド時刻を表示します。");
+        _chatGui.Print("/xmuc : キャラ選択画面のエモート/声診断情報を表示します。");
         _chatGui.Print("/xmu : /xivminiutil のエイリアス");
     }
 

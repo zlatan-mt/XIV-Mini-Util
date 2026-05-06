@@ -10,6 +10,7 @@ using ImGuiTableFlags = Dalamud.Bindings.ImGui.ImGuiTableFlags;
 using ImGuiWindowFlags = Dalamud.Bindings.ImGui.ImGuiWindowFlags;
 using XivMiniUtil.Services.Desynth;
 using XivMiniUtil.Services.Materia;
+using XivMiniUtil.Services.CharaSelect;
 using XivMiniUtil.Services.Checklist;
 using XivMiniUtil.Services.Notification;
 using XivMiniUtil.Services.Shop;
@@ -25,6 +26,7 @@ public sealed class SettingsTab : ITabComponent
     private readonly DiscordService _discordService;
     private readonly ChecklistService _checklistService;
     private readonly DutyReadyNotificationService _dutyReadyNotificationService;
+    private readonly CharaSelectService _charaSelectService;
     private readonly bool _materiaFeatureEnabled;
     private readonly bool _desynthFeatureEnabled;
 
@@ -50,6 +52,7 @@ public sealed class SettingsTab : ITabComponent
         DiscordService discordService,
         ChecklistService checklistService,
         DutyReadyNotificationService dutyReadyNotificationService,
+        CharaSelectService charaSelectService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
     {
@@ -60,6 +63,7 @@ public sealed class SettingsTab : ITabComponent
         _discordService = discordService;
         _checklistService = checklistService;
         _dutyReadyNotificationService = dutyReadyNotificationService;
+        _charaSelectService = charaSelectService;
         _materiaFeatureEnabled = materiaFeatureEnabled;
         _desynthFeatureEnabled = desynthFeatureEnabled;
     }
@@ -98,6 +102,7 @@ public sealed class SettingsTab : ITabComponent
             "Shop Search",
             "Checklist",
             "シャキ通知",
+            "Login / Character Select",
             "Submarines",
         };
 
@@ -137,6 +142,9 @@ public sealed class SettingsTab : ITabComponent
                 DrawDutyReadySettings();
                 break;
             case 5:
+                DrawCharaSelectSettings();
+                break;
+            case 6:
                 DrawSubmarineSettings();
                 break;
             default:
@@ -354,6 +362,70 @@ public sealed class SettingsTab : ITabComponent
         {
             _dutyReadyNotificationService.StopNotification();
         }
+    }
+
+    private void DrawCharaSelectSettings()
+    {
+        ImGui.Text("ログイン / キャラ選択");
+        ImGui.Separator();
+
+        var emoteEnabled = _configuration.CharaSelectEmoteEnabled;
+        if (ImGui.Checkbox("キャラ選択画面で保存したエモートを再生する", ref emoteEnabled))
+        {
+            _charaSelectService.SetEmoteEnabled(emoteEnabled);
+        }
+
+        ImGui.TextDisabled("ログイン中に記録したエモートを、次回以降のキャラ選択画面で再生します。");
+
+        if (!emoteEnabled)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        ImGui.Spacing();
+        ImGui.Text($"現在の保存エモート: {_charaSelectService.GetCurrentSelectedEmoteDisplayName()}");
+
+        if (_charaSelectService.IsRecordingEmote)
+        {
+            if (ImGui.Button("記録停止"))
+            {
+                _charaSelectService.StopRecordingEmote();
+            }
+        }
+        else
+        {
+            if (ImGui.Button("記録開始"))
+            {
+                _charaSelectService.StartRecordingEmote();
+            }
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("解除"))
+        {
+            _charaSelectService.ClearSelectedEmote();
+        }
+
+        if (_charaSelectService.IsRecordingEmote)
+        {
+            ImGui.TextColored(new Vector4(1f, 0.8f, 0.2f, 1f), "記録中: 保存したいエモートを実行してください。");
+        }
+
+        if (!emoteEnabled)
+        {
+            ImGui.EndDisabled();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        var preloadEnabled = _configuration.CharaSelectPreloadTerritoryEnabled;
+        if (ImGui.Checkbox("ログイン待機中にログイン先エリアを事前読み込みする", ref preloadEnabled))
+        {
+            _charaSelectService.SetPreloadTerritoryEnabled(preloadEnabled);
+        }
+
+        ImGui.TextDisabled("注意: 背景画像の任意差し替えではなく、ログイン先テリトリーのLayout事前ロードです。");
     }
 
     private void DrawChecklistSettings()
@@ -731,6 +803,7 @@ public sealed class SettingsTab : ITabComponent
                 {
                     _configuration.ApplyFrom(_pendingImportConfig);
                     _configuration.Save();
+                    _charaSelectService.SyncFromConfiguration();
                     SetConfigIoMessage("インポートしました。", false);
                 }
 
