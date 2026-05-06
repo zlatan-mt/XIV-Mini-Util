@@ -88,6 +88,119 @@ Test("voice id falls back to one-based voice table when zero-based entry is empt
     return CharaSelectVoiceIdResolver.Resolve(1, voices.Length, index => voices[index]) == 20;
 });
 
+Test("preset active index is clamped", () =>
+{
+    var presets = new Dictionary<ulong, List<uint>> { [1] = [100, 101] };
+    var activeIndexes = new Dictionary<ulong, int> { [1] = 9 };
+    return CharaSelectEmotePresetStore.GetActiveIndex(presets, activeIndexes, 1) == 1
+        && CharaSelectEmotePresetStore.GetActiveEmoteId(presets, activeIndexes, 1) == 101;
+});
+
+Test("preset next changes active emote", () =>
+{
+    var presets = new Dictionary<ulong, List<uint>> { [1] = [100, 101] };
+    var activeIndexes = new Dictionary<ulong, int> { [1] = 0 };
+    return CharaSelectEmotePresetStore.SelectNext(presets, activeIndexes, 1)
+        && CharaSelectEmotePresetStore.GetActiveEmoteId(presets, activeIndexes, 1) == 101;
+});
+
+Test("preset append selects added emote and avoids duplicates", () =>
+{
+    var presets = new Dictionary<ulong, List<uint>> { [1] = [100] };
+    var activeIndexes = new Dictionary<ulong, int> { [1] = 0 };
+    var added = CharaSelectEmotePresetStore.Append(presets, activeIndexes, 1, 101);
+    var duplicateAdded = CharaSelectEmotePresetStore.Append(presets, activeIndexes, 1, 100);
+    return added
+        && !duplicateAdded
+        && presets[1].SequenceEqual(new uint[] { 100, 101 })
+        && activeIndexes[1] == 0;
+});
+
+Test("preset save to active slot replaces current emote", () =>
+{
+    var presets = new Dictionary<ulong, List<uint>> { [1] = [100, 101] };
+    var activeIndexes = new Dictionary<ulong, int> { [1] = 1 };
+    return CharaSelectEmotePresetStore.SaveToActiveSlot(presets, activeIndexes, 1, 102)
+        && presets[1].SequenceEqual(new uint[] { 100, 102 })
+        && activeIndexes[1] == 1;
+});
+
+Test("preset remove active advances to remaining emote", () =>
+{
+    var presets = new Dictionary<ulong, List<uint>> { [1] = [100, 101] };
+    var activeIndexes = new Dictionary<ulong, int> { [1] = 1 };
+    return CharaSelectEmotePresetStore.RemoveActive(presets, activeIndexes, 1)
+        && presets[1].SequenceEqual(new uint[] { 100 })
+        && activeIndexes[1] == 0;
+});
+
+Test("legacy fallback is gone after explicit clear removes both stores", () =>
+{
+    var presets = new Dictionary<ulong, List<uint>> { [1] = [100] };
+    var activeIndexes = new Dictionary<ulong, int> { [1] = 0 };
+    var legacy = new Dictionary<ulong, uint> { [1] = 100 };
+    CharaSelectEmotePresetStore.RemoveActive(presets, activeIndexes, 1);
+    legacy.Remove(1);
+    return CharaSelectEmotePresetStore.GetActiveEmoteId(presets, activeIndexes, 1, legacy) == null;
+});
+
+Test("active emote change replays through tracker", () =>
+{
+    var tracker = new CharaSelectReplayTracker();
+    tracker.MarkReplayed(1, 100, 0x1000);
+    return tracker.ShouldReplay(1, 101, 0x1000, force: false);
+});
+
+Test("last recorded emote is isolated per content id", () =>
+{
+    var lastRecorded = new Dictionary<ulong, uint>
+    {
+        [1] = 100,
+        [2] = 101,
+    };
+    return lastRecorded[1] == 100 && lastRecorded[2] == 101;
+});
+
+Test("nearest level resolves by territory and xyz", () =>
+{
+    CharaSelectLevelCandidate[] candidates =
+    [
+        new(10, 100, 1, 0f, 0f, 0f),
+        new(11, 100, 2, 10f, 0f, 0f),
+        new(12, 101, 3, 1f, 0f, 0f),
+    ];
+    var resolved = CharaSelectLevelResolver.ResolveNearest(candidates, 100, 8f, 0f, 0f);
+    return resolved.RowId == 11 && resolved.Type == 2;
+});
+
+Test("nearest level ignores different territory", () =>
+{
+    CharaSelectLevelCandidate[] candidates =
+    [
+        new(10, 100, 1, 0f, 0f, 0f),
+    ];
+    return !CharaSelectLevelResolver.ResolveNearest(candidates, 101, 0f, 0f, 0f).IsValid;
+});
+
+Test("lobby position resolves by territory param", () =>
+{
+    CharaSelectLobbyCandidate[] candidates =
+    [
+        new(1, 0, 100, 0),
+        new(2, 1, 200, 0),
+    ];
+    return CharaSelectLobbyPositionResolver.ResolveByTerritory(candidates, 200, 9) == 2;
+});
+
+Test("lobby position falls back when territory is missing", () =>
+{
+    CharaSelectLobbyCandidate[] candidates =
+    [
+        new(1, 0, 100, 0),
+    ];
+    return CharaSelectLobbyPositionResolver.ResolveByTerritory(candidates, 200, 9) == 9;
+});
+
 if (failures.Count > 0)
 {
     foreach (var failure in failures)

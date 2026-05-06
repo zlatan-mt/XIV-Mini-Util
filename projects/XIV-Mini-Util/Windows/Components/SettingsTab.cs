@@ -384,6 +384,24 @@ public sealed class SettingsTab : ITabComponent
 
         ImGui.Spacing();
         ImGui.Text($"現在の保存エモート: {_charaSelectService.GetCurrentSelectedEmoteDisplayName()}");
+        ImGui.Text($"最後に記録したエモート: {_charaSelectService.GetLastRecordedEmoteDisplayName()}");
+
+        if (ImGui.Button("前へ"))
+        {
+            _charaSelectService.SelectPreviousEmote();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("次へ"))
+        {
+            _charaSelectService.SelectNextEmote();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("再生"))
+        {
+            _charaSelectService.ReplaySelectedEmote();
+        }
 
         if (_charaSelectService.IsRecordingEmote)
         {
@@ -401,7 +419,19 @@ public sealed class SettingsTab : ITabComponent
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("解除"))
+        if (ImGui.Button("現在スロットへ保存"))
+        {
+            _charaSelectService.SaveLastRecordedEmoteToActiveSlot();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("追加保存"))
+        {
+            _charaSelectService.AppendLastRecordedEmotePreset();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("削除"))
         {
             _charaSelectService.ClearSelectedEmote();
         }
@@ -426,6 +456,90 @@ public sealed class SettingsTab : ITabComponent
         }
 
         ImGui.TextDisabled("注意: 背景画像の任意差し替えではなく、ログイン先テリトリーのLayout事前ロードです。");
+
+        ImGui.Spacing();
+
+        var overrideEnabled = _configuration.CharaSelectOverrideTerritoryEnabled;
+        if (ImGui.Checkbox("キャラ選択画面に表示するエリアを固定する（実験）", ref overrideEnabled))
+        {
+            _charaSelectService.SetOverrideTerritoryEnabled(overrideEnabled);
+        }
+
+        var overrideTerritoryId = (int)_configuration.CharaSelectOverrideTerritoryTypeId;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("TerritoryTypeId", ref overrideTerritoryId))
+        {
+            overrideTerritoryId = Math.Clamp(overrideTerritoryId, 0, ushort.MaxValue);
+            _charaSelectService.SetOverrideTerritoryTypeId((ushort)overrideTerritoryId);
+        }
+
+        ImGui.Text($"固定エリア: {_charaSelectService.GetOverrideTerritoryDisplayName()}");
+        ImGui.Text($"現在のログイン先: {_charaSelectService.GetCurrentLoginTerritoryDisplayName()}");
+        ImGui.Text($"ログイン背景position: {_charaSelectService.GetLoginPositionDisplayName()}");
+
+        if (ImGui.Button("現在のログイン先を使う"))
+        {
+            _charaSelectService.UseCurrentLoginTerritoryForOverride();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("読み込み"))
+        {
+            _charaSelectService.SetOverrideTerritoryTypeId((ushort)overrideTerritoryId);
+            _charaSelectService.SetOverrideTerritoryEnabled(overrideTerritoryId != 0);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("固定解除"))
+        {
+            _charaSelectService.ClearOverrideTerritory();
+        }
+
+        var overridePositionEnabled = _configuration.CharaSelectOverridePositionEnabled;
+        if (ImGui.Checkbox("表示地点を指定する（X/Y/Z）", ref overridePositionEnabled))
+        {
+            _charaSelectService.SetOverridePositionEnabled(overridePositionEnabled);
+        }
+
+        var overrideX = _configuration.CharaSelectOverridePositionX;
+        var overrideY = _configuration.CharaSelectOverridePositionY;
+        var overrideZ = _configuration.CharaSelectOverridePositionZ;
+
+        ImGui.SetNextItemWidth(90f);
+        var positionChanged = ImGui.InputFloat("X", ref overrideX, 1f, 10f, "%.2f");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(90f);
+        positionChanged |= ImGui.InputFloat("Y", ref overrideY, 1f, 10f, "%.2f");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(90f);
+        positionChanged |= ImGui.InputFloat("Z", ref overrideZ, 1f, 10f, "%.2f");
+        if (positionChanged)
+        {
+            _charaSelectService.SetOverridePosition(overrideX, overrideY, overrideZ);
+        }
+
+        ImGui.Text($"指定地点: {_charaSelectService.GetOverridePositionDisplayName()}");
+        if (ImGui.Button("現在位置を使う"))
+        {
+            _charaSelectService.UseCurrentPlayerPositionForOverride();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("地点解除"))
+        {
+            _charaSelectService.SetOverridePositionEnabled(false);
+        }
+
+        ImGui.Spacing();
+
+        var showLastDataCenterName = _configuration.CharaSelectShowLastDataCenterNameEnabled;
+        if (ImGui.Checkbox("最後にログインしたDC名を記録する（実験）", ref showLastDataCenterName))
+        {
+            _charaSelectService.SetShowLastDataCenterNameEnabled(showLastDataCenterName);
+        }
+
+        ImGui.Text($"最後に記録したDC: {(_configuration.CharaSelectLastDataCenterName.Length == 0 ? "なし" : _configuration.CharaSelectLastDataCenterName)}");
+        ImGui.TextDisabled("DataCenter表示の置換は対象addon確認後に有効化します。");
     }
 
     private void DrawChecklistSettings()

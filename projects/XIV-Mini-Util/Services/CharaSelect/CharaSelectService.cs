@@ -3,6 +3,7 @@
 // Reason: unsafe hookとUI設定をPlugin本体から分離するため
 using Dalamud.Plugin.Services;
 using Dalamud.Hooking;
+using FFXIVClientStructs.FFXIV.Application.Network.WorkDefinitions;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
 using FFXIVClientStructs.FFXIV.Client.Game;
@@ -38,6 +39,7 @@ public sealed unsafe class CharaSelectService : IDisposable
     private Hook<AgentLobby.Delegates.UpdateCharaSelectDisplay>? _updateCharaSelectDisplayHook;
     private Hook<EmoteManager.Delegates.ExecuteEmote>? _executeEmoteHook;
     private Hook<AgentLobby.Delegates.OpenLoginWaitDialog>? _openLoginWaitDialogHook;
+    private Hook<AgentLobby.Delegates.UpdateLoginPosition>? _updateLoginPositionHook;
     private CharaSelectCharacterState? _currentEntry;
     private readonly CharaSelectReplayTracker _replayTracker = new();
     private bool _disposed;
@@ -47,6 +49,14 @@ public sealed unsafe class CharaSelectService : IDisposable
     private ulong _delayedReplayContentId;
     private uint _delayedReplayEmoteId;
     private nint _delayedReplayCharacterAddress;
+    private CharaSelectPrefetchOwner _prefetchOwner;
+    private ushort _loadedPrefetchTerritoryTypeId;
+    private string _loadedPrefetchBg = string.Empty;
+    private uint _loadedPrefetchLevelId;
+    private byte _loadedPrefetchLayerEntryType;
+    private int _dataCenterNamePollFrame;
+    private int _lastLoginPosition;
+    private int _lastOverrideLoginPosition;
     private IReadOnlyList<string> _lastVoiceDiagnosticLines = [];
 
     public CharaSelectService(
@@ -73,19 +83,20 @@ public sealed unsafe class CharaSelectService : IDisposable
     }
 
     public bool IsRecordingEmote => _isRecordingEmote;
-    public ulong ActiveContentId => _currentEntry?.ContentId ?? _playerState.ContentId;
+    public ulong ActiveContentId => _clientState.IsLoggedIn
+        ? _playerState.ContentId
+        : _currentEntry?.ContentId ?? _playerState.ContentId;
 
     public uint? CurrentSelectedEmoteId
     {
         get
         {
             var contentId = ActiveContentId;
-            if (contentId == 0 || !_configuration.CharaSelectSelectedEmotes.TryGetValue(contentId, out var emoteId) || emoteId == 0)
-            {
-                return null;
-            }
-
-            return emoteId;
+            return CharaSelectEmotePresetStore.GetActiveEmoteId(
+                _configuration.CharaSelectEmotePresets,
+                _configuration.CharaSelectActiveEmotePresetIndexes,
+                contentId,
+                _configuration.CharaSelectSelectedEmotes);
         }
     }
 
@@ -110,7 +121,11 @@ public sealed unsafe class CharaSelectService : IDisposable
         _configuration.CharaSelectPreloadTerritoryEnabled = enabled;
         _configuration.Save();
 
-        ApplyPreloadTerritoryHookState(enabled);
+        ApplyLoginWaitHookState();
+        if (!enabled)
+        {
+            TryUnloadPrefetchLayout(CharaSelectPrefetchOwner.LoginWait);
+        }
     }
 
     public void SyncFromConfiguration()
@@ -121,13 +136,16 @@ public sealed unsafe class CharaSelectService : IDisposable
             ResetEmoteMode();
         }
 
-        ApplyPreloadTerritoryHookState(_configuration.CharaSelectPreloadTerritoryEnabled);
+        ApplyLoginWaitHookState();
+        ApplyOverrideTerritoryPrefetch();
     }
 
-    private void ApplyPreloadTerritoryHookState(bool enabled)
+    private void ApplyLoginWaitHookState()
     {
         try
         {
+            var enabled = _configuration.CharaSelectPreloadTerritoryEnabled
+                || _configuration.CharaSelectOverrideTerritoryEnabled;
             if (enabled)
             {
                 _openLoginWaitDialogHook?.Enable();
@@ -135,12 +153,12 @@ public sealed unsafe class CharaSelectService : IDisposable
             else
             {
                 _openLoginWaitDialogHook?.Disable();
-                TryUnloadPrefetchLayout();
+                TryUnloadPrefetchLayout(CharaSelectPrefetchOwner.LoginWait);
             }
         }
         catch (Exception ex)
         {
-            _log.Warning(ex, "Failed to toggle CharaSelect preload territory hook.");
+            _log.Warning(ex, "Failed to toggle CharaSelect login wait hook.");
         }
     }
 
@@ -162,7 +180,12 @@ public sealed unsafe class CharaSelectService : IDisposable
             return;
         }
 
-        if (_configuration.CharaSelectSelectedEmotes.Remove(contentId))
+        var removedPreset = CharaSelectEmotePresetStore.RemoveActive(
+            _configuration.CharaSelectEmotePresets,
+            _configuration.CharaSelectActiveEmotePresetIndexes,
+            contentId);
+        var removedLegacy = _configuration.CharaSelectSelectedEmotes.Remove(contentId);
+        if (removedPreset || removedLegacy)
         {
             _configuration.Save();
         }
@@ -173,12 +196,70 @@ public sealed unsafe class CharaSelectService : IDisposable
 
     public void ReplaySelectedEmote()
     {
-        if (!_configuration.CharaSelectEmoteEnabled || CurrentSelectedEmoteId is not { } emoteId)
+        if (_clientState.IsLoggedIn || !_configuration.CharaSelectEmoteEnabled || CurrentSelectedEmoteId is not { } emoteId)
         {
             return;
         }
 
         PlayEmote(emoteId);
+    }
+
+    public void SelectPreviousEmote()
+    {
+        SelectPreset(CharaSelectEmotePresetStore.SelectPrevious);
+    }
+
+    public void SelectNextEmote()
+    {
+        SelectPreset(CharaSelectEmotePresetStore.SelectNext);
+    }
+
+    public void SaveLastRecordedEmoteToActiveSlot()
+    {
+        var contentId = ActiveContentId;
+        if (!TryGetLastRecordedEmote(contentId, out var emoteId))
+        {
+            return;
+        }
+
+        if (!IsRecordableEmote(emoteId))
+        {
+            _configuration.CharaSelectLastRecordedEmotes.Remove(contentId);
+            _configuration.Save();
+            return;
+        }
+
+        CharaSelectEmotePresetStore.SaveToActiveSlot(
+            _configuration.CharaSelectEmotePresets,
+            _configuration.CharaSelectActiveEmotePresetIndexes,
+            contentId,
+            emoteId);
+        _configuration.Save();
+        ReplayAfterActivePresetChanged();
+    }
+
+    public void AppendLastRecordedEmotePreset()
+    {
+        var contentId = ActiveContentId;
+        if (!TryGetLastRecordedEmote(contentId, out var emoteId))
+        {
+            return;
+        }
+
+        if (!IsRecordableEmote(emoteId))
+        {
+            _configuration.CharaSelectLastRecordedEmotes.Remove(contentId);
+            _configuration.Save();
+            return;
+        }
+
+        CharaSelectEmotePresetStore.Append(
+            _configuration.CharaSelectEmotePresets,
+            _configuration.CharaSelectActiveEmotePresetIndexes,
+            contentId,
+            emoteId);
+        _configuration.Save();
+        ReplayAfterActivePresetChanged();
     }
 
     public string GetCurrentSelectedEmoteDisplayName()
@@ -189,22 +270,152 @@ public sealed unsafe class CharaSelectService : IDisposable
             return "キャラクター未選択";
         }
 
-        if (!_configuration.CharaSelectSelectedEmotes.TryGetValue(contentId, out var emoteId) || emoteId == 0)
+        if (CurrentSelectedEmoteId is not { } emoteId)
         {
             return "なし";
         }
 
-        try
+        var emotes = CharaSelectEmotePresetStore.GetEmotes(_configuration.CharaSelectEmotePresets, contentId);
+        var prefix = emotes.Count > 0
+            ? $"{CharaSelectEmotePresetStore.GetActiveIndex(_configuration.CharaSelectEmotePresets, _configuration.CharaSelectActiveEmotePresetIndexes, contentId) + 1}/{emotes.Count} "
+            : string.Empty;
+        return prefix + GetEmoteDisplayName(emoteId);
+    }
+
+    public string GetLastRecordedEmoteDisplayName()
+    {
+        return TryGetLastRecordedEmote(ActiveContentId, out var emoteId)
+            ? GetEmoteDisplayName(emoteId)
+            : "なし";
+    }
+
+    public string GetOverrideTerritoryDisplayName()
+    {
+        var territoryTypeId = _configuration.CharaSelectOverrideTerritoryTypeId;
+        return territoryTypeId == 0 ? "未指定" : GetTerritoryDisplayName(territoryTypeId);
+    }
+
+    public string GetCurrentLoginTerritoryDisplayName()
+    {
+        var territoryTypeId = ResolveCurrentTerritoryTypeId();
+        return territoryTypeId == 0 ? "未選択" : GetTerritoryDisplayName(territoryTypeId);
+    }
+
+    public string GetOverridePositionDisplayName()
+    {
+        if (!_configuration.CharaSelectOverridePositionEnabled)
         {
-            var emoteSheet = _dataManager.GetExcelSheet<Emote>();
-            var emote = emoteSheet.GetRow(emoteId);
-            var name = emote.Name.ToString();
-            return string.IsNullOrWhiteSpace(name) ? $"不明 (ID: {emoteId})" : name;
+            return "未使用";
         }
-        catch
+
+        return $"X:{_configuration.CharaSelectOverridePositionX:0.00} Y:{_configuration.CharaSelectOverridePositionY:0.00} Z:{_configuration.CharaSelectOverridePositionZ:0.00}";
+    }
+
+    public string GetLoginPositionDisplayName()
+    {
+        return _lastLoginPosition == 0
+            ? "未検出"
+            : $"last={_lastLoginPosition}, override={(_lastOverrideLoginPosition == 0 ? "なし" : _lastOverrideLoginPosition)}";
+    }
+
+    public void SetOverrideTerritoryEnabled(bool enabled)
+    {
+        _configuration.CharaSelectOverrideTerritoryEnabled = enabled;
+        _configuration.Save();
+
+        if (_configuration.CharaSelectOverrideTerritoryEnabled)
         {
-            return $"不明 (ID: {emoteId})";
+            ApplyLoginWaitHookState();
+            ApplyOverrideTerritoryPrefetch();
+            RefreshCharaSelectDisplay();
         }
+        else
+        {
+            ApplyLoginWaitHookState();
+            TryUnloadPrefetchLayout(CharaSelectPrefetchOwner.OverrideDisplay);
+            RefreshCharaSelectDisplay();
+        }
+    }
+
+    public void SetOverrideTerritoryTypeId(ushort territoryTypeId)
+    {
+        _configuration.CharaSelectOverrideTerritoryTypeId = territoryTypeId;
+        if (territoryTypeId == 0)
+        {
+            _configuration.CharaSelectOverrideTerritoryEnabled = false;
+        }
+
+        _configuration.Save();
+        ApplyLoginWaitHookState();
+        ApplyOverrideTerritoryPrefetch();
+        RefreshCharaSelectDisplay();
+    }
+
+    public void UseCurrentLoginTerritoryForOverride()
+    {
+        var territoryTypeId = ResolveCurrentTerritoryTypeId();
+        if (territoryTypeId == 0)
+        {
+            return;
+        }
+
+        _configuration.CharaSelectOverrideTerritoryTypeId = territoryTypeId;
+        _configuration.CharaSelectOverrideTerritoryEnabled = true;
+        _configuration.Save();
+        ApplyLoginWaitHookState();
+        ApplyOverrideTerritoryPrefetch();
+        RefreshCharaSelectDisplay();
+    }
+
+    public void ClearOverrideTerritory()
+    {
+        _configuration.CharaSelectOverrideTerritoryTypeId = 0;
+        _configuration.CharaSelectOverrideTerritoryEnabled = false;
+        _configuration.Save();
+        ApplyLoginWaitHookState();
+        TryUnloadPrefetchLayout(CharaSelectPrefetchOwner.OverrideDisplay);
+        RefreshCharaSelectDisplay();
+    }
+
+    public void SetOverridePositionEnabled(bool enabled)
+    {
+        _configuration.CharaSelectOverridePositionEnabled = enabled;
+        _configuration.Save();
+        ApplyOverrideTerritoryPrefetch();
+        RefreshCharaSelectDisplay();
+    }
+
+    public void SetOverridePosition(float x, float y, float z)
+    {
+        _configuration.CharaSelectOverridePositionX = SanitizeCoordinate(x);
+        _configuration.CharaSelectOverridePositionY = SanitizeCoordinate(y);
+        _configuration.CharaSelectOverridePositionZ = SanitizeCoordinate(z);
+        _configuration.Save();
+        ApplyOverrideTerritoryPrefetch();
+        RefreshCharaSelectDisplay();
+    }
+
+    public void UseCurrentPlayerPositionForOverride()
+    {
+        var localPlayer = _objectTable.LocalPlayer;
+        if (localPlayer == null)
+        {
+            return;
+        }
+
+        var position = localPlayer.Position;
+        SetOverridePosition(position.X, position.Y, position.Z);
+        _configuration.CharaSelectOverridePositionEnabled = true;
+        _configuration.Save();
+        ApplyOverrideTerritoryPrefetch();
+        RefreshCharaSelectDisplay();
+    }
+
+    public void SetShowLastDataCenterNameEnabled(bool enabled)
+    {
+        _configuration.CharaSelectShowLastDataCenterNameEnabled = enabled;
+        _dataCenterNamePollFrame = enabled ? 299 : 0;
+        _configuration.Save();
     }
 
     public IReadOnlyList<string> GetVoiceDiagnosticLines()
@@ -276,6 +487,7 @@ public sealed unsafe class CharaSelectService : IDisposable
         TryUnloadPrefetchLayout();
         _currentEntry = null;
         _framework.Update -= OnFrameworkUpdate;
+        DisposeHook(_updateLoginPositionHook);
         DisposeHook(_openLoginWaitDialogHook);
         DisposeHook(_executeEmoteHook);
         DisposeHook(_updateCharaSelectDisplayHook);
@@ -294,9 +506,13 @@ public sealed unsafe class CharaSelectService : IDisposable
             _openLoginWaitDialogHook = _gameInteropProvider.HookFromAddress<AgentLobby.Delegates.OpenLoginWaitDialog>(
                 AgentLobby.MemberFunctionPointers.OpenLoginWaitDialog,
                 OpenLoginWaitDialogDetour);
+            _updateLoginPositionHook = _gameInteropProvider.HookFromAddress<AgentLobby.Delegates.UpdateLoginPosition>(
+                AgentLobby.MemberFunctionPointers.UpdateLoginPosition,
+                UpdateLoginPositionDetour);
 
             _updateCharaSelectDisplayHook.Enable();
             _executeEmoteHook.Enable();
+            _updateLoginPositionHook.Enable();
 
             if (_configuration.CharaSelectPreloadTerritoryEnabled)
             {
@@ -306,9 +522,11 @@ public sealed unsafe class CharaSelectService : IDisposable
         catch (Exception ex)
         {
             _log.Error(ex, "Failed to initialize CharaSelect hooks.");
+            DisposeHook(_updateLoginPositionHook);
             DisposeHook(_openLoginWaitDialogHook);
             DisposeHook(_executeEmoteHook);
             DisposeHook(_updateCharaSelectDisplayHook);
+            _updateLoginPositionHook = null;
             _openLoginWaitDialogHook = null;
             _executeEmoteHook = null;
             _updateCharaSelectDisplayHook = null;
@@ -320,7 +538,36 @@ public sealed unsafe class CharaSelectService : IDisposable
 
     private bool UpdateCharaSelectDisplayDetour(AgentLobby* agent, sbyte index, bool a2)
     {
-        var result = _updateCharaSelectDisplayHook?.Original(agent, index, a2) ?? false;
+        var result = false;
+        var originalClientSelectData = default(ClientSelectData);
+        var patchedDisplayData = false;
+        var patchedWorldIndex = (short)0;
+        var patchedNormalizedIndex = -1;
+        var patchedContentId = 0UL;
+
+        try
+        {
+            patchedDisplayData = TryPatchOverrideDisplayData(
+                agent,
+                index,
+                out patchedWorldIndex,
+                out patchedNormalizedIndex,
+                out patchedContentId,
+                out originalClientSelectData);
+            result = _updateCharaSelectDisplayHook?.Original(agent, index, a2) ?? false;
+        }
+        finally
+        {
+            if (patchedDisplayData)
+            {
+                RestorePatchedOverrideDisplayData(
+                    agent,
+                    patchedWorldIndex,
+                    patchedNormalizedIndex,
+                    patchedContentId,
+                    originalClientSelectData);
+            }
+        }
 
         try
         {
@@ -332,6 +579,88 @@ public sealed unsafe class CharaSelectService : IDisposable
         }
 
         return result;
+    }
+
+    private bool TryPatchOverrideDisplayData(
+        AgentLobby* agent,
+        sbyte index,
+        out short worldIndex,
+        out int normalizedIndex,
+        out ulong contentId,
+        out ClientSelectData originalClientSelectData)
+    {
+        worldIndex = 0;
+        normalizedIndex = -1;
+        contentId = 0;
+        originalClientSelectData = default;
+
+        if (agent == null
+            || _clientState.IsLoggedIn
+            || !_configuration.CharaSelectOverrideTerritoryEnabled
+            || _configuration.CharaSelectOverrideTerritoryTypeId == 0)
+        {
+            return false;
+        }
+
+        normalizedIndex = index >= 100 ? index - 100 : index;
+        if (normalizedIndex < 0)
+        {
+            return false;
+        }
+
+        worldIndex = agent->WorldIndex;
+        var entry = agent->LobbyData.GetCharacterEntryByIndex(0, worldIndex, normalizedIndex);
+        if (entry == null || entry->ContentId == 0)
+        {
+            return false;
+        }
+
+        var territoryTypeId = NormalizeHousingTerritory(_configuration.CharaSelectOverrideTerritoryTypeId);
+        if (territoryTypeId == 0)
+        {
+            return false;
+        }
+
+        var resolvedLevel = ResolveOverrideLevel(territoryTypeId, CharaSelectPrefetchOwner.OverrideDisplay);
+        var patchedZoneId = resolvedLevel.IsValid && resolvedLevel.RowId <= ushort.MaxValue
+            ? (ushort)resolvedLevel.RowId
+            : (ushort)0;
+        if (entry->ClientSelectData.TerritoryType == territoryTypeId
+            && (patchedZoneId == 0 || entry->ClientSelectData.ZoneId == patchedZoneId))
+        {
+            return false;
+        }
+
+        originalClientSelectData = entry->ClientSelectData;
+        contentId = entry->ContentId;
+        entry->ClientSelectData.TerritoryType = territoryTypeId;
+        if (patchedZoneId != 0)
+        {
+            entry->ClientSelectData.ZoneId = patchedZoneId;
+        }
+
+        return true;
+    }
+
+    private void RestorePatchedOverrideDisplayData(
+        AgentLobby* agent,
+        short worldIndex,
+        int normalizedIndex,
+        ulong contentId,
+        ClientSelectData originalClientSelectData)
+    {
+        if (agent == null || normalizedIndex < 0 || contentId == 0)
+        {
+            return;
+        }
+
+        var entry = agent->LobbyData.GetCharacterEntryByIndex(0, worldIndex, normalizedIndex);
+        if (entry == null || entry->ContentId != contentId)
+        {
+            return;
+        }
+
+        entry->ClientSelectData = originalClientSelectData;
     }
 
     private bool ExecuteEmoteDetour(EmoteManager* manager, ushort emoteId, EmoteController.PlayEmoteOption* playEmoteOption)
@@ -356,7 +685,8 @@ public sealed unsafe class CharaSelectService : IDisposable
 
     private void OpenLoginWaitDialogDetour(AgentLobby* agent, int position)
     {
-        _openLoginWaitDialogHook?.Original(agent, position);
+        var resolvedPosition = ResolveOverrideLoginPosition(position);
+        _openLoginWaitDialogHook?.Original(agent, resolvedPosition);
 
         try
         {
@@ -371,10 +701,63 @@ public sealed unsafe class CharaSelectService : IDisposable
         }
     }
 
+    private void UpdateLoginPositionDetour(AgentLobby* agent, int newPosition)
+    {
+        var resolvedPosition = ResolveOverrideLoginPosition(newPosition);
+        _updateLoginPositionHook?.Original(agent, resolvedPosition);
+    }
+
+    private int ResolveOverrideLoginPosition(int fallbackPosition)
+    {
+        _lastLoginPosition = fallbackPosition;
+        _lastOverrideLoginPosition = 0;
+
+        if (_clientState.IsLoggedIn
+            || !_configuration.CharaSelectOverrideTerritoryEnabled
+            || _configuration.CharaSelectOverrideTerritoryTypeId == 0)
+        {
+            return fallbackPosition;
+        }
+
+        try
+        {
+            var territoryTypeId = NormalizeHousingTerritory(_configuration.CharaSelectOverrideTerritoryTypeId);
+            var lobbySheet = _dataManager.GetExcelSheet<Lobby>();
+            var candidates = lobbySheet.Select(lobby => new CharaSelectLobbyCandidate(
+                lobby.RowId,
+                lobby.TYPE,
+                lobby.PARAM,
+                lobby.LINK));
+            var resolvedPosition = CharaSelectLobbyPositionResolver.ResolveByTerritory(
+                candidates,
+                territoryTypeId,
+                fallbackPosition);
+
+            if (resolvedPosition != fallbackPosition)
+            {
+                _lastOverrideLoginPosition = resolvedPosition;
+            }
+
+            return resolvedPosition;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Failed to resolve CharaSelect override login position.");
+            return fallbackPosition;
+        }
+    }
+
     private void OnFrameworkUpdate(IFramework framework)
     {
-        if (_disposed || _clientState.IsLoggedIn)
+        if (_disposed)
         {
+            return;
+        }
+
+        if (_clientState.IsLoggedIn)
+        {
+            ClearCharaSelectPointers();
+            TryUpdateLastDataCenterName();
             return;
         }
 
@@ -433,6 +816,7 @@ public sealed unsafe class CharaSelectService : IDisposable
             && _currentEntry.Character == character;
         if (sameEntry)
         {
+            ApplyOverrideTerritoryPrefetch();
             if (IsDelayedReplayPending(entry->ContentId, character))
             {
                 return;
@@ -449,6 +833,8 @@ public sealed unsafe class CharaSelectService : IDisposable
             entry->ClientSelectData.CurrentClass,
             voiceId);
 
+        ApplyOverrideTerritoryPrefetch();
+
         if (scheduleDelayedReplay || isFirstEntry)
         {
             ScheduleDelayedReplay();
@@ -456,6 +842,36 @@ public sealed unsafe class CharaSelectService : IDisposable
         }
 
         ReplaySelectedEmoteIfNeeded(force: true);
+    }
+
+    private void RefreshCharaSelectDisplay()
+    {
+        if (_clientState.IsLoggedIn)
+        {
+            return;
+        }
+
+        try
+        {
+            var agent = AgentLobby.Instance();
+            if (agent == null || agent->IsLoggedIn)
+            {
+                return;
+            }
+
+            var index = agent->SelectedCharacterIndex;
+            var normalizedIndex = index >= 100 ? index - 100 : index;
+            if (normalizedIndex < 0 || normalizedIndex >= 40)
+            {
+                return;
+            }
+
+            agent->UpdateCharaSelectDisplay((sbyte)index, true);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Failed to refresh CharaSelect display.");
+        }
     }
 
     private void SaveExecutedEmote(uint emoteId)
@@ -472,8 +888,136 @@ public sealed unsafe class CharaSelectService : IDisposable
             return;
         }
 
-        _configuration.CharaSelectSelectedEmotes[contentId] = saveEmoteId;
+        _configuration.CharaSelectLastRecordedEmotes[contentId] = saveEmoteId;
         _configuration.Save();
+    }
+
+    private void SelectPreset(Func<Dictionary<ulong, List<uint>>, Dictionary<ulong, int>, ulong, bool> selector)
+    {
+        var contentId = ActiveContentId;
+        if (contentId == 0)
+        {
+            return;
+        }
+
+        if (!selector(_configuration.CharaSelectEmotePresets, _configuration.CharaSelectActiveEmotePresetIndexes, contentId))
+        {
+            return;
+        }
+
+        _configuration.Save();
+        ReplayAfterActivePresetChanged();
+    }
+
+    private void ReplayAfterActivePresetChanged()
+    {
+        ClearReplayState();
+        if (!_clientState.IsLoggedIn)
+        {
+            ReplaySelectedEmote();
+        }
+    }
+
+    private bool TryGetLastRecordedEmote(ulong contentId, out uint emoteId)
+    {
+        if (contentId != 0
+            && _configuration.CharaSelectLastRecordedEmotes.TryGetValue(contentId, out emoteId)
+            && emoteId != 0)
+        {
+            return true;
+        }
+
+        emoteId = 0;
+        return false;
+    }
+
+    private string GetEmoteDisplayName(uint emoteId)
+    {
+        try
+        {
+            var emoteSheet = _dataManager.GetExcelSheet<Emote>();
+            var emote = emoteSheet.GetRow(emoteId);
+            var name = emote.Name.ToString();
+            return string.IsNullOrWhiteSpace(name) ? $"不明 (ID: {emoteId})" : name;
+        }
+        catch
+        {
+            return $"不明 (ID: {emoteId})";
+        }
+    }
+
+    private string GetTerritoryDisplayName(ushort territoryTypeId)
+    {
+        try
+        {
+            var territorySheet = _dataManager.GetExcelSheet<TerritoryType>();
+            var territory = territorySheet.GetRow(territoryTypeId);
+            var name = territory.PlaceName.Value.Name.ToString();
+            return string.IsNullOrWhiteSpace(name)
+                ? $"TerritoryTypeId: {territoryTypeId}"
+                : $"{name} ({territoryTypeId})";
+        }
+        catch
+        {
+            return $"不明 (ID: {territoryTypeId})";
+        }
+    }
+
+    private static float SanitizeCoordinate(float value)
+    {
+        return float.IsFinite(value) ? Math.Clamp(value, -100000f, 100000f) : 0f;
+    }
+
+    private ushort ResolveCurrentTerritoryTypeId()
+    {
+        if (_clientState.IsLoggedIn)
+        {
+            var territoryTypeId = _clientState.TerritoryType;
+            return territoryTypeId > ushort.MaxValue
+                ? (ushort)0
+                : NormalizeHousingTerritory((ushort)territoryTypeId);
+        }
+
+        return NormalizeHousingTerritory(_currentEntry?.TerritoryTypeId ?? 0);
+    }
+
+    private void ClearCharaSelectPointers()
+    {
+        ClearReplayState();
+        _currentEntry = null;
+        _lastVoiceDiagnosticLines = [];
+    }
+
+    private void TryUpdateLastDataCenterName()
+    {
+        if (!_configuration.CharaSelectShowLastDataCenterNameEnabled)
+        {
+            return;
+        }
+
+        _dataCenterNamePollFrame = (_dataCenterNamePollFrame + 1) % 300;
+        if (_dataCenterNamePollFrame != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var world = _objectTable.LocalPlayer?.CurrentWorld.Value;
+            var dataCenterName = world?.DataCenter.Value.Name.ToString();
+            if (string.IsNullOrWhiteSpace(dataCenterName)
+                || string.Equals(_configuration.CharaSelectLastDataCenterName, dataCenterName, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _configuration.CharaSelectLastDataCenterName = dataCenterName;
+            _configuration.Save();
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Failed to update CharaSelect last data center name.");
+        }
     }
 
     private ushort ResolveCharacterVoiceId(CharaSelectCharacterEntry* entry)
@@ -792,22 +1336,98 @@ public sealed unsafe class CharaSelectService : IDisposable
     private void PreloadLoginTerritory()
     {
         var territoryTypeId = NormalizeHousingTerritory(_currentEntry?.TerritoryTypeId ?? 0);
+        TryLoadPrefetchLayout(territoryTypeId, CharaSelectPrefetchOwner.LoginWait);
+    }
+
+    private void ApplyOverrideTerritoryPrefetch()
+    {
+        if (!_configuration.CharaSelectOverrideTerritoryEnabled)
+        {
+            return;
+        }
+
+        if (_prefetchOwner == CharaSelectPrefetchOwner.LoginWait)
+        {
+            return;
+        }
+
+        TryLoadPrefetchLayout(
+            NormalizeHousingTerritory(_configuration.CharaSelectOverrideTerritoryTypeId),
+            CharaSelectPrefetchOwner.OverrideDisplay);
+    }
+
+    private void TryLoadPrefetchLayout(ushort territoryTypeId, CharaSelectPrefetchOwner owner)
+    {
         if (territoryTypeId == 0)
         {
             return;
         }
 
-        var territorySheet = _dataManager.GetExcelSheet<TerritoryType>();
-        var territory = territorySheet.GetRow(territoryTypeId);
-        var bg = territory.Bg.ToString();
-        if (string.IsNullOrWhiteSpace(bg))
+        try
         {
-            return;
+            var territorySheet = _dataManager.GetExcelSheet<TerritoryType>();
+            var territory = territorySheet.GetRow(territoryTypeId);
+            var bg = territory.Bg.ToString();
+            if (string.IsNullOrWhiteSpace(bg))
+            {
+                return;
+            }
+
+            var resolvedLevel = ResolveOverrideLevel(territoryTypeId, owner);
+            if (_prefetchOwner == owner
+                && _loadedPrefetchTerritoryTypeId == territoryTypeId
+                && string.Equals(_loadedPrefetchBg, bg, StringComparison.Ordinal)
+                && _loadedPrefetchLevelId == resolvedLevel.RowId
+                && _loadedPrefetchLayerEntryType == resolvedLevel.Type)
+            {
+                return;
+            }
+
+            var layoutWorld = LayoutWorld.Instance();
+            TryUnloadPrefetchLayout();
+            layoutWorld->LoadPrefetchLayout(0, bg, resolvedLevel.Type, resolvedLevel.RowId, territoryTypeId, null, 0);
+            _prefetchOwner = owner;
+            _loadedPrefetchTerritoryTypeId = territoryTypeId;
+            _loadedPrefetchBg = bg;
+            _loadedPrefetchLevelId = resolvedLevel.RowId;
+            _loadedPrefetchLayerEntryType = resolvedLevel.Type;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Failed to load CharaSelect prefetch layout.");
+        }
+    }
+
+    private CharaSelectResolvedLevel ResolveOverrideLevel(ushort territoryTypeId, CharaSelectPrefetchOwner owner)
+    {
+        if (owner != CharaSelectPrefetchOwner.OverrideDisplay || !_configuration.CharaSelectOverridePositionEnabled)
+        {
+            return default;
         }
 
-        var layoutWorld = LayoutWorld.Instance();
-        TryUnloadPrefetchLayout();
-        layoutWorld->LoadPrefetchLayout(0, bg, 0, 0, territoryTypeId, null, 0);
+        try
+        {
+            var levelSheet = _dataManager.GetExcelSheet<Level>();
+            var candidates = levelSheet.Select(level => new CharaSelectLevelCandidate(
+                level.RowId,
+                level.Territory.RowId > ushort.MaxValue ? (ushort)0 : (ushort)level.Territory.RowId,
+                level.Type,
+                level.X,
+                level.Y,
+                level.Z));
+
+            return CharaSelectLevelResolver.ResolveNearest(
+                candidates,
+                territoryTypeId,
+                _configuration.CharaSelectOverridePositionX,
+                _configuration.CharaSelectOverridePositionY,
+                _configuration.CharaSelectOverridePositionZ);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Failed to resolve CharaSelect override level.");
+            return default;
+        }
     }
 
     private static ushort NormalizeHousingTerritory(ushort territoryTypeId)
@@ -849,11 +1469,26 @@ public sealed unsafe class CharaSelectService : IDisposable
         return rowId > ushort.MaxValue ? (ushort)0 : (ushort)rowId;
     }
 
-    private void TryUnloadPrefetchLayout()
+    private void TryUnloadPrefetchLayout(CharaSelectPrefetchOwner? owner = null)
     {
+        if (_prefetchOwner == CharaSelectPrefetchOwner.None)
+        {
+            return;
+        }
+
+        if (owner.HasValue && _prefetchOwner != owner.Value)
+        {
+            return;
+        }
+
         try
         {
             LayoutWorld.UnloadPrefetchLayout();
+            _prefetchOwner = CharaSelectPrefetchOwner.None;
+            _loadedPrefetchTerritoryTypeId = 0;
+            _loadedPrefetchBg = string.Empty;
+            _loadedPrefetchLevelId = 0;
+            _loadedPrefetchLayerEntryType = 0;
         }
         catch (Exception ex)
         {

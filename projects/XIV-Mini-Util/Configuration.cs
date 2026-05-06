@@ -62,7 +62,18 @@ public sealed class Configuration : IPluginConfiguration
     public bool CharaSelectEmoteEnabled { get; set; } = false;
     public bool CharaSelectPreloadTerritoryEnabled { get; set; } = false;
     public Dictionary<ulong, uint> CharaSelectSelectedEmotes { get; set; } = new();
+    public Dictionary<ulong, List<uint>> CharaSelectEmotePresets { get; set; } = new();
+    public Dictionary<ulong, int> CharaSelectActiveEmotePresetIndexes { get; set; } = new();
+    public Dictionary<ulong, uint> CharaSelectLastRecordedEmotes { get; set; } = new();
     public Dictionary<ulong, ushort> CharaSelectVoiceIds { get; set; } = new();
+    public bool CharaSelectOverrideTerritoryEnabled { get; set; } = false;
+    public ushort CharaSelectOverrideTerritoryTypeId { get; set; } = 0;
+    public bool CharaSelectOverridePositionEnabled { get; set; } = false;
+    public float CharaSelectOverridePositionX { get; set; } = 0f;
+    public float CharaSelectOverridePositionY { get; set; } = 0f;
+    public float CharaSelectOverridePositionZ { get; set; } = 0f;
+    public bool CharaSelectShowLastDataCenterNameEnabled { get; set; } = false;
+    public string CharaSelectLastDataCenterName { get; set; } = string.Empty;
 
     private IDalamudPluginInterface? _pluginInterface;
 
@@ -203,10 +214,30 @@ public sealed class Configuration : IPluginConfiguration
             .Where(pair => pair.Key != 0 && pair.Value != 0)
             .ToDictionary(pair => pair.Key, pair => pair.Value)
             ?? new Dictionary<ulong, uint>();
+        CharaSelectEmotePresets = source.CharaSelectEmotePresets?
+            .Where(pair => pair.Key != 0 && pair.Value != null)
+            .ToDictionary(pair => pair.Key, pair => pair.Value.ToList())
+            ?? new Dictionary<ulong, List<uint>>();
+        CharaSelectActiveEmotePresetIndexes = source.CharaSelectActiveEmotePresetIndexes?
+            .Where(pair => pair.Key != 0 && pair.Value >= 0)
+            .ToDictionary(pair => pair.Key, pair => pair.Value)
+            ?? new Dictionary<ulong, int>();
+        CharaSelectLastRecordedEmotes = source.CharaSelectLastRecordedEmotes?
+            .Where(pair => pair.Key != 0 && pair.Value != 0)
+            .ToDictionary(pair => pair.Key, pair => pair.Value)
+            ?? new Dictionary<ulong, uint>();
         CharaSelectVoiceIds = source.CharaSelectVoiceIds?
             .Where(pair => pair.Key != 0 && pair.Value != 0)
             .ToDictionary(pair => pair.Key, pair => pair.Value)
             ?? new Dictionary<ulong, ushort>();
+        CharaSelectOverrideTerritoryEnabled = source.CharaSelectOverrideTerritoryEnabled;
+        CharaSelectOverrideTerritoryTypeId = source.CharaSelectOverrideTerritoryTypeId;
+        CharaSelectOverridePositionEnabled = source.CharaSelectOverridePositionEnabled;
+        CharaSelectOverridePositionX = SanitizeCoordinate(source.CharaSelectOverridePositionX);
+        CharaSelectOverridePositionY = SanitizeCoordinate(source.CharaSelectOverridePositionY);
+        CharaSelectOverridePositionZ = SanitizeCoordinate(source.CharaSelectOverridePositionZ);
+        CharaSelectShowLastDataCenterNameEnabled = source.CharaSelectShowLastDataCenterNameEnabled;
+        CharaSelectLastDataCenterName = source.CharaSelectLastDataCenterName ?? string.Empty;
         NormalizeAndMigrate();
     }
 
@@ -313,6 +344,84 @@ public sealed class Configuration : IPluginConfiguration
             }
         }
 
+        if (CharaSelectEmotePresets == null)
+        {
+            CharaSelectEmotePresets = new Dictionary<ulong, List<uint>>();
+            changed = true;
+        }
+
+        if (CharaSelectActiveEmotePresetIndexes == null)
+        {
+            CharaSelectActiveEmotePresetIndexes = new Dictionary<ulong, int>();
+            changed = true;
+        }
+
+        var normalizedPresets = CharaSelectEmotePresets
+            .Where(pair => pair.Key != 0)
+            .Select(pair =>
+            {
+                var emotes = (pair.Value ?? new List<uint>())
+                    .Where(emoteId => emoteId != 0)
+                    .Distinct()
+                    .ToList();
+                return new KeyValuePair<ulong, List<uint>>(pair.Key, emotes);
+            })
+            .Where(pair => pair.Value.Count > 0)
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+
+        foreach (var pair in CharaSelectSelectedEmotes)
+        {
+            if (!normalizedPresets.ContainsKey(pair.Key) && pair.Value != 0)
+            {
+                normalizedPresets[pair.Key] = new List<uint> { pair.Value };
+            }
+        }
+
+        if (!DictionaryListEquals(CharaSelectEmotePresets, normalizedPresets))
+        {
+            CharaSelectEmotePresets = normalizedPresets;
+            changed = true;
+        }
+
+        var normalizedActiveIndexes = CharaSelectActiveEmotePresetIndexes
+            .Where(pair => pair.Key != 0 && CharaSelectEmotePresets.TryGetValue(pair.Key, out var emotes) && emotes.Count > 0)
+            .ToDictionary(
+                pair => pair.Key,
+                pair =>
+                {
+                    var emotes = CharaSelectEmotePresets[pair.Key];
+                    return Math.Clamp(pair.Value, 0, emotes.Count - 1);
+                });
+
+        foreach (var key in CharaSelectEmotePresets.Keys)
+        {
+            normalizedActiveIndexes.TryAdd(key, 0);
+        }
+
+        if (!CharaSelectActiveEmotePresetIndexes.OrderBy(pair => pair.Key).SequenceEqual(normalizedActiveIndexes.OrderBy(pair => pair.Key)))
+        {
+            CharaSelectActiveEmotePresetIndexes = normalizedActiveIndexes;
+            changed = true;
+        }
+
+        if (CharaSelectLastRecordedEmotes == null)
+        {
+            CharaSelectLastRecordedEmotes = new Dictionary<ulong, uint>();
+            changed = true;
+        }
+        else
+        {
+            var normalizedLastRecorded = CharaSelectLastRecordedEmotes
+                .Where(pair => pair.Key != 0 && pair.Value != 0)
+                .ToDictionary(pair => pair.Key, pair => pair.Value);
+
+            if (!CharaSelectLastRecordedEmotes.OrderBy(pair => pair.Key).SequenceEqual(normalizedLastRecorded.OrderBy(pair => pair.Key)))
+            {
+                CharaSelectLastRecordedEmotes = normalizedLastRecorded;
+                changed = true;
+            }
+        }
+
         if (CharaSelectVoiceIds == null)
         {
             CharaSelectVoiceIds = new Dictionary<ulong, ushort>();
@@ -329,6 +438,26 @@ public sealed class Configuration : IPluginConfiguration
                 CharaSelectVoiceIds = normalizedVoiceIds;
                 changed = true;
             }
+        }
+
+        var normalizedLastDataCenterName = (CharaSelectLastDataCenterName ?? string.Empty).Trim();
+        if (CharaSelectLastDataCenterName != normalizedLastDataCenterName)
+        {
+            CharaSelectLastDataCenterName = normalizedLastDataCenterName;
+            changed = true;
+        }
+
+        var normalizedX = SanitizeCoordinate(CharaSelectOverridePositionX);
+        var normalizedY = SanitizeCoordinate(CharaSelectOverridePositionY);
+        var normalizedZ = SanitizeCoordinate(CharaSelectOverridePositionZ);
+        if (CharaSelectOverridePositionX != normalizedX
+            || CharaSelectOverridePositionY != normalizedY
+            || CharaSelectOverridePositionZ != normalizedZ)
+        {
+            CharaSelectOverridePositionX = normalizedX;
+            CharaSelectOverridePositionY = normalizedY;
+            CharaSelectOverridePositionZ = normalizedZ;
+            changed = true;
         }
 
         return changed;
@@ -372,6 +501,31 @@ public sealed class Configuration : IPluginConfiguration
             && left.ReminderMinute == right.ReminderMinute
             && left.LastResetKey == right.LastResetKey
             && left.LastReminderKey == right.LastReminderKey;
+    }
+
+    private static float SanitizeCoordinate(float value)
+    {
+        return float.IsFinite(value) ? Math.Clamp(value, -100000f, 100000f) : 0f;
+    }
+
+    private static bool DictionaryListEquals(Dictionary<ulong, List<uint>> left, Dictionary<ulong, List<uint>> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        foreach (var pair in left)
+        {
+            if (!right.TryGetValue(pair.Key, out var values)
+                || pair.Value == null
+                || !pair.Value.SequenceEqual(values))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private Configuration BuildExportSnapshot()
