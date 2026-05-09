@@ -268,3 +268,9 @@ dotnet build projects\XIV-Mini-Util\XivMiniUtil.csproj -c Release
 - `TitleAndCharaSelect` は未実装扱いにし、実装完了まで UI から選択不可にした。
 - Camera / Focus / FOV override は Phase 2 に延期し、Focus fields は Phase 1 では予約値として扱う。
 - Phase 1 acceptance は CharaSelect scene path override のみ。HaselTweaks 相当の emote / preload 機能とは分離したままにする。
+
+## 2026-05-09 追記: ResolveOnly 実機結果からの resolver 修正
+
+- 実機 ResolveOnly で `CreateScene` / `LobbyUpdate` の signature match が `E8` 命令そのものではなく近傍の命令列に一致するケースを確認した。
+- `TryScanText+E8Rel32` を `TryScanText+NearbyE8Rel32` に拡張し、match 位置の前後から近い `E8 rel32` callsite を探して resolved target を計算する。
+- ResolveOnly の安全境界は維持し、hook 作成・有効化は引き続き行わない。

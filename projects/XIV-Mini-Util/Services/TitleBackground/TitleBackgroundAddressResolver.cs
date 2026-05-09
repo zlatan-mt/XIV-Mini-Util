@@ -8,6 +8,8 @@ namespace XivMiniUtil.Services.TitleBackground;
 
 internal sealed unsafe class TitleBackgroundAddressResolver
 {
+    private const int E8SearchBytesBeforeMatch = 16;
+    private const int E8SearchBytesAfterMatch = 64;
     private readonly List<TitleBackgroundSignatureScanResult> _scanResults = new();
 
     public nint CreateScene { get; private set; }
@@ -93,17 +95,18 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             return false;
         }
 
-        var rel32 = *(int*)(match + 1);
-        if (!TryResolveE8CallTarget(*(byte*)match, match, rel32, out target))
+        if (!TryFindE8Callsite(sigScanner, match, out var callsite))
         {
-            RecordFailure(name, "TryScanText+E8Rel32", "invalid-callsite", $"{name} match does not start with E8.", required);
+            RecordFailure(name, "TryScanText+NearbyE8Rel32", "invalid-callsite", $"{name} match does not contain a nearby E8 callsite.", required);
             return false;
         }
 
+        var rel32 = *(int*)(callsite + 1);
+        _ = TryResolveE8CallTarget(*(byte*)callsite, callsite, rel32, out target);
         var targetWithinText = IsWithinText(sigScanner, target);
         var status = targetWithinText ? "resolved" : "target-outside-text";
         var message = targetWithinText ? string.Empty : $"{name} E8 target is outside module text.";
-        _scanResults.Add(new TitleBackgroundSignatureScanResult(name, "TryScanText+E8Rel32", status, match, target, true, IsWithinText(sigScanner, match), targetWithinText, message));
+        _scanResults.Add(new TitleBackgroundSignatureScanResult(name, "TryScanText+NearbyE8Rel32", status, callsite, target, true, IsWithinText(sigScanner, callsite), targetWithinText, message));
         if (!targetWithinText)
         {
             if (required)
@@ -178,6 +181,93 @@ internal sealed unsafe class TitleBackgroundAddressResolver
 
         target = match + 5 + rel32;
         return true;
+    }
+
+    internal static bool TryFindNearbyE8Callsite(ReadOnlySpan<byte> bytes, int matchOffset, out int callsiteOffset)
+    {
+        callsiteOffset = -1;
+        if (bytes.Length < 5 || matchOffset < 0 || matchOffset >= bytes.Length)
+        {
+            return false;
+        }
+
+        if (IsE8Callsite(bytes, matchOffset))
+        {
+            callsiteOffset = matchOffset;
+            return true;
+        }
+
+        var maxDistance = Math.Max(E8SearchBytesBeforeMatch, E8SearchBytesAfterMatch);
+        for (var distance = 1; distance <= maxDistance; distance++)
+        {
+            var forward = matchOffset + distance;
+            if (distance <= E8SearchBytesAfterMatch && IsE8Callsite(bytes, forward))
+            {
+                callsiteOffset = forward;
+                return true;
+            }
+
+            var backward = matchOffset - distance;
+            if (distance <= E8SearchBytesBeforeMatch && IsE8Callsite(bytes, backward))
+            {
+                callsiteOffset = backward;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsE8Callsite(ReadOnlySpan<byte> bytes, int offset)
+    {
+        return offset >= 0
+            && offset <= bytes.Length - 5
+            && bytes[offset] == 0xE8;
+    }
+
+    private bool TryFindE8Callsite(ISigScanner sigScanner, nint match, out nint callsite)
+    {
+        callsite = nint.Zero;
+        if (!IsWithinText(sigScanner, match))
+        {
+            return false;
+        }
+
+        if (IsSafeE8Read(sigScanner, match) && *(byte*)match == 0xE8)
+        {
+            callsite = match;
+            return true;
+        }
+
+        var start = match - E8SearchBytesBeforeMatch;
+        var end = match + E8SearchBytesAfterMatch;
+        for (var address = match + 1; address <= end; address++)
+        {
+            if (IsSafeE8Read(sigScanner, address) && *(byte*)address == 0xE8)
+            {
+                callsite = address;
+                return true;
+            }
+        }
+
+        for (var address = match - 1; address >= start; address--)
+        {
+            if (IsSafeE8Read(sigScanner, address) && *(byte*)address == 0xE8)
+            {
+                callsite = address;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsSafeE8Read(ISigScanner sigScanner, nint address)
+    {
+        var value = address.ToInt64();
+        var start = sigScanner.TextSectionBase.ToInt64();
+        var end = start + sigScanner.TextSectionSize;
+        return value >= start && value + 5 <= end;
     }
 
     private static bool IsWithinText(ISigScanner sigScanner, nint address)

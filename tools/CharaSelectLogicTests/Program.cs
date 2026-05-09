@@ -321,6 +321,27 @@ Test("title background e8 callsite resolver rejects non e8 match", () =>
         && acceptedTarget == new nint(0x1025);
 });
 
+Test("title background e8 callsite resolver finds nearby forward callsite", () =>
+{
+    byte[] bytes = [0x48, 0x89, 0x5C, 0x24, 0x08, 0xE8, 0x11, 0x22, 0x33, 0x44];
+    return TitleBackgroundAddressResolver.TryFindNearbyE8Callsite(bytes, 0, out var callsiteOffset)
+        && callsiteOffset == 5;
+});
+
+Test("title background e8 callsite resolver finds nearby backward callsite", () =>
+{
+    byte[] bytes = [0xE8, 0x11, 0x22, 0x33, 0x44, 0x48, 0x89, 0x5C, 0x24, 0x08];
+    return TitleBackgroundAddressResolver.TryFindNearbyE8Callsite(bytes, 8, out var callsiteOffset)
+        && callsiteOffset == 0;
+});
+
+Test("title background e8 callsite resolver rejects window without callsite", () =>
+{
+    byte[] bytes = [0x48, 0x89, 0x5C, 0x24, 0x08, 0x90, 0x90, 0x90];
+    return !TitleBackgroundAddressResolver.TryFindNearbyE8Callsite(bytes, 0, out var callsiteOffset)
+        && callsiteOffset == -1;
+});
+
 if (failures.Count > 0)
 {
     foreach (var failure in failures)
