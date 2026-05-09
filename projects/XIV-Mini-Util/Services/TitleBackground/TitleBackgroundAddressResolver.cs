@@ -38,8 +38,8 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         var lobbyUpdateResolved = TryResolveE8Call(sigScanner, configuration.TitleBackgroundLobbyUpdateSignature, nameof(LobbyUpdate), out var lobbyUpdateMatch, out var lobbyUpdate);
         var loadLobbySceneResolved = TryResolveText(sigScanner, configuration.TitleBackgroundLoadLobbySceneSignature, nameof(LoadLobbyScene), out var loadLobbyScene);
         var currentMapResolved = TryResolveStatic(sigScanner, configuration.TitleBackgroundLobbyCurrentMapSignature, nameof(LobbyCurrentMap), out var lobbyCurrentMap);
-        var fixOnResolved = TryResolveText(sigScanner, configuration.TitleBackgroundFixOnSignature, "LobbyCameraFixOn", out var fixOn);
-        var uiStageResolved = TryResolveUpdateLobbyUiStage(sigScanner, out var updateLobbyUiStage);
+        var fixOnResolved = TryResolveText(sigScanner, configuration.TitleBackgroundFixOnSignature, "LobbyCameraFixOn", out var fixOn, required: configuration.TitleBackgroundCameraOverrideEnabled);
+        _ = TryResolveUpdateLobbyUiStage(sigScanner, out var updateLobbyUiStage);
 
         CreateSceneMatch = createSceneMatch;
         CreateScene = createScene;
@@ -53,23 +53,22 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             && lobbyUpdateResolved
             && loadLobbySceneResolved
             && currentMapResolved
-            && fixOnResolved
-            && uiStageResolved;
+            && (!configuration.TitleBackgroundCameraOverrideEnabled || fixOnResolved);
     }
 
-    private bool TryResolveText(ISigScanner sigScanner, string signature, string name, out nint address)
+    private bool TryResolveText(ISigScanner sigScanner, string signature, string name, out nint address, bool required = true)
     {
         address = nint.Zero;
         signature = NormalizeSignature(signature);
         if (string.IsNullOrWhiteSpace(signature))
         {
-            RecordFailure(name, "TryScanText", "not-configured", $"{name} signature is not configured.");
+            RecordFailure(name, "TryScanText", "not-configured", $"{name} signature is not configured.", required);
             return false;
         }
 
         if (!sigScanner.TryScanText(signature, out address) || address == nint.Zero)
         {
-            RecordFailure(name, "TryScanText", "not-found", $"{name} signature was not found.");
+            RecordFailure(name, "TryScanText", "not-found", $"{name} signature was not found.", required);
             return false;
         }
 
@@ -77,38 +76,40 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         return true;
     }
 
-    private bool TryResolveE8Call(ISigScanner sigScanner, string signature, string name, out nint match, out nint target)
+    private bool TryResolveE8Call(ISigScanner sigScanner, string signature, string name, out nint match, out nint target, bool required = true)
     {
         match = nint.Zero;
         target = nint.Zero;
         signature = NormalizeSignature(signature);
         if (string.IsNullOrWhiteSpace(signature))
         {
-            RecordFailure(name, "TryScanText+E8Rel32", "not-configured", $"{name} signature is not configured.");
+            RecordFailure(name, "TryScanText+E8Rel32", "not-configured", $"{name} signature is not configured.", required);
             return false;
         }
 
         if (!sigScanner.TryScanText(signature, out match) || match == nint.Zero)
         {
-            RecordFailure(name, "TryScanText+E8Rel32", "not-found", $"{name} signature was not found.");
-            return false;
-        }
-
-        if (*(byte*)match != 0xE8)
-        {
-            RecordFailure(name, "TryScanText+E8Rel32", "invalid-callsite", $"{name} match does not start with E8.");
+            RecordFailure(name, "TryScanText+E8Rel32", "not-found", $"{name} signature was not found.", required);
             return false;
         }
 
         var rel32 = *(int*)(match + 1);
-        target = match + 5 + rel32;
+        if (!TryResolveE8CallTarget(*(byte*)match, match, rel32, out target))
+        {
+            RecordFailure(name, "TryScanText+E8Rel32", "invalid-callsite", $"{name} match does not start with E8.", required);
+            return false;
+        }
+
         var targetWithinText = IsWithinText(sigScanner, target);
         var status = targetWithinText ? "resolved" : "target-outside-text";
         var message = targetWithinText ? string.Empty : $"{name} E8 target is outside module text.";
         _scanResults.Add(new TitleBackgroundSignatureScanResult(name, "TryScanText+E8Rel32", status, match, target, true, IsWithinText(sigScanner, match), targetWithinText, message));
         if (!targetWithinText)
         {
-            LastError = string.IsNullOrWhiteSpace(LastError) ? message : LastError;
+            if (required)
+            {
+                LastError = string.IsNullOrWhiteSpace(LastError) ? message : LastError;
+            }
         }
 
         return targetWithinText;
@@ -140,11 +141,11 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         var signature = AgentLobby.Addresses.UpdateLobbyUIStage.String;
         if (string.IsNullOrWhiteSpace(signature))
         {
-            RecordFailure("UpdateLobbyUIStage", "FFXIVClientStructs", "not-configured", "AgentLobby.UpdateLobbyUIStage signature is unavailable.");
+            RecordFailure("UpdateLobbyUIStage", "FFXIVClientStructs", "not-configured", "AgentLobby.UpdateLobbyUIStage signature is unavailable.", required: false);
             return false;
         }
 
-        if (!TryResolveE8Call(sigScanner, signature, "UpdateLobbyUIStage", out _, out address))
+        if (!TryResolveE8Call(sigScanner, signature, "UpdateLobbyUIStage", out _, out address, required: false))
         {
             return false;
         }
@@ -157,10 +158,26 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         _scanResults.Add(new TitleBackgroundSignatureScanResult(name, method, "resolved", address, target, false, true, targetWithinText, message));
     }
 
-    private void RecordFailure(string name, string method, string status, string message)
+    private void RecordFailure(string name, string method, string status, string message, bool required = true)
     {
-        LastError = string.IsNullOrWhiteSpace(LastError) ? message : LastError;
+        if (required)
+        {
+            LastError = string.IsNullOrWhiteSpace(LastError) ? message : LastError;
+        }
+
         _scanResults.Add(new TitleBackgroundSignatureScanResult(name, method, status, nint.Zero, nint.Zero, false, false, false, message));
+    }
+
+    internal static bool TryResolveE8CallTarget(byte firstByte, nint match, int rel32, out nint target)
+    {
+        target = nint.Zero;
+        if (firstByte != 0xE8)
+        {
+            return false;
+        }
+
+        target = match + 5 + rel32;
+        return true;
     }
 
     private static bool IsWithinText(ISigScanner sigScanner, nint address)

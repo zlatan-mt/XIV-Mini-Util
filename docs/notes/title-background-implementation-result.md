@@ -259,3 +259,12 @@ dotnet build projects\XIV-Mini-Util\XivMiniUtil.csproj -c Release
 - キャラ選択後の login wait / queue 中に背景が変わらないこと。
 - ログイン後の通常 gameplay に影響しないこと。
 - plugin unload 時の hook dispose 実動作。
+
+## 2026-05-09 追記: Phase 1 safety 修正
+
+- `FixOn` camera hook は optional とし、既定では作成・有効化しない。
+- CharaSelect scene override は `CreateScene` / `LobbyUpdate` / `LoadLobbyScene` / `LobbyCurrentMap` だけを必須にし、`FixOn` 未解決でも ready になれるようにした。
+- `UpdateLobbyUIStage` は diagnostic-only とし、解決失敗しても scene readiness をブロックしない。
+- `TitleAndCharaSelect` は未実装扱いにし、実装完了まで UI から選択不可にした。
+- Camera / Focus / FOV override は Phase 2 に延期し、Focus fields は Phase 1 では予約値として扱う。
+- Phase 1 acceptance は CharaSelect scene path override のみ。HaselTweaks 相当の emote / preload 機能とは分離したままにする。

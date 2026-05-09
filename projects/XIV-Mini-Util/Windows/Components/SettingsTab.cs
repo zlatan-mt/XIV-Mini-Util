@@ -569,6 +569,11 @@ public sealed class SettingsTab : ITabComponent
         {
             foreach (TitleBackgroundRuntimeMode mode in Enum.GetValues(typeof(TitleBackgroundRuntimeMode)))
             {
+                if (!TitleBackgroundRuntimeModeHelper.IsRuntimeModeSelectable(mode))
+                {
+                    continue;
+                }
+
                 if (ImGui.Selectable(GetTitleBackgroundRuntimeModeLabel(mode), runtimeMode == mode))
                 {
                     _configuration.TitleBackgroundRuntimeMode = mode;
@@ -579,6 +584,7 @@ public sealed class SettingsTab : ITabComponent
 
             ImGui.EndCombo();
         }
+        ImGui.TextDisabled("Title + CharaSelect は未実装のため、実機確認までは選択肢から外しています。");
 
         var territoryPath = _configuration.TitleBackgroundTerritoryPath;
         if (ImGui.InputTextWithHint("TerritoryPath##TitleBackgroundTerritoryPath", "ffxiv/.../level/...", ref territoryPath, 256))
@@ -647,6 +653,7 @@ public sealed class SettingsTab : ITabComponent
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
         }
+        ImGui.TextDisabled("Camera / Focus / FOV は Phase 2 予約値です。Phase 1 では scene path 差し替えのみを実行します。");
 
         if (ImGui.Button("適用"))
         {
@@ -797,6 +804,7 @@ public sealed class SettingsTab : ITabComponent
     private void ClearTitleBackgroundInputs()
     {
         _configuration.TitleBackgroundOverrideEnabled = false;
+        _configuration.TitleBackgroundCameraOverrideEnabled = false;
         _configuration.TitleBackgroundTerritoryPath = string.Empty;
         _configuration.TitleBackgroundTerritoryTypeId = 0;
         _configuration.TitleBackgroundLayoutTerritoryTypeId = 0;

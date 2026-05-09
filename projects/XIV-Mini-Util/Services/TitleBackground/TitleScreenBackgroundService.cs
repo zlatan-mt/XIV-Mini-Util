@@ -61,7 +61,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         _configuration.TitleBackgroundOverrideEnabled = enabled;
         _configuration.Save();
-        ApplyFromConfiguration();
+        ReloadNativeIntegration();
     }
 
     public void ApplyFromConfiguration()
@@ -69,6 +69,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         NormalizeConfiguration();
         if (_configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly)
         {
+            DisposeHooks();
             _cameraApplyPending = false;
             _state = TitleBackgroundServiceState.Disabled;
             _stateReason = "resolver-only";
@@ -78,26 +79,32 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         if (_configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.Disabled
             || !_configuration.TitleBackgroundOverrideEnabled)
         {
+            DisposeHooks();
             _cameraApplyPending = false;
-            _state = AreHooksReady() || _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly
-                ? TitleBackgroundServiceState.Disabled
-                : _state;
+            _state = TitleBackgroundServiceState.Disabled;
             _stateReason = "無効";
             return;
         }
 
         if (!ValidateCurrentConfiguration(out var errorMessage))
         {
+            DisposeHooks();
             _state = TitleBackgroundServiceState.InvalidConfiguration;
             _stateReason = errorMessage;
             _cameraApplyPending = false;
             return;
         }
 
-        if (!AreHooksReady())
+        if (ShouldCreateSceneHooks() && (!AreSceneHooksReady() || !IsHookSetAlignedWithConfiguration()))
+        {
+            DisposeHooks();
+            InitializeHooks();
+        }
+
+        if (!AreSceneReady())
         {
             _state = TitleBackgroundServiceState.HookCreateFailed;
-            _stateReason = "hook unavailable";
+            _stateReason = "scene hook unavailable";
             return;
         }
 
@@ -119,7 +126,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundOverrideEnabled = false;
         _configuration.Save();
         _cameraApplyPending = false;
-        _state = AreHooksReady() ? TitleBackgroundServiceState.Disabled : _state;
+        DisposeHooks();
+        _state = TitleBackgroundServiceState.Disabled;
         _stateReason = "無効";
     }
 
@@ -140,7 +148,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     public IReadOnlyList<string> GetDiagnosticLines()
     {
-        var hooksReady = AreHooksReady();
+        var sceneHooksReady = AreSceneHooksReady();
+        var cameraHookReady = AreCameraHookReady();
+        var hooksReady = sceneHooksReady && (!_configuration.TitleBackgroundCameraOverrideEnabled || cameraHookReady);
         var hooksEnabled = IsHookEnabled(_createSceneHook)
             || IsHookEnabled(_lobbyUpdateHook)
             || IsHookEnabled(_loadLobbySceneHook)
@@ -149,6 +159,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             $"runtimeMode={_configuration.TitleBackgroundRuntimeMode}",
             $"hooksReady={hooksReady}",
+            $"sceneHooksReady={sceneHooksReady}",
+            $"cameraHookReady={cameraHookReady}",
+            $"cameraHookEnabled={IsHookEnabled(_cameraFixOnHook)}",
+            $"cameraOverrideEnabled={_configuration.TitleBackgroundCameraOverrideEnabled}",
+            $"titleOverrideImplemented={TitleBackgroundRuntimeModeHelper.IsTitleOverrideImplemented(_configuration.TitleBackgroundRuntimeMode)}",
+            "fixOnAbiVerified=False",
             $"hooksEnabled={hooksEnabled}",
             "",
             BuildAddressLine("CreateScene.configured", _configuration.TitleBackgroundCreateSceneSignature),
@@ -180,7 +196,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             "LobbyCameraFixOn.method=TryScanText",
             $"LobbyCameraFixOn.targetWithinText={GetTargetWithinText("LobbyCameraFixOn")}",
             "",
-            $"AgentLobby.LobbyUIStage={FormatAddress(_addressResolver.UpdateLobbyUIStage)}",
+            "UpdateLobbyUIStage.optional=True",
+            $"UpdateLobbyUIStage.address={FormatAddress(_addressResolver.UpdateLobbyUIStage)}",
+            $"Focus.reservedForCameraPhase={!TitleBackgroundRuntimeModeHelper.IsFocusUsed(_configuration.TitleBackgroundCameraOverrideEnabled)}",
             $"lastLobbyUpdateMapId={_lastLobbyUpdateMapId}",
             $"loadingLobbyType={_loadingLobbyType}",
             $"effectiveLobbyType={EffectiveLobbyType}",
@@ -258,8 +276,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 return;
             }
 
-            if (_configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.Disabled
-                || _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly)
+            if (!ShouldCreateSceneHooks())
             {
                 _state = TitleBackgroundServiceState.Disabled;
                 _stateReason = _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly
@@ -271,12 +288,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _createSceneHook = _gameInteropProvider.HookFromAddress<CreateSceneDelegate>(_addressResolver.CreateScene, CreateSceneDetour);
             _lobbyUpdateHook = _gameInteropProvider.HookFromAddress<LobbyUpdateDelegate>(_addressResolver.LobbyUpdate, LobbyUpdateDetour);
             _loadLobbySceneHook = _gameInteropProvider.HookFromAddress<LoadLobbySceneDelegate>(_addressResolver.LoadLobbyScene, LoadLobbySceneDetour);
-            _cameraFixOnHook = _gameInteropProvider.HookFromAddress<LobbyCameraFixOnDelegate>(_addressResolver.FixOn, LobbyCameraFixOnDetour);
+            if (TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(
+                _configuration.TitleBackgroundRuntimeMode,
+                _configuration.TitleBackgroundOverrideEnabled,
+                _configuration.TitleBackgroundCameraOverrideEnabled))
+            {
+                _cameraFixOnHook = _gameInteropProvider.HookFromAddress<LobbyCameraFixOnDelegate>(_addressResolver.FixOn, LobbyCameraFixOnDetour);
+            }
 
             _createSceneHook.Enable();
             _lobbyUpdateHook.Enable();
             _loadLobbySceneHook.Enable();
-            _cameraFixOnHook.Enable();
+            _cameraFixOnHook?.Enable();
             _state = TitleBackgroundServiceState.Disabled;
             _stateReason = "無効";
         }
@@ -421,8 +444,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         return _state == TitleBackgroundServiceState.Ready
             && _configuration.TitleBackgroundOverrideEnabled
-            && (_configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
-                || _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.TitleAndCharaSelect)
+            && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
             && TryReadCurrentLobbyMap(out var currentMap)
             && GameLobbyTypeHelper.IsTitleCharaSelectTransition(currentMap, nextMap);
     }
@@ -431,15 +453,15 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         return _state == TitleBackgroundServiceState.Ready
             && _configuration.TitleBackgroundOverrideEnabled
-            && (_configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
-                || _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.TitleAndCharaSelect)
+            && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
             && lobbyType == GameLobbyType.CharaSelect
             && !string.IsNullOrWhiteSpace(_validatedTerritoryPath);
     }
 
     private bool ShouldOverrideCamera()
     {
-        return _cameraApplyPending
+        return _configuration.TitleBackgroundCameraOverrideEnabled
+            && _cameraApplyPending
             && _state == TitleBackgroundServiceState.Ready
             && TryReadCurrentLobbyMap(out var currentMap)
             && currentMap == GameLobbyType.CharaSelect;
@@ -484,6 +506,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundCameraX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraX);
         _configuration.TitleBackgroundCameraY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraY);
         _configuration.TitleBackgroundCameraZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraZ);
+        _configuration.TitleBackgroundFocusX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusX);
+        _configuration.TitleBackgroundFocusY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusY);
+        _configuration.TitleBackgroundFocusZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusZ);
         _configuration.TitleBackgroundFovY = TitleBackgroundPreset.ClampFovY(_configuration.TitleBackgroundFovY);
         _configuration.TitleBackgroundCreateSceneSignature = NormalizeSignature(_configuration.TitleBackgroundCreateSceneSignature);
         _configuration.TitleBackgroundFixOnSignature = NormalizeSignature(_configuration.TitleBackgroundFixOnSignature);
@@ -492,17 +517,55 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundLobbyCurrentMapSignature = NormalizeSignature(_configuration.TitleBackgroundLobbyCurrentMapSignature);
     }
 
-    private bool AreHooksReady()
+    private bool AreSceneReady()
     {
-        if (_configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly)
+        return AreSceneHooksReady() && AreNativeSceneAddressesReady();
+    }
+
+    private bool AreSceneHooksReady()
+    {
+        if (!TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(
+            _configuration.TitleBackgroundRuntimeMode,
+            _configuration.TitleBackgroundOverrideEnabled))
         {
             return false;
         }
 
-        return _createSceneHook != null
-            && _lobbyUpdateHook != null
-            && _loadLobbySceneHook != null
+        return TitleBackgroundRuntimeModeHelper.AreSceneHooksReady(
+            _createSceneHook != null,
+            _lobbyUpdateHook != null,
+            _loadLobbySceneHook != null);
+    }
+
+    private bool AreCameraHookReady()
+    {
+        return _configuration.TitleBackgroundCameraOverrideEnabled
             && _cameraFixOnHook != null;
+    }
+
+    private bool AreNativeSceneAddressesReady()
+    {
+        return TitleBackgroundRuntimeModeHelper.AreNativeSceneAddressesReady(
+            _addressResolver.CreateScene != nint.Zero,
+            _addressResolver.LobbyUpdate != nint.Zero,
+            _addressResolver.LoadLobbyScene != nint.Zero,
+            _addressResolver.LobbyCurrentMap != nint.Zero);
+    }
+
+    private bool ShouldCreateSceneHooks()
+    {
+        return TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(
+            _configuration.TitleBackgroundRuntimeMode,
+            _configuration.TitleBackgroundOverrideEnabled);
+    }
+
+    private bool IsHookSetAlignedWithConfiguration()
+    {
+        var shouldCreateCameraHook = TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(
+            _configuration.TitleBackgroundRuntimeMode,
+            _configuration.TitleBackgroundOverrideEnabled,
+            _configuration.TitleBackgroundCameraOverrideEnabled);
+        return shouldCreateCameraHook == (_cameraFixOnHook != null);
     }
 
     private void MarkRuntimeError(Exception ex, string hookName)
@@ -599,5 +662,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private delegate void LoadLobbySceneDelegate(GameLobbyType mapId);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    // UNVERIFIED ABI - DO NOT ENABLE BY DEFAULT. Phase 1 does not create this hook.
     private delegate nint LobbyCameraFixOnDelegate(nint self, float* cameraPos, float* focusPos, float fovY);
 }

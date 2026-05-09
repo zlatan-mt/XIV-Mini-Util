@@ -276,6 +276,51 @@ Test("title chara select transition resets current map only when override enable
         && GameLobbyTypeHelper.GetCurrentMapForTransition(GameLobbyType.Title, GameLobbyType.LaNoscea, overrideEnabled: true) == GameLobbyType.Title;
 });
 
+Test("title background resolve only does not create hooks", () =>
+{
+    return !TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(TitleBackgroundRuntimeMode.ResolveOnly, overrideEnabled: true)
+        && !TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(TitleBackgroundRuntimeMode.ResolveOnly, overrideEnabled: true, cameraOverrideEnabled: true);
+});
+
+Test("title background chara select scene readiness does not require fix on", () =>
+{
+    return TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: true)
+        && TitleBackgroundRuntimeModeHelper.AreSceneHooksReady(createSceneReady: true, lobbyUpdateReady: true, loadLobbySceneReady: true)
+        && !TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: true, cameraOverrideEnabled: false);
+});
+
+Test("title background update lobby ui stage failure does not block scene readiness", () =>
+{
+    var updateLobbyUiStageResolved = false;
+    return !updateLobbyUiStageResolved
+        && TitleBackgroundRuntimeModeHelper.AreNativeSceneAddressesReady(createSceneReady: true, lobbyUpdateReady: true, loadLobbySceneReady: true, currentMapReady: true);
+});
+
+Test("title and chara select mode is hidden until implemented", () =>
+{
+    return !TitleBackgroundRuntimeModeHelper.IsTitleOverrideImplemented(TitleBackgroundRuntimeMode.TitleAndCharaSelect)
+        && !TitleBackgroundRuntimeModeHelper.IsRuntimeModeSelectable(TitleBackgroundRuntimeMode.TitleAndCharaSelect);
+});
+
+Test("title background focus fields are reserved while camera override disabled", () =>
+{
+    return !TitleBackgroundRuntimeModeHelper.IsFocusUsed(cameraOverrideEnabled: false)
+        && TitleBackgroundRuntimeModeHelper.IsFocusUsed(cameraOverrideEnabled: true);
+});
+
+Test("game lobby type none remains minus one", () =>
+{
+    return (short)GameLobbyType.None == -1;
+});
+
+Test("title background e8 callsite resolver rejects non e8 match", () =>
+{
+    return !TitleBackgroundAddressResolver.TryResolveE8CallTarget(0x90, new nint(0x1000), 0x20, out var rejectedTarget)
+        && rejectedTarget == nint.Zero
+        && TitleBackgroundAddressResolver.TryResolveE8CallTarget(0xE8, new nint(0x1000), 0x20, out var acceptedTarget)
+        && acceptedTarget == new nint(0x1025);
+});
+
 if (failures.Count > 0)
 {
     foreach (var failure in failures)

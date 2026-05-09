@@ -30,3 +30,41 @@ internal static class GameLobbyTypeHelper
             : current;
     }
 }
+
+internal static class TitleBackgroundRuntimeModeHelper
+{
+    public static bool IsTitleOverrideImplemented(TitleBackgroundRuntimeMode mode)
+    {
+        return false;
+    }
+
+    public static bool ShouldCreateSceneHooks(TitleBackgroundRuntimeMode mode, bool overrideEnabled)
+    {
+        return overrideEnabled && mode == TitleBackgroundRuntimeMode.CharaSelectOnly;
+    }
+
+    public static bool ShouldCreateCameraHook(TitleBackgroundRuntimeMode mode, bool overrideEnabled, bool cameraOverrideEnabled)
+    {
+        return ShouldCreateSceneHooks(mode, overrideEnabled) && cameraOverrideEnabled;
+    }
+
+    public static bool AreSceneHooksReady(bool createSceneReady, bool lobbyUpdateReady, bool loadLobbySceneReady)
+    {
+        return createSceneReady && lobbyUpdateReady && loadLobbySceneReady;
+    }
+
+    public static bool AreNativeSceneAddressesReady(bool createSceneReady, bool lobbyUpdateReady, bool loadLobbySceneReady, bool currentMapReady)
+    {
+        return createSceneReady && lobbyUpdateReady && loadLobbySceneReady && currentMapReady;
+    }
+
+    public static bool IsRuntimeModeSelectable(TitleBackgroundRuntimeMode mode)
+    {
+        return mode != TitleBackgroundRuntimeMode.TitleAndCharaSelect;
+    }
+
+    public static bool IsFocusUsed(bool cameraOverrideEnabled)
+    {
+        return cameraOverrideEnabled;
+    }
+}

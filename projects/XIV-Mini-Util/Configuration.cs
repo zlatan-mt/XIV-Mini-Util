@@ -78,6 +78,7 @@ public sealed class Configuration : IPluginConfiguration
 
     // タイトル背景設定
     public bool TitleBackgroundOverrideEnabled { get; set; } = false;
+    public bool TitleBackgroundCameraOverrideEnabled { get; set; } = false;
     public TitleBackgroundRuntimeMode TitleBackgroundRuntimeMode { get; set; } = TitleBackgroundRuntimeMode.ResolveOnly;
     public string TitleBackgroundTerritoryPath { get; set; } = string.Empty;
     public uint TitleBackgroundTerritoryTypeId { get; set; } = 0;
@@ -267,6 +268,7 @@ public sealed class Configuration : IPluginConfiguration
         CharaSelectShowLastDataCenterNameEnabled = source.CharaSelectShowLastDataCenterNameEnabled;
         CharaSelectLastDataCenterName = source.CharaSelectLastDataCenterName ?? string.Empty;
         TitleBackgroundOverrideEnabled = source.TitleBackgroundOverrideEnabled;
+        TitleBackgroundCameraOverrideEnabled = source.TitleBackgroundCameraOverrideEnabled;
         TitleBackgroundRuntimeMode = NormalizeTitleBackgroundRuntimeMode(source.TitleBackgroundRuntimeMode);
         TitleBackgroundTerritoryPath = NormalizeTitleBackgroundTerritoryPath(source.TitleBackgroundTerritoryPath);
         TitleBackgroundTerritoryTypeId = source.TitleBackgroundTerritoryTypeId;
@@ -645,9 +647,14 @@ public sealed class Configuration : IPluginConfiguration
 
     private static TitleBackgroundRuntimeMode NormalizeTitleBackgroundRuntimeMode(TitleBackgroundRuntimeMode mode)
     {
-        return Enum.IsDefined(typeof(TitleBackgroundRuntimeMode), mode)
+        if (!Enum.IsDefined(typeof(TitleBackgroundRuntimeMode), mode))
+        {
+            return TitleBackgroundRuntimeMode.ResolveOnly;
+        }
+
+        return TitleBackgroundRuntimeModeHelper.IsRuntimeModeSelectable(mode)
             ? mode
-            : TitleBackgroundRuntimeMode.ResolveOnly;
+            : TitleBackgroundRuntimeMode.CharaSelectOnly;
     }
 
     private static string NormalizeAssetPath(string? path)
