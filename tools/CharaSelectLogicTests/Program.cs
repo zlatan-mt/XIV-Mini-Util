@@ -348,6 +348,18 @@ Test("title background direct text candidate requires nonzero match", () =>
         && !TitleBackgroundAddressResolver.ShouldRecordDirectTextCandidate(nint.Zero);
 });
 
+Test("title background prologue hint classifies common msvc prologue", () =>
+{
+    byte[] bytes = [0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83];
+    return TitleBackgroundAddressResolver.ClassifyFunctionPrologue(bytes) == "likely-msvc-prologue";
+});
+
+Test("title background prologue hint does not verify unknown bytes", () =>
+{
+    byte[] bytes = [0x8B, 0xD9, 0xE8, 0x11, 0x22, 0x33, 0x44];
+    return TitleBackgroundAddressResolver.ClassifyFunctionPrologue(bytes) == "unknown";
+});
+
 if (failures.Count > 0)
 {
     foreach (var failure in failures)

@@ -173,6 +173,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"CreateScene.hookTarget={FormatAddress(_addressResolver.CreateScene)}",
             $"CreateScene.hookTargetVerified={GetHookTargetVerified("CreateScene")}",
             $"CreateScene.method={GetResolveMethod("CreateScene", "TryScanText+NearbyE8Rel32")}",
+            $"CreateScene.candidateReadable={GetCandidateReadable("CreateScene")}",
+            $"CreateScene.candidatePrologueHint={GetCandidatePrologueHint("CreateScene")}",
+            $"CreateScene.candidateFirstBytes={GetCandidateFirstBytes("CreateScene")}",
             $"CreateScene.targetWithinText={GetTargetWithinText("CreateScene")}",
             "",
             BuildAddressLine("LobbyUpdate.configured", _configuration.TitleBackgroundLobbyUpdateSignature),
@@ -181,6 +184,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"LobbyUpdate.hookTarget={FormatAddress(_addressResolver.LobbyUpdate)}",
             $"LobbyUpdate.hookTargetVerified={GetHookTargetVerified("LobbyUpdate")}",
             $"LobbyUpdate.method={GetResolveMethod("LobbyUpdate", "TryScanText+NearbyE8Rel32")}",
+            $"LobbyUpdate.candidateReadable={GetCandidateReadable("LobbyUpdate")}",
+            $"LobbyUpdate.candidatePrologueHint={GetCandidatePrologueHint("LobbyUpdate")}",
+            $"LobbyUpdate.candidateFirstBytes={GetCandidateFirstBytes("LobbyUpdate")}",
             $"LobbyUpdate.targetWithinText={GetTargetWithinText("LobbyUpdate")}",
             "",
             BuildAddressLine("LoadLobbyScene.configured", _configuration.TitleBackgroundLoadLobbySceneSignature),
@@ -217,7 +223,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
         foreach (var result in _addressResolver.ScanResults)
         {
-            lines.Add($"signatureScan: name={result.Name}, method={result.Method}, status={result.Status}, address={FormatAddress(result.Address)}, resolvedCandidate={FormatAddress(result.ResolvedCandidate)}, hookTarget={FormatAddress(result.HookTarget)}, hookTargetVerified={result.HookTargetVerified}, addressSource={result.AddressSource}, targetWithinText={result.TargetWithinText}, hookTargetWithinText={result.HookTargetWithinText}, safetyNote={(string.IsNullOrWhiteSpace(result.SafetyNote) ? "none" : result.SafetyNote)}");
+            lines.Add($"signatureScan: name={result.Name}, method={result.Method}, status={result.Status}, address={FormatAddress(result.Address)}, resolvedCandidate={FormatAddress(result.ResolvedCandidate)}, hookTarget={FormatAddress(result.HookTarget)}, hookTargetVerified={result.HookTargetVerified}, addressSource={result.AddressSource}, targetWithinText={result.TargetWithinText}, hookTargetWithinText={result.HookTargetWithinText}, candidateReadable={result.CandidateDiagnostics.Readable}, candidatePrologueHint={result.CandidateDiagnostics.PrologueHint}, candidateFirstBytes={(string.IsNullOrWhiteSpace(result.CandidateDiagnostics.FirstBytesHex) ? "none" : result.CandidateDiagnostics.FirstBytesHex)}, safetyNote={(string.IsNullOrWhiteSpace(result.SafetyNote) ? "none" : result.SafetyNote)}");
         }
 
         return lines;
@@ -632,6 +638,22 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private string GetResolveMethod(string name, string fallback)
     {
         return FindResult(name)?.Method ?? fallback;
+    }
+
+    private string GetCandidateReadable(string name)
+    {
+        return FindResult(name)?.CandidateDiagnostics.Readable.ToString() ?? "False";
+    }
+
+    private string GetCandidatePrologueHint(string name)
+    {
+        return FindResult(name)?.CandidateDiagnostics.PrologueHint ?? "unavailable";
+    }
+
+    private string GetCandidateFirstBytes(string name)
+    {
+        var bytes = FindResult(name)?.CandidateDiagnostics.FirstBytesHex ?? string.Empty;
+        return string.IsNullOrWhiteSpace(bytes) ? "none" : bytes;
     }
 
     private string ReadCurrentLobbyMapRawText()

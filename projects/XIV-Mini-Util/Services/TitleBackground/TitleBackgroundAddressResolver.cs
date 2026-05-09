@@ -3,6 +3,7 @@
 // Reason: signature drift時に背景差し替えだけをfail-closedで止めるため
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using System.Runtime.InteropServices;
 
 namespace XivMiniUtil.Services.TitleBackground;
 
@@ -10,6 +11,7 @@ internal sealed unsafe class TitleBackgroundAddressResolver
 {
     private const int E8SearchBytesBeforeMatch = 16;
     private const int E8SearchBytesAfterMatch = 64;
+    private const int CandidatePreviewBytes = 16;
     private readonly List<TitleBackgroundSignatureScanResult> _scanResults = new();
 
     public nint CreateScene { get; private set; }
@@ -134,7 +136,8 @@ internal sealed unsafe class TitleBackgroundAddressResolver
                 IsWithinText(sigScanner, callsite),
                 false,
                 false,
-                message));
+                message,
+                TitleBackgroundCandidateDiagnostics.Unavailable));
             return false;
         }
 
@@ -155,7 +158,8 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             IsWithinText(sigScanner, callsite),
             targetWithinText,
             true,
-            safetyNote));
+            safetyNote,
+            TitleBackgroundCandidateDiagnostics.Unavailable));
         return true;
     }
 
@@ -212,7 +216,8 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             true,
             targetWithinText,
             hookTargetVerified,
-            safetyNote));
+            safetyNote,
+            TitleBackgroundCandidateDiagnostics.Unavailable));
     }
 
     private void RecordCandidateOnly(ISigScanner sigScanner, string name, string method, string status, nint candidate, string addressSource, string message, bool required)
@@ -235,7 +240,8 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             IsWithinText(sigScanner, candidate),
             IsWithinText(sigScanner, candidate),
             false,
-            message));
+            message,
+            BuildCandidateDiagnostics(candidate)));
     }
 
     private void RecordFailure(string name, string method, string status, string message, bool required = true)
@@ -258,7 +264,8 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             false,
             false,
             false,
-            message));
+            message,
+            TitleBackgroundCandidateDiagnostics.Unavailable));
     }
 
     internal static bool TryResolveE8CallTarget(byte firstByte, nint match, int rel32, out nint target)
@@ -311,6 +318,41 @@ internal sealed unsafe class TitleBackgroundAddressResolver
     internal static bool ShouldRecordDirectTextCandidate(nint match)
     {
         return match != nint.Zero;
+    }
+
+    internal static string ClassifyFunctionPrologue(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 4)
+        {
+            return "insufficient-bytes";
+        }
+
+        if (bytes[0] == 0x48 && bytes[1] == 0x89 && bytes[2] == 0x5C && bytes[3] == 0x24)
+        {
+            return "likely-msvc-prologue";
+        }
+
+        if (bytes[0] == 0x40 && bytes[1] == 0x53)
+        {
+            return "likely-msvc-prologue";
+        }
+
+        if (bytes[0] == 0x48 && bytes[1] == 0x83 && bytes[2] == 0xEC)
+        {
+            return "likely-stack-prologue";
+        }
+
+        if (bytes[0] == 0xE9 || bytes[0] == 0xE8)
+        {
+            return "branch-or-call";
+        }
+
+        if (bytes[0] == 0xCC || bytes[0] == 0xC3)
+        {
+            return "unlikely-function-start";
+        }
+
+        return "unknown";
     }
 
     private static bool IsE8Callsite(ReadOnlySpan<byte> bytes, int offset)
@@ -368,9 +410,110 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         return value >= start && value < end;
     }
 
+    private static TitleBackgroundCandidateDiagnostics BuildCandidateDiagnostics(nint candidate)
+    {
+        if (candidate == nint.Zero)
+        {
+            return TitleBackgroundCandidateDiagnostics.Unavailable;
+        }
+
+        if (!TryReadBytes(candidate, CandidatePreviewBytes, out var bytes))
+        {
+            return new TitleBackgroundCandidateDiagnostics(false, "unreadable", string.Empty, "unreadable");
+        }
+
+        return new TitleBackgroundCandidateDiagnostics(
+            true,
+            ClassifyFunctionPrologue(bytes),
+            Convert.ToHexString(bytes),
+            "candidate bytes only; not treated as a verified hook target");
+    }
+
+    private static bool TryReadBytes(nint address, int length, out byte[] bytes)
+    {
+        bytes = [];
+        if (length <= 0 || !IsReadableExecutableMemory(address, length))
+        {
+            return false;
+        }
+
+        bytes = new byte[length];
+        Marshal.Copy(address, bytes, 0, length);
+        return true;
+    }
+
+    private static bool IsReadableExecutableMemory(nint address, int length)
+    {
+        if (address == nint.Zero || length <= 0)
+        {
+            return false;
+        }
+
+        if (VirtualQuery(address, out var info, (nuint)Marshal.SizeOf<MemoryBasicInformation>()) == 0)
+        {
+            return false;
+        }
+
+        var start = address.ToInt64();
+        var regionStart = info.BaseAddress.ToInt64();
+        var regionEnd = checked(regionStart + (long)info.RegionSize);
+        return info.State == MemoryState.Commit
+            && start >= regionStart
+            && checked(start + length) <= regionEnd
+            && IsReadableProtection(info.Protect);
+    }
+
+    private static bool IsReadableProtection(MemoryProtection protect)
+    {
+        var normalized = protect & ~(MemoryProtection.Guard | MemoryProtection.NoCache | MemoryProtection.WriteCombine);
+        return normalized is MemoryProtection.ReadOnly
+            or MemoryProtection.ReadWrite
+            or MemoryProtection.WriteCopy
+            or MemoryProtection.ExecuteRead
+            or MemoryProtection.ExecuteReadWrite
+            or MemoryProtection.ExecuteWriteCopy;
+    }
+
     private static string NormalizeSignature(string? signature)
     {
         return (signature ?? string.Empty).Trim();
+    }
+
+    [DllImport("kernel32.dll", SetLastError = false)]
+    private static extern nuint VirtualQuery(nint lpAddress, out MemoryBasicInformation lpBuffer, nuint dwLength);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct MemoryBasicInformation
+    {
+        public readonly nint BaseAddress;
+        public readonly nint AllocationBase;
+        public readonly MemoryProtection AllocationProtect;
+        public readonly ushort PartitionId;
+        public readonly nuint RegionSize;
+        public readonly MemoryState State;
+        public readonly MemoryProtection Protect;
+        public readonly uint Type;
+    }
+
+    private enum MemoryState : uint
+    {
+        Commit = 0x1000,
+    }
+
+    [Flags]
+    private enum MemoryProtection : uint
+    {
+        NoAccess = 0x01,
+        ReadOnly = 0x02,
+        ReadWrite = 0x04,
+        WriteCopy = 0x08,
+        Execute = 0x10,
+        ExecuteRead = 0x20,
+        ExecuteReadWrite = 0x40,
+        ExecuteWriteCopy = 0x80,
+        Guard = 0x100,
+        NoCache = 0x200,
+        WriteCombine = 0x400,
     }
 }
 
@@ -387,4 +530,14 @@ internal sealed record TitleBackgroundSignatureScanResult(
     bool AddressWithinText,
     bool TargetWithinText,
     bool HookTargetWithinText,
-    string SafetyNote);
+    string SafetyNote,
+    TitleBackgroundCandidateDiagnostics CandidateDiagnostics);
+
+internal sealed record TitleBackgroundCandidateDiagnostics(
+    bool Readable,
+    string PrologueHint,
+    string FirstBytesHex,
+    string Note)
+{
+    public static readonly TitleBackgroundCandidateDiagnostics Unavailable = new(false, "unavailable", string.Empty, "unavailable");
+}
