@@ -86,7 +86,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             return;
         }
 
-        if (!ValidateCurrentConfiguration(out var errorMessage))
+        if (ShouldValidateSceneOverrideConfiguration() && !ValidateCurrentConfiguration(out var errorMessage))
         {
             DisposeHooks();
             _state = TitleBackgroundServiceState.InvalidConfiguration;
@@ -150,7 +150,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         var sceneHooksReady = AreSceneHooksReady();
         var cameraHookReady = AreCameraHookReady();
-        var hooksReady = sceneHooksReady && (!_configuration.TitleBackgroundCameraOverrideEnabled || cameraHookReady);
+        var shouldCreateCameraHook = TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(
+            _configuration.TitleBackgroundRuntimeMode,
+            _configuration.TitleBackgroundOverrideEnabled,
+            _configuration.TitleBackgroundCameraOverrideEnabled);
+        var hooksReady = sceneHooksReady && (!shouldCreateCameraHook || cameraHookReady);
         var hooksEnabled = IsHookEnabled(_createSceneHook)
             || IsHookEnabled(_lobbyUpdateHook)
             || IsHookEnabled(_loadLobbySceneHook)
@@ -158,6 +162,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var lines = new List<string>
         {
             $"runtimeMode={_configuration.TitleBackgroundRuntimeMode}",
+            $"probeMode={IsHookProbeMode()}",
+            $"probeMutatesScene=False",
+            $"probeWritesCurrentMap=False",
+            $"probeEnablesCameraHook=False",
             $"hooksReady={hooksReady}",
             $"sceneHooksReady={sceneHooksReady}",
             $"cameraHookReady={cameraHookReady}",
@@ -168,6 +176,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"hooksEnabled={hooksEnabled}",
             "",
             BuildAddressLine("CreateScene.configured", _configuration.TitleBackgroundCreateSceneSignature),
+            $"CreateScene.resolverMode={_configuration.TitleBackgroundCreateSceneResolverMode}",
             $"CreateScene.match={FormatAddress(_addressResolver.CreateSceneMatch)}",
             $"CreateScene.resolvedCandidate={FormatAddress(GetResolvedCandidate("CreateScene"))}",
             $"CreateScene.hookTarget={FormatAddress(_addressResolver.CreateScene)}",
@@ -179,6 +188,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"CreateScene.targetWithinText={GetTargetWithinText("CreateScene")}",
             "",
             BuildAddressLine("LobbyUpdate.configured", _configuration.TitleBackgroundLobbyUpdateSignature),
+            $"LobbyUpdate.resolverMode={_configuration.TitleBackgroundLobbyUpdateResolverMode}",
             $"LobbyUpdate.match={FormatAddress(_addressResolver.LobbyUpdateMatch)}",
             $"LobbyUpdate.resolvedCandidate={FormatAddress(GetResolvedCandidate("LobbyUpdate"))}",
             $"LobbyUpdate.hookTarget={FormatAddress(_addressResolver.LobbyUpdate)}",
@@ -343,6 +353,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _lastObservedCreateScenePath = originalPath;
             _log.Debug("[XMU BG] CreateScene lobbyType={LobbyType}, path={Path}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", lobbyType, originalPath, territoryId, layerFilterKey);
 
+            if (IsHookProbeMode())
+            {
+                return _createSceneHook?.Original(territoryPath, territoryId, p3, layerFilterKey, festivals, p6, contentFinderConditionId) ?? 0;
+            }
+
             if (ShouldOverrideCharaSelect(lobbyType))
             {
                 LayoutWorld.UnloadPrefetchLayout();
@@ -389,6 +404,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         try
         {
+            if (IsHookProbeMode())
+            {
+                return _lobbyUpdateHook?.Original(mapId, time) ?? 0;
+            }
+
             if (ShouldResetCurrentMapForReload(mapId))
             {
                 _currentMapWriteAttempted = true;
@@ -457,6 +477,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private bool ShouldResetCurrentMapForReload(GameLobbyType nextMap)
     {
         return _state == TitleBackgroundServiceState.Ready
+            && !IsHookProbeMode()
             && _configuration.TitleBackgroundOverrideEnabled
             && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
             && TryReadCurrentLobbyMap(out var currentMap)
@@ -466,6 +487,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private bool ShouldOverrideCharaSelect(GameLobbyType lobbyType)
     {
         return _state == TitleBackgroundServiceState.Ready
+            && !IsHookProbeMode()
             && _configuration.TitleBackgroundOverrideEnabled
             && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
             && lobbyType == GameLobbyType.CharaSelect
@@ -475,6 +497,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private bool ShouldOverrideCamera()
     {
         return _configuration.TitleBackgroundCameraOverrideEnabled
+            && !IsHookProbeMode()
             && _cameraApplyPending
             && _state == TitleBackgroundServiceState.Ready
             && TryReadCurrentLobbyMap(out var currentMap)
@@ -513,6 +536,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private void NormalizeConfiguration()
     {
         _configuration.TitleBackgroundTerritoryPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(_configuration.TitleBackgroundTerritoryPath);
+        _configuration.TitleBackgroundCreateSceneResolverMode = NormalizeResolverMode(_configuration.TitleBackgroundCreateSceneResolverMode);
+        _configuration.TitleBackgroundLobbyUpdateResolverMode = NormalizeResolverMode(_configuration.TitleBackgroundLobbyUpdateResolverMode);
         _configuration.TitleBackgroundCharacterPositionX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCharacterPositionX);
         _configuration.TitleBackgroundCharacterPositionY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCharacterPositionY);
         _configuration.TitleBackgroundCharacterPositionZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCharacterPositionZ);
@@ -559,6 +584,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private bool AreNativeSceneAddressesReady()
     {
+        if (IsHookProbeMode())
+        {
+            return TitleBackgroundRuntimeModeHelper.AreNativeProbeAddressesReady(
+                _addressResolver.CreateScene != nint.Zero,
+                _addressResolver.LobbyUpdate != nint.Zero,
+                _addressResolver.LoadLobbyScene != nint.Zero);
+        }
+
         return TitleBackgroundRuntimeModeHelper.AreNativeSceneAddressesReady(
             _addressResolver.CreateScene != nint.Zero,
             _addressResolver.LobbyUpdate != nint.Zero,
@@ -571,6 +604,17 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(
             _configuration.TitleBackgroundRuntimeMode,
             _configuration.TitleBackgroundOverrideEnabled);
+    }
+
+    private bool ShouldValidateSceneOverrideConfiguration()
+    {
+        return TitleBackgroundRuntimeModeHelper.ShouldValidateSceneOverrideConfiguration(
+            _configuration.TitleBackgroundRuntimeMode);
+    }
+
+    private bool IsHookProbeMode()
+    {
+        return _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.HookProbe;
     }
 
     private bool IsHookSetAlignedWithConfiguration()
@@ -695,6 +739,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private static string NormalizeSignature(string? signature)
     {
         return (signature ?? string.Empty).Trim();
+    }
+
+    private static TitleBackgroundResolverMode NormalizeResolverMode(TitleBackgroundResolverMode mode)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundResolverMode), mode)
+            ? mode
+            : TitleBackgroundResolverMode.AutoDiagnosticOnly;
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]

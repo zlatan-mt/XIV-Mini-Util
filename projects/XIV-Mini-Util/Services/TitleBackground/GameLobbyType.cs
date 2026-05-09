@@ -40,12 +40,19 @@ internal static class TitleBackgroundRuntimeModeHelper
 
     public static bool ShouldCreateSceneHooks(TitleBackgroundRuntimeMode mode, bool overrideEnabled)
     {
-        return overrideEnabled && mode == TitleBackgroundRuntimeMode.CharaSelectOnly;
+        return overrideEnabled && mode is TitleBackgroundRuntimeMode.CharaSelectOnly or TitleBackgroundRuntimeMode.HookProbe;
     }
 
     public static bool ShouldCreateCameraHook(TitleBackgroundRuntimeMode mode, bool overrideEnabled, bool cameraOverrideEnabled)
     {
-        return ShouldCreateSceneHooks(mode, overrideEnabled) && cameraOverrideEnabled;
+        return mode == TitleBackgroundRuntimeMode.CharaSelectOnly
+            && ShouldCreateSceneHooks(mode, overrideEnabled)
+            && cameraOverrideEnabled;
+    }
+
+    public static bool ShouldValidateSceneOverrideConfiguration(TitleBackgroundRuntimeMode mode)
+    {
+        return mode == TitleBackgroundRuntimeMode.CharaSelectOnly;
     }
 
     public static bool AreSceneHooksReady(bool createSceneReady, bool lobbyUpdateReady, bool loadLobbySceneReady)
@@ -56,6 +63,11 @@ internal static class TitleBackgroundRuntimeModeHelper
     public static bool AreNativeSceneAddressesReady(bool createSceneReady, bool lobbyUpdateReady, bool loadLobbySceneReady, bool currentMapReady)
     {
         return createSceneReady && lobbyUpdateReady && loadLobbySceneReady && currentMapReady;
+    }
+
+    public static bool AreNativeProbeAddressesReady(bool createSceneReady, bool lobbyUpdateReady, bool loadLobbySceneReady)
+    {
+        return createSceneReady && lobbyUpdateReady && loadLobbySceneReady;
     }
 
     public static bool IsRuntimeModeSelectable(TitleBackgroundRuntimeMode mode)

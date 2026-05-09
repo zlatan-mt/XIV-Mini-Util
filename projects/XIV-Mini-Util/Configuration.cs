@@ -80,6 +80,8 @@ public sealed class Configuration : IPluginConfiguration
     public bool TitleBackgroundOverrideEnabled { get; set; } = false;
     public bool TitleBackgroundCameraOverrideEnabled { get; set; } = false;
     public TitleBackgroundRuntimeMode TitleBackgroundRuntimeMode { get; set; } = TitleBackgroundRuntimeMode.ResolveOnly;
+    public TitleBackgroundResolverMode TitleBackgroundCreateSceneResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
+    public TitleBackgroundResolverMode TitleBackgroundLobbyUpdateResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
     public string TitleBackgroundTerritoryPath { get; set; } = string.Empty;
     public uint TitleBackgroundTerritoryTypeId { get; set; } = 0;
     public uint TitleBackgroundLayoutTerritoryTypeId { get; set; } = 0;
@@ -270,6 +272,8 @@ public sealed class Configuration : IPluginConfiguration
         TitleBackgroundOverrideEnabled = source.TitleBackgroundOverrideEnabled;
         TitleBackgroundCameraOverrideEnabled = source.TitleBackgroundCameraOverrideEnabled;
         TitleBackgroundRuntimeMode = NormalizeTitleBackgroundRuntimeMode(source.TitleBackgroundRuntimeMode);
+        TitleBackgroundCreateSceneResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundCreateSceneResolverMode);
+        TitleBackgroundLobbyUpdateResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundLobbyUpdateResolverMode);
         TitleBackgroundTerritoryPath = NormalizeTitleBackgroundTerritoryPath(source.TitleBackgroundTerritoryPath);
         TitleBackgroundTerritoryTypeId = source.TitleBackgroundTerritoryTypeId;
         TitleBackgroundLayoutTerritoryTypeId = source.TitleBackgroundLayoutTerritoryTypeId;
@@ -529,6 +533,16 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedCreateSceneResolverMode = NormalizeTitleBackgroundResolverMode(TitleBackgroundCreateSceneResolverMode);
+        var normalizedLobbyUpdateResolverMode = NormalizeTitleBackgroundResolverMode(TitleBackgroundLobbyUpdateResolverMode);
+        if (TitleBackgroundCreateSceneResolverMode != normalizedCreateSceneResolverMode
+            || TitleBackgroundLobbyUpdateResolverMode != normalizedLobbyUpdateResolverMode)
+        {
+            TitleBackgroundCreateSceneResolverMode = normalizedCreateSceneResolverMode;
+            TitleBackgroundLobbyUpdateResolverMode = normalizedLobbyUpdateResolverMode;
+            changed = true;
+        }
+
         var normalizedTitleCharacterPositionX = SanitizeCoordinate(TitleBackgroundCharacterPositionX);
         var normalizedTitleCharacterPositionY = SanitizeCoordinate(TitleBackgroundCharacterPositionY);
         var normalizedTitleCharacterPositionZ = SanitizeCoordinate(TitleBackgroundCharacterPositionZ);
@@ -655,6 +669,13 @@ public sealed class Configuration : IPluginConfiguration
         return TitleBackgroundRuntimeModeHelper.IsRuntimeModeSelectable(mode)
             ? mode
             : TitleBackgroundRuntimeMode.CharaSelectOnly;
+    }
+
+    private static TitleBackgroundResolverMode NormalizeTitleBackgroundResolverMode(TitleBackgroundResolverMode mode)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundResolverMode), mode)
+            ? mode
+            : TitleBackgroundResolverMode.AutoDiagnosticOnly;
     }
 
     private static string NormalizeAssetPath(string? path)

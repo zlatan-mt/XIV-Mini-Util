@@ -9,4 +9,5 @@ public enum TitleBackgroundRuntimeMode
     ResolveOnly = 1,
     CharaSelectOnly = 2,
     TitleAndCharaSelect = 3,
+    HookProbe = 4,
 }

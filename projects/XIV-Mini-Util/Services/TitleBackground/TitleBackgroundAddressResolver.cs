@@ -38,11 +38,30 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         LastError = string.Empty;
         _scanResults.Clear();
 
-        var createSceneResolved = TryResolveE8Call(sigScanner, configuration.TitleBackgroundCreateSceneSignature, nameof(CreateScene), out var createSceneMatch, out var createScene);
-        var lobbyUpdateResolved = TryResolveE8Call(sigScanner, configuration.TitleBackgroundLobbyUpdateSignature, nameof(LobbyUpdate), out var lobbyUpdateMatch, out var lobbyUpdate);
+        var allowDirectTextProbeTargets = configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.HookProbe;
+        var createSceneResolved = TryResolveE8Call(
+            sigScanner,
+            configuration.TitleBackgroundCreateSceneSignature,
+            nameof(CreateScene),
+            configuration.TitleBackgroundCreateSceneResolverMode,
+            allowDirectTextProbeTargets,
+            out var createSceneMatch,
+            out var createScene);
+        var lobbyUpdateResolved = TryResolveE8Call(
+            sigScanner,
+            configuration.TitleBackgroundLobbyUpdateSignature,
+            nameof(LobbyUpdate),
+            configuration.TitleBackgroundLobbyUpdateResolverMode,
+            allowDirectTextProbeTargets,
+            out var lobbyUpdateMatch,
+            out var lobbyUpdate);
         var loadLobbySceneResolved = TryResolveText(sigScanner, configuration.TitleBackgroundLoadLobbySceneSignature, nameof(LoadLobbyScene), out var loadLobbyScene);
         var currentMapResolved = TryResolveStatic(sigScanner, configuration.TitleBackgroundLobbyCurrentMapSignature, nameof(LobbyCurrentMap), out var lobbyCurrentMap);
-        var fixOnResolved = TryResolveText(sigScanner, configuration.TitleBackgroundFixOnSignature, "LobbyCameraFixOn", out var fixOn, required: configuration.TitleBackgroundCameraOverrideEnabled);
+        var cameraHookRequired = TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(
+            configuration.TitleBackgroundRuntimeMode,
+            configuration.TitleBackgroundOverrideEnabled,
+            configuration.TitleBackgroundCameraOverrideEnabled);
+        var fixOnResolved = TryResolveText(sigScanner, configuration.TitleBackgroundFixOnSignature, "LobbyCameraFixOn", out var fixOn, required: cameraHookRequired);
         _ = TryResolveUpdateLobbyUiStage(sigScanner, out var updateLobbyUiStage);
 
         CreateSceneMatch = createSceneMatch;
@@ -53,11 +72,18 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         LobbyCurrentMap = lobbyCurrentMap;
         FixOn = fixOn;
         UpdateLobbyUIStage = updateLobbyUiStage;
+        if (configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.HookProbe)
+        {
+            return createSceneResolved
+                && lobbyUpdateResolved
+                && loadLobbySceneResolved;
+        }
+
         return createSceneResolved
             && lobbyUpdateResolved
             && loadLobbySceneResolved
             && currentMapResolved
-            && (!configuration.TitleBackgroundCameraOverrideEnabled || fixOnResolved);
+            && (!cameraHookRequired || fixOnResolved);
     }
 
     private bool TryResolveText(ISigScanner sigScanner, string signature, string name, out nint address, bool required = true)
@@ -80,7 +106,15 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         return true;
     }
 
-    private bool TryResolveE8Call(ISigScanner sigScanner, string signature, string name, out nint match, out nint hookTarget, bool required = true)
+    private bool TryResolveE8Call(
+        ISigScanner sigScanner,
+        string signature,
+        string name,
+        TitleBackgroundResolverMode resolverMode,
+        bool allowDirectTextProbeTarget,
+        out nint match,
+        out nint hookTarget,
+        bool required = true)
     {
         match = nint.Zero;
         hookTarget = nint.Zero;
@@ -99,6 +133,28 @@ internal sealed unsafe class TitleBackgroundAddressResolver
 
         if (!TryFindE8Callsite(sigScanner, match, out var callsite))
         {
+            if (ShouldPromoteDirectTextCandidateForProbe(match, resolverMode, allowDirectTextProbeTarget))
+            {
+                var candidateDiagnostics = BuildCandidateDiagnostics(match);
+                hookTarget = match;
+                _scanResults.Add(new TitleBackgroundSignatureScanResult(
+                    name,
+                    "TryScanText+ManualDirectTextProbe",
+                    "resolved-probe",
+                    match,
+                    match,
+                    hookTarget,
+                    false,
+                    true,
+                    "ManualDirectTextProbe",
+                    IsWithinText(sigScanner, match),
+                    IsWithinText(sigScanner, match),
+                    IsWithinText(sigScanner, match),
+                    $"{name} manual DirectText probe target is enabled; hook may observe calls but detours must not mutate state.",
+                    candidateDiagnostics));
+                return true;
+            }
+
             var message = ShouldRecordDirectTextCandidate(match)
                 ? $"{name} has a direct TryScanText candidate but no verified hook target; refusing to hook an unverified function offset."
                 : $"{name} match does not contain a nearby E8 callsite.";
@@ -193,7 +249,15 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             return false;
         }
 
-        if (!TryResolveE8Call(sigScanner, signature, "UpdateLobbyUIStage", out _, out address, required: false))
+        if (!TryResolveE8Call(
+            sigScanner,
+            signature,
+            "UpdateLobbyUIStage",
+            TitleBackgroundResolverMode.AutoDiagnosticOnly,
+            allowDirectTextProbeTarget: false,
+            out _,
+            out address,
+            required: false))
         {
             return false;
         }
@@ -318,6 +382,16 @@ internal sealed unsafe class TitleBackgroundAddressResolver
     internal static bool ShouldRecordDirectTextCandidate(nint match)
     {
         return match != nint.Zero;
+    }
+
+    internal static bool ShouldPromoteDirectTextCandidateForProbe(
+        nint match,
+        TitleBackgroundResolverMode resolverMode,
+        bool allowDirectTextProbeTarget)
+    {
+        return match != nint.Zero
+            && allowDirectTextProbeTarget
+            && resolverMode == TitleBackgroundResolverMode.ManualDirectTextProbe;
     }
 
     internal static string ClassifyFunctionPrologue(ReadOnlySpan<byte> bytes)

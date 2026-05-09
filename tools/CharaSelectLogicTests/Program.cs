@@ -282,6 +282,13 @@ Test("title background resolve only does not create hooks", () =>
         && !TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(TitleBackgroundRuntimeMode.ResolveOnly, overrideEnabled: true, cameraOverrideEnabled: true);
 });
 
+Test("title background hook probe creates scene hooks only", () =>
+{
+    return TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(TitleBackgroundRuntimeMode.HookProbe, overrideEnabled: true)
+        && !TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(TitleBackgroundRuntimeMode.HookProbe, overrideEnabled: true, cameraOverrideEnabled: true)
+        && !TitleBackgroundRuntimeModeHelper.ShouldValidateSceneOverrideConfiguration(TitleBackgroundRuntimeMode.HookProbe);
+});
+
 Test("title background chara select scene readiness does not require fix on", () =>
 {
     return TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: true)
@@ -346,6 +353,22 @@ Test("title background direct text candidate requires nonzero match", () =>
 {
     return TitleBackgroundAddressResolver.ShouldRecordDirectTextCandidate(new nint(0x1000))
         && !TitleBackgroundAddressResolver.ShouldRecordDirectTextCandidate(nint.Zero);
+});
+
+Test("title background direct text hook target requires manual probe opt in", () =>
+{
+    return TitleBackgroundAddressResolver.ShouldPromoteDirectTextCandidateForProbe(
+            new nint(0x1000),
+            TitleBackgroundResolverMode.ManualDirectTextProbe,
+            allowDirectTextProbeTarget: true)
+        && !TitleBackgroundAddressResolver.ShouldPromoteDirectTextCandidateForProbe(
+            new nint(0x1000),
+            TitleBackgroundResolverMode.AutoDiagnosticOnly,
+            allowDirectTextProbeTarget: true)
+        && !TitleBackgroundAddressResolver.ShouldPromoteDirectTextCandidateForProbe(
+            new nint(0x1000),
+            TitleBackgroundResolverMode.ManualDirectTextProbe,
+            allowDirectTextProbeTarget: false);
 });
 
 Test("title background prologue hint classifies common msvc prologue", () =>

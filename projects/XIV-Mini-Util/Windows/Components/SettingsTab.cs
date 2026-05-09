@@ -702,6 +702,7 @@ public sealed class SettingsTab : ITabComponent
         ImGui.Text("native signature（上級者向け）");
         ImGui.TextDisabled("signature は場所IDやカットシーンIDではなく、ゲーム実行ファイル内の処理を探すための機械語の目印です。");
         ImGui.TextDisabled("現行clientで独自確認した値だけを入力します。既定では空のままfail-closedします。");
+        DrawTitleBackgroundResolverModeInputs();
         DrawTitleBackgroundSignatureInputs();
 
         if (ImGui.Button("address再解決"))
@@ -752,6 +753,44 @@ public sealed class SettingsTab : ITabComponent
         _configuration.Save();
     }
 
+    private void DrawTitleBackgroundResolverModeInputs()
+    {
+        var createSceneMode = _configuration.TitleBackgroundCreateSceneResolverMode;
+        var lobbyUpdateMode = _configuration.TitleBackgroundLobbyUpdateResolverMode;
+        var changed = DrawTitleBackgroundResolverModeInput("CreateScene", ref createSceneMode);
+        changed |= DrawTitleBackgroundResolverModeInput("LobbyUpdate", ref lobbyUpdateMode);
+
+        if (!changed)
+        {
+            return;
+        }
+
+        _configuration.TitleBackgroundCreateSceneResolverMode = createSceneMode;
+        _configuration.TitleBackgroundLobbyUpdateResolverMode = lobbyUpdateMode;
+        _configuration.Save();
+    }
+
+    private static bool DrawTitleBackgroundResolverModeInput(string label, ref TitleBackgroundResolverMode mode)
+    {
+        if (!ImGui.BeginCombo($"{label} resolver##TitleBackground{label}ResolverMode", GetTitleBackgroundResolverModeLabel(mode)))
+        {
+            return false;
+        }
+
+        var changed = false;
+        foreach (TitleBackgroundResolverMode candidate in Enum.GetValues(typeof(TitleBackgroundResolverMode)))
+        {
+            if (ImGui.Selectable(GetTitleBackgroundResolverModeLabel(candidate), mode == candidate))
+            {
+                mode = candidate;
+                changed = true;
+            }
+        }
+
+        ImGui.EndCombo();
+        return changed;
+    }
+
     private static bool DrawTitleBackgroundSignatureInput(string label, ref string signature)
     {
         return ImGui.InputTextWithHint($"{label}##TitleBackground{label}Signature", "xx xx ?? ...", ref signature, 512);
@@ -772,8 +811,19 @@ public sealed class SettingsTab : ITabComponent
         {
             TitleBackgroundRuntimeMode.ResolveOnly => "address解決のみ",
             TitleBackgroundRuntimeMode.Disabled => "無効",
+            TitleBackgroundRuntimeMode.HookProbe => "hook probe（変更なし）",
             TitleBackgroundRuntimeMode.CharaSelectOnly => "キャラ選択のみ",
             TitleBackgroundRuntimeMode.TitleAndCharaSelect => "タイトル+キャラ選択",
+            _ => mode.ToString(),
+        };
+    }
+
+    private static string GetTitleBackgroundResolverModeLabel(TitleBackgroundResolverMode mode)
+    {
+        return mode switch
+        {
+            TitleBackgroundResolverMode.AutoDiagnosticOnly => "自動診断のみ",
+            TitleBackgroundResolverMode.ManualDirectTextProbe => "手動DirectText probe",
             _ => mode.ToString(),
         };
     }
@@ -805,6 +855,9 @@ public sealed class SettingsTab : ITabComponent
     {
         _configuration.TitleBackgroundOverrideEnabled = false;
         _configuration.TitleBackgroundCameraOverrideEnabled = false;
+        _configuration.TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.ResolveOnly;
+        _configuration.TitleBackgroundCreateSceneResolverMode = TitleBackgroundResolverMode.AutoDiagnosticOnly;
+        _configuration.TitleBackgroundLobbyUpdateResolverMode = TitleBackgroundResolverMode.AutoDiagnosticOnly;
         _configuration.TitleBackgroundTerritoryPath = string.Empty;
         _configuration.TitleBackgroundTerritoryTypeId = 0;
         _configuration.TitleBackgroundLayoutTerritoryTypeId = 0;
