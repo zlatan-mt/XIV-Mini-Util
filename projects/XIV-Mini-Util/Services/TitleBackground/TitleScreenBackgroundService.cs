@@ -170,13 +170,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             BuildAddressLine("CreateScene.configured", _configuration.TitleBackgroundCreateSceneSignature),
             $"CreateScene.match={FormatAddress(_addressResolver.CreateSceneMatch)}",
             $"CreateScene.resolvedTarget={FormatAddress(_addressResolver.CreateScene)}",
-            "CreateScene.method=TryScanText+NearbyE8Rel32",
+            $"CreateScene.method={GetResolveMethod("CreateScene", "TryScanText+NearbyE8Rel32")}",
             $"CreateScene.targetWithinText={GetTargetWithinText("CreateScene")}",
             "",
             BuildAddressLine("LobbyUpdate.configured", _configuration.TitleBackgroundLobbyUpdateSignature),
             $"LobbyUpdate.match={FormatAddress(_addressResolver.LobbyUpdateMatch)}",
             $"LobbyUpdate.resolvedTarget={FormatAddress(_addressResolver.LobbyUpdate)}",
-            "LobbyUpdate.method=TryScanText+NearbyE8Rel32",
+            $"LobbyUpdate.method={GetResolveMethod("LobbyUpdate", "TryScanText+NearbyE8Rel32")}",
             $"LobbyUpdate.targetWithinText={GetTargetWithinText("LobbyUpdate")}",
             "",
             BuildAddressLine("LoadLobbyScene.configured", _configuration.TitleBackgroundLoadLobbySceneSignature),
@@ -609,6 +609,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private string GetTargetWithinText(string name)
     {
         return FindResult(name)?.TargetWithinText.ToString() ?? "False";
+    }
+
+    private string GetResolveMethod(string name, string fallback)
+    {
+        return FindResult(name)?.Method ?? fallback;
     }
 
     private string ReadCurrentLobbyMapRawText()

@@ -97,6 +97,23 @@ internal sealed unsafe class TitleBackgroundAddressResolver
 
         if (!TryFindE8Callsite(sigScanner, match, out var callsite))
         {
+            if (ShouldUseDirectTextFallback(match))
+            {
+                var matchWithinText = IsWithinText(sigScanner, match);
+                target = match;
+                _scanResults.Add(new TitleBackgroundSignatureScanResult(
+                    name,
+                    "TryScanText+DirectTextFallback",
+                    "resolved-direct",
+                    match,
+                    target,
+                    false,
+                    matchWithinText,
+                    matchWithinText,
+                    $"{name} match did not contain a nearby E8 callsite; using TryScanText match as direct target."));
+                return true;
+            }
+
             RecordFailure(name, "TryScanText+NearbyE8Rel32", "invalid-callsite", $"{name} match does not contain a nearby E8 callsite.", required);
             return false;
         }
@@ -218,6 +235,11 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         return false;
     }
 
+    internal static bool ShouldUseDirectTextFallback(nint match)
+    {
+        return match != nint.Zero;
+    }
+
     private static bool IsE8Callsite(ReadOnlySpan<byte> bytes, int offset)
     {
         return offset >= 0
@@ -228,11 +250,6 @@ internal sealed unsafe class TitleBackgroundAddressResolver
     private bool TryFindE8Callsite(ISigScanner sigScanner, nint match, out nint callsite)
     {
         callsite = nint.Zero;
-        if (!IsWithinText(sigScanner, match))
-        {
-            return false;
-        }
-
         if (IsSafeE8Read(sigScanner, match) && *(byte*)match == 0xE8)
         {
             callsite = match;

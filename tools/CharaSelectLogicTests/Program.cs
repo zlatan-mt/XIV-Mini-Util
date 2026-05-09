@@ -342,6 +342,12 @@ Test("title background e8 callsite resolver rejects window without callsite", ()
         && callsiteOffset == -1;
 });
 
+Test("title background direct text fallback requires nonzero match", () =>
+{
+    return TitleBackgroundAddressResolver.ShouldUseDirectTextFallback(new nint(0x1000))
+        && !TitleBackgroundAddressResolver.ShouldUseDirectTextFallback(nint.Zero);
+});
+
 if (failures.Count > 0)
 {
     foreach (var failure in failures)
