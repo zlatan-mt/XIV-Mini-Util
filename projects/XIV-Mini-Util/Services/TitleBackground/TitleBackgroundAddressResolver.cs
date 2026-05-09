@@ -74,14 +74,14 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             return false;
         }
 
-        RecordSuccess(name, "TryScanText", address, address, IsWithinText(sigScanner, address), string.Empty);
+        RecordSuccess(name, "TryScanText", address, address, true, IsWithinText(sigScanner, address), "TryScanTextDirect", "direct signature is configured as hook target");
         return true;
     }
 
-    private bool TryResolveE8Call(ISigScanner sigScanner, string signature, string name, out nint match, out nint target, bool required = true)
+    private bool TryResolveE8Call(ISigScanner sigScanner, string signature, string name, out nint match, out nint hookTarget, bool required = true)
     {
         match = nint.Zero;
-        target = nint.Zero;
+        hookTarget = nint.Zero;
         signature = NormalizeSignature(signature);
         if (string.IsNullOrWhiteSpace(signature))
         {
@@ -97,42 +97,66 @@ internal sealed unsafe class TitleBackgroundAddressResolver
 
         if (!TryFindE8Callsite(sigScanner, match, out var callsite))
         {
-            if (ShouldUseDirectTextFallback(match))
-            {
-                var matchWithinText = IsWithinText(sigScanner, match);
-                target = match;
-                _scanResults.Add(new TitleBackgroundSignatureScanResult(
-                    name,
-                    "TryScanText+DirectTextFallback",
-                    "resolved-direct",
-                    match,
-                    target,
-                    false,
-                    matchWithinText,
-                    matchWithinText,
-                    $"{name} match did not contain a nearby E8 callsite; using TryScanText match as direct target."));
-                return true;
-            }
-
-            RecordFailure(name, "TryScanText+NearbyE8Rel32", "invalid-callsite", $"{name} match does not contain a nearby E8 callsite.", required);
+            var message = ShouldRecordDirectTextCandidate(match)
+                ? $"{name} has a direct TryScanText candidate but no verified hook target; refusing to hook an unverified function offset."
+                : $"{name} match does not contain a nearby E8 callsite.";
+            RecordCandidateOnly(
+                sigScanner,
+                name,
+                "TryScanText+DirectTextCandidate",
+                "candidate-unverified",
+                match,
+                "TryScanTextDirectCandidate",
+                message,
+                required);
             return false;
         }
 
         var rel32 = *(int*)(callsite + 1);
-        _ = TryResolveE8CallTarget(*(byte*)callsite, callsite, rel32, out target);
-        var targetWithinText = IsWithinText(sigScanner, target);
-        var status = targetWithinText ? "resolved" : "target-outside-text";
-        var message = targetWithinText ? string.Empty : $"{name} E8 target is outside module text.";
-        _scanResults.Add(new TitleBackgroundSignatureScanResult(name, "TryScanText+NearbyE8Rel32", status, callsite, target, true, IsWithinText(sigScanner, callsite), targetWithinText, message));
-        if (!targetWithinText)
+        if (!TryResolveE8CallTarget(*(byte*)callsite, callsite, rel32, out hookTarget) || hookTarget == nint.Zero)
         {
+            var message = $"{name} E8 callsite could not be decoded.";
             if (required)
             {
                 LastError = string.IsNullOrWhiteSpace(LastError) ? message : LastError;
             }
+
+            _scanResults.Add(new TitleBackgroundSignatureScanResult(
+                name,
+                "TryScanText+NearbyE8Rel32",
+                "invalid-callsite",
+                callsite,
+                callsite,
+                nint.Zero,
+                false,
+                false,
+                "E8Rel32",
+                IsWithinText(sigScanner, callsite),
+                false,
+                false,
+                message));
+            return false;
         }
 
-        return targetWithinText;
+        var targetWithinText = IsWithinText(sigScanner, hookTarget);
+        var safetyNote = targetWithinText
+            ? "verified E8 rel32 hook target"
+            : "verified E8 rel32 hook target; text section check is informational in this runtime";
+        _scanResults.Add(new TitleBackgroundSignatureScanResult(
+            name,
+            "TryScanText+NearbyE8Rel32",
+            "resolved",
+            callsite,
+            hookTarget,
+            hookTarget,
+            true,
+            true,
+            "E8Rel32",
+            IsWithinText(sigScanner, callsite),
+            targetWithinText,
+            true,
+            safetyNote));
+        return true;
     }
 
     private bool TryResolveStatic(ISigScanner sigScanner, string signature, string name, out nint address)
@@ -151,7 +175,7 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             return false;
         }
 
-        RecordSuccess(name, "TryGetStaticAddressFromSig", address, address, true, string.Empty);
+        RecordSuccess(name, "TryGetStaticAddressFromSig", address, address, true, true, "StaticAddressFromSig", "static address resolved from signature");
         return true;
     }
 
@@ -173,9 +197,45 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         return true;
     }
 
-    private void RecordSuccess(string name, string method, nint address, nint target, bool targetWithinText, string message)
+    private void RecordSuccess(string name, string method, nint address, nint hookTarget, bool hookTargetVerified, bool targetWithinText, string addressSource, string safetyNote)
     {
-        _scanResults.Add(new TitleBackgroundSignatureScanResult(name, method, "resolved", address, target, false, true, targetWithinText, message));
+        _scanResults.Add(new TitleBackgroundSignatureScanResult(
+            name,
+            method,
+            "resolved",
+            address,
+            hookTarget,
+            hookTarget,
+            false,
+            hookTargetVerified,
+            addressSource,
+            true,
+            targetWithinText,
+            hookTargetVerified,
+            safetyNote));
+    }
+
+    private void RecordCandidateOnly(ISigScanner sigScanner, string name, string method, string status, nint candidate, string addressSource, string message, bool required)
+    {
+        if (required)
+        {
+            LastError = string.IsNullOrWhiteSpace(LastError) ? message : LastError;
+        }
+
+        _scanResults.Add(new TitleBackgroundSignatureScanResult(
+            name,
+            method,
+            status,
+            candidate,
+            candidate,
+            nint.Zero,
+            false,
+            false,
+            addressSource,
+            IsWithinText(sigScanner, candidate),
+            IsWithinText(sigScanner, candidate),
+            false,
+            message));
     }
 
     private void RecordFailure(string name, string method, string status, string message, bool required = true)
@@ -185,7 +245,20 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             LastError = string.IsNullOrWhiteSpace(LastError) ? message : LastError;
         }
 
-        _scanResults.Add(new TitleBackgroundSignatureScanResult(name, method, status, nint.Zero, nint.Zero, false, false, false, message));
+        _scanResults.Add(new TitleBackgroundSignatureScanResult(
+            name,
+            method,
+            status,
+            nint.Zero,
+            nint.Zero,
+            nint.Zero,
+            false,
+            false,
+            "none",
+            false,
+            false,
+            false,
+            message));
     }
 
     internal static bool TryResolveE8CallTarget(byte firstByte, nint match, int rel32, out nint target)
@@ -235,7 +308,7 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         return false;
     }
 
-    internal static bool ShouldUseDirectTextFallback(nint match)
+    internal static bool ShouldRecordDirectTextCandidate(nint match)
     {
         return match != nint.Zero;
     }
@@ -306,8 +379,12 @@ internal sealed record TitleBackgroundSignatureScanResult(
     string Method,
     string Status,
     nint Address,
-    nint ResolvedTarget,
+    nint ResolvedCandidate,
+    nint HookTarget,
     bool IsE8Callsite,
+    bool HookTargetVerified,
+    string AddressSource,
     bool AddressWithinText,
     bool TargetWithinText,
-    string Message);
+    bool HookTargetWithinText,
+    string SafetyNote);
