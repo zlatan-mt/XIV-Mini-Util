@@ -14,6 +14,7 @@ using XivMiniUtil.Services.CharaSelect;
 using XivMiniUtil.Services.Checklist;
 using XivMiniUtil.Services.Notification;
 using XivMiniUtil.Services.Shop;
+using XivMiniUtil.Services.TitleBackground;
 
 namespace XivMiniUtil.Windows.Components;
 
@@ -27,6 +28,7 @@ public sealed class SettingsTab : ITabComponent
     private readonly ChecklistService _checklistService;
     private readonly DutyReadyNotificationService _dutyReadyNotificationService;
     private readonly CharaSelectService _charaSelectService;
+    private readonly TitleScreenBackgroundService _titleScreenBackgroundService;
     private readonly bool _materiaFeatureEnabled;
     private readonly bool _desynthFeatureEnabled;
 
@@ -53,6 +55,7 @@ public sealed class SettingsTab : ITabComponent
         ChecklistService checklistService,
         DutyReadyNotificationService dutyReadyNotificationService,
         CharaSelectService charaSelectService,
+        TitleScreenBackgroundService titleScreenBackgroundService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
     {
@@ -64,6 +67,7 @@ public sealed class SettingsTab : ITabComponent
         _checklistService = checklistService;
         _dutyReadyNotificationService = dutyReadyNotificationService;
         _charaSelectService = charaSelectService;
+        _titleScreenBackgroundService = titleScreenBackgroundService;
         _materiaFeatureEnabled = materiaFeatureEnabled;
         _desynthFeatureEnabled = desynthFeatureEnabled;
     }
@@ -102,7 +106,7 @@ public sealed class SettingsTab : ITabComponent
             "Shop Search",
             "Checklist",
             "シャキ通知",
-            "Login / Character Select",
+            "Login / Title Background",
             "Submarines",
         };
 
@@ -366,7 +370,7 @@ public sealed class SettingsTab : ITabComponent
 
     private void DrawCharaSelectSettings()
     {
-        ImGui.Text("ログイン / キャラ選択");
+        ImGui.Text("ログイン / タイトル背景");
         ImGui.Separator();
 
         var emoteEnabled = _configuration.CharaSelectEmoteEnabled;
@@ -449,54 +453,57 @@ public sealed class SettingsTab : ITabComponent
         ImGui.Spacing();
         ImGui.Separator();
 
+        ImGui.Text("ログイン先エリア preload / 診断");
+
         var preloadEnabled = _configuration.CharaSelectPreloadTerritoryEnabled;
         if (ImGui.Checkbox("ログイン待機中にログイン先エリアを事前読み込みする", ref preloadEnabled))
         {
             _charaSelectService.SetPreloadTerritoryEnabled(preloadEnabled);
         }
 
-        ImGui.TextDisabled("注意: 背景画像の任意差し替えではなく、ログイン先テリトリーのLayout事前ロードです。");
+        ImGui.TextDisabled("これは背景画像の任意差し替えではなく、ログイン先テリトリーのLayout事前ロードです。");
+        ImGui.TextDisabled("タイトル背景の差し替えは下の「タイトル背景」設定に分離します。");
 
         ImGui.Spacing();
 
         var overrideEnabled = _configuration.CharaSelectOverrideTerritoryEnabled;
-        if (ImGui.Checkbox("キャラ選択画面に表示するエリアを固定する（実験）", ref overrideEnabled))
+        if (ImGui.Checkbox("ログイン先エリア診断でTerritoryTypeIdを固定する（実験）", ref overrideEnabled))
         {
             _charaSelectService.SetOverrideTerritoryEnabled(overrideEnabled);
         }
 
         var overrideTerritoryId = (int)_configuration.CharaSelectOverrideTerritoryTypeId;
         ImGui.SetNextItemWidth(120f);
-        if (ImGui.InputInt("TerritoryTypeId", ref overrideTerritoryId))
+        if (ImGui.InputInt("診断 TerritoryTypeId", ref overrideTerritoryId))
         {
             overrideTerritoryId = Math.Clamp(overrideTerritoryId, 0, ushort.MaxValue);
             _charaSelectService.SetOverrideTerritoryTypeId((ushort)overrideTerritoryId);
         }
 
-        ImGui.Text($"固定エリア: {_charaSelectService.GetOverrideTerritoryDisplayName()}");
+        ImGui.Text($"診断固定エリア: {_charaSelectService.GetOverrideTerritoryDisplayName()}");
         ImGui.Text($"現在のログイン先: {_charaSelectService.GetCurrentLoginTerritoryDisplayName()}");
-        ImGui.Text($"ログイン背景position: {_charaSelectService.GetLoginPositionDisplayName()}");
+        ImGui.Text($"ログイン位置診断: {_charaSelectService.GetLoginPositionDisplayName()}");
 
-        if (ImGui.Button("現在のログイン先を使う"))
+        if (ImGui.Button("現在のログイン先を診断値に使う"))
         {
             _charaSelectService.UseCurrentLoginTerritoryForOverride();
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("読み込み"))
+        if (ImGui.Button("診断読み込み"))
         {
             _charaSelectService.SetOverrideTerritoryTypeId((ushort)overrideTerritoryId);
             _charaSelectService.SetOverrideTerritoryEnabled(overrideTerritoryId != 0);
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("固定解除"))
+        if (ImGui.Button("診断解除"))
         {
             _charaSelectService.ClearOverrideTerritory();
         }
 
         var overridePositionEnabled = _configuration.CharaSelectOverridePositionEnabled;
-        if (ImGui.Checkbox("表示地点を指定する（X/Y/Z）", ref overridePositionEnabled))
+        if (ImGui.Checkbox("ログイン位置診断で地点を指定する（X/Y/Z）", ref overridePositionEnabled))
         {
             _charaSelectService.SetOverridePositionEnabled(overridePositionEnabled);
         }
@@ -518,14 +525,14 @@ public sealed class SettingsTab : ITabComponent
             _charaSelectService.SetOverridePosition(overrideX, overrideY, overrideZ);
         }
 
-        ImGui.Text($"指定地点: {_charaSelectService.GetOverridePositionDisplayName()}");
-        if (ImGui.Button("現在位置を使う"))
+        ImGui.Text($"診断地点: {_charaSelectService.GetOverridePositionDisplayName()}");
+        if (ImGui.Button("現在位置を診断値に使う"))
         {
             _charaSelectService.UseCurrentPlayerPositionForOverride();
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("地点解除"))
+        if (ImGui.Button("診断地点解除"))
         {
             _charaSelectService.SetOverridePositionEnabled(false);
         }
@@ -540,6 +547,281 @@ public sealed class SettingsTab : ITabComponent
 
         ImGui.Text($"最後に記録したDC: {(_configuration.CharaSelectLastDataCenterName.Length == 0 ? "なし" : _configuration.CharaSelectLastDataCenterName)}");
         ImGui.TextDisabled("DataCenter表示の置換は対象addon確認後に有効化します。");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        DrawTitleBackgroundSettings();
+    }
+
+    private void DrawTitleBackgroundSettings()
+    {
+        ImGui.Text("キャラクター選択画面背景");
+        ImGui.TextDisabled("キャラ選択画面の scene load 時だけ preset 背景へ差し替えます。emote / pet / queue preload とは別機能です。");
+
+        var enabled = _configuration.TitleBackgroundOverrideEnabled;
+        if (ImGui.Checkbox("キャラ選択画面背景を差し替える（実験）", ref enabled))
+        {
+            _titleScreenBackgroundService.SetEnabled(enabled);
+        }
+
+        var runtimeMode = _configuration.TitleBackgroundRuntimeMode;
+        if (ImGui.BeginCombo("実行モード##TitleBackgroundRuntimeMode", GetTitleBackgroundRuntimeModeLabel(runtimeMode)))
+        {
+            foreach (TitleBackgroundRuntimeMode mode in Enum.GetValues(typeof(TitleBackgroundRuntimeMode)))
+            {
+                if (ImGui.Selectable(GetTitleBackgroundRuntimeModeLabel(mode), runtimeMode == mode))
+                {
+                    _configuration.TitleBackgroundRuntimeMode = mode;
+                    _configuration.Save();
+                    _titleScreenBackgroundService.ReloadNativeIntegration();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        var territoryPath = _configuration.TitleBackgroundTerritoryPath;
+        if (ImGui.InputTextWithHint("TerritoryPath##TitleBackgroundTerritoryPath", "ffxiv/.../level/...", ref territoryPath, 256))
+        {
+            _configuration.TitleBackgroundTerritoryPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(territoryPath);
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        var territoryTypeId = (int)_configuration.TitleBackgroundTerritoryTypeId;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("TerritoryTypeId##TitleBackgroundTerritoryTypeId", ref territoryTypeId))
+        {
+            _configuration.TitleBackgroundTerritoryTypeId = (uint)Math.Clamp(territoryTypeId, 0, int.MaxValue);
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        var layoutTerritoryTypeId = (int)_configuration.TitleBackgroundLayoutTerritoryTypeId;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("LayoutTerritoryTypeId##TitleBackgroundLayoutTerritoryTypeId", ref layoutTerritoryTypeId))
+        {
+            _configuration.TitleBackgroundLayoutTerritoryTypeId = (uint)Math.Clamp(layoutTerritoryTypeId, 0, int.MaxValue);
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        var layerFilterKey = (int)_configuration.TitleBackgroundLayoutLayerFilterKey;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("LayoutLayerFilterKey##TitleBackgroundLayoutLayerFilterKey", ref layerFilterKey))
+        {
+            _configuration.TitleBackgroundLayoutLayerFilterKey = (uint)Math.Clamp(layerFilterKey, 0, int.MaxValue);
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        var characterX = _configuration.TitleBackgroundCharacterPositionX;
+        var characterY = _configuration.TitleBackgroundCharacterPositionY;
+        var characterZ = _configuration.TitleBackgroundCharacterPositionZ;
+        if (DrawTitleBackgroundVectorInput("Character", ref characterX, ref characterY, ref characterZ))
+        {
+            _configuration.TitleBackgroundCharacterPositionX = characterX;
+            _configuration.TitleBackgroundCharacterPositionY = characterY;
+            _configuration.TitleBackgroundCharacterPositionZ = characterZ;
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        var cameraX = _configuration.TitleBackgroundCameraX;
+        var cameraY = _configuration.TitleBackgroundCameraY;
+        var cameraZ = _configuration.TitleBackgroundCameraZ;
+        if (DrawTitleBackgroundVectorInput("Camera", ref cameraX, ref cameraY, ref cameraZ))
+        {
+            _configuration.TitleBackgroundCameraX = cameraX;
+            _configuration.TitleBackgroundCameraY = cameraY;
+            _configuration.TitleBackgroundCameraZ = cameraZ;
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        var fovY = _configuration.TitleBackgroundFovY;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputFloat("FOV Y##TitleBackgroundFovY", ref fovY, 1f, 5f, "%.2f"))
+        {
+            _configuration.TitleBackgroundFovY = TitleBackgroundPreset.ClampFovY(fovY);
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        if (ImGui.Button("適用"))
+        {
+            _configuration.TitleBackgroundTerritoryPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(_configuration.TitleBackgroundTerritoryPath);
+            _configuration.TitleBackgroundCharacterPositionX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCharacterPositionX);
+            _configuration.TitleBackgroundCharacterPositionY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCharacterPositionY);
+            _configuration.TitleBackgroundCharacterPositionZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCharacterPositionZ);
+            _configuration.TitleBackgroundCameraX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraX);
+            _configuration.TitleBackgroundCameraY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraY);
+            _configuration.TitleBackgroundCameraZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraZ);
+            _configuration.TitleBackgroundFovY = TitleBackgroundPreset.ClampFovY(_configuration.TitleBackgroundFovY);
+            NormalizeTitleBackgroundSignatures();
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("解除"))
+        {
+            _titleScreenBackgroundService.ClearOverride();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("入力をクリア"))
+        {
+            ClearTitleBackgroundInputs();
+        }
+
+        var statusText = _titleScreenBackgroundService.GetStatusText();
+        var statusIsError = statusText.Contains("失敗", StringComparison.Ordinal)
+            || statusText.Contains("エラー", StringComparison.Ordinal)
+            || statusText.Contains("見つかりません", StringComparison.Ordinal)
+            || statusText.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
+            || statusText.Contains("error", StringComparison.OrdinalIgnoreCase);
+        ImGui.TextColored(statusIsError
+            ? new Vector4(1f, 0.45f, 0.45f, 1f)
+            : new Vector4(0.7f, 0.7f, 0.7f, 1f), statusText);
+
+        if (!string.IsNullOrWhiteSpace(_configuration.TitleBackgroundTerritoryPath))
+        {
+            ImGui.TextDisabled($"LVB想定パス: {TitleBackgroundPathHelper.BuildLvbPath(_configuration.TitleBackgroundTerritoryPath)}");
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Text("native signature（上級者向け）");
+        ImGui.TextDisabled("signature は場所IDやカットシーンIDではなく、ゲーム実行ファイル内の処理を探すための機械語の目印です。");
+        ImGui.TextDisabled("現行clientで独自確認した値だけを入力します。既定では空のままfail-closedします。");
+        DrawTitleBackgroundSignatureInputs();
+
+        if (ImGui.Button("address再解決"))
+        {
+            NormalizeTitleBackgroundSignatures();
+            _configuration.Save();
+            _titleScreenBackgroundService.ReloadNativeIntegration();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("signatureをクリア"))
+        {
+            _configuration.TitleBackgroundCreateSceneSignature = string.Empty;
+            _configuration.TitleBackgroundFixOnSignature = string.Empty;
+            _configuration.TitleBackgroundLobbyUpdateSignature = string.Empty;
+            _configuration.TitleBackgroundLoadLobbySceneSignature = string.Empty;
+            _configuration.TitleBackgroundLobbyCurrentMapSignature = string.Empty;
+            _configuration.Save();
+            _titleScreenBackgroundService.ReloadNativeIntegration();
+        }
+
+        ImGui.TextDisabled("BGM / 天候 / 時刻 / 現在地とカメラ保存は後続接続用の設定枠です。");
+    }
+
+    private void DrawTitleBackgroundSignatureInputs()
+    {
+        var createSceneSignature = _configuration.TitleBackgroundCreateSceneSignature;
+        var fixOnSignature = _configuration.TitleBackgroundFixOnSignature;
+        var lobbyUpdateSignature = _configuration.TitleBackgroundLobbyUpdateSignature;
+        var loadLobbySceneSignature = _configuration.TitleBackgroundLoadLobbySceneSignature;
+        var lobbyCurrentMapSignature = _configuration.TitleBackgroundLobbyCurrentMapSignature;
+        var changed = DrawTitleBackgroundSignatureInput("CreateScene", ref createSceneSignature);
+        changed |= DrawTitleBackgroundSignatureInput("FixOn", ref fixOnSignature);
+        changed |= DrawTitleBackgroundSignatureInput("LobbyUpdate", ref lobbyUpdateSignature);
+        changed |= DrawTitleBackgroundSignatureInput("LoadLobbyScene", ref loadLobbySceneSignature);
+        changed |= DrawTitleBackgroundSignatureInput("LobbyCurrentMap", ref lobbyCurrentMapSignature);
+
+        if (!changed)
+        {
+            return;
+        }
+
+        _configuration.TitleBackgroundCreateSceneSignature = createSceneSignature.Trim();
+        _configuration.TitleBackgroundFixOnSignature = fixOnSignature.Trim();
+        _configuration.TitleBackgroundLobbyUpdateSignature = lobbyUpdateSignature.Trim();
+        _configuration.TitleBackgroundLoadLobbySceneSignature = loadLobbySceneSignature.Trim();
+        _configuration.TitleBackgroundLobbyCurrentMapSignature = lobbyCurrentMapSignature.Trim();
+        _configuration.Save();
+    }
+
+    private static bool DrawTitleBackgroundSignatureInput(string label, ref string signature)
+    {
+        return ImGui.InputTextWithHint($"{label}##TitleBackground{label}Signature", "xx xx ?? ...", ref signature, 512);
+    }
+
+    private void NormalizeTitleBackgroundSignatures()
+    {
+        _configuration.TitleBackgroundCreateSceneSignature = (_configuration.TitleBackgroundCreateSceneSignature ?? string.Empty).Trim();
+        _configuration.TitleBackgroundFixOnSignature = (_configuration.TitleBackgroundFixOnSignature ?? string.Empty).Trim();
+        _configuration.TitleBackgroundLobbyUpdateSignature = (_configuration.TitleBackgroundLobbyUpdateSignature ?? string.Empty).Trim();
+        _configuration.TitleBackgroundLoadLobbySceneSignature = (_configuration.TitleBackgroundLoadLobbySceneSignature ?? string.Empty).Trim();
+        _configuration.TitleBackgroundLobbyCurrentMapSignature = (_configuration.TitleBackgroundLobbyCurrentMapSignature ?? string.Empty).Trim();
+    }
+
+    private static string GetTitleBackgroundRuntimeModeLabel(TitleBackgroundRuntimeMode mode)
+    {
+        return mode switch
+        {
+            TitleBackgroundRuntimeMode.ResolveOnly => "address解決のみ",
+            TitleBackgroundRuntimeMode.Disabled => "無効",
+            TitleBackgroundRuntimeMode.CharaSelectOnly => "キャラ選択のみ",
+            TitleBackgroundRuntimeMode.TitleAndCharaSelect => "タイトル+キャラ選択",
+            _ => mode.ToString(),
+        };
+    }
+
+    private bool DrawTitleBackgroundVectorInput(string label, ref float x, ref float y, ref float z)
+    {
+        ImGui.Text(label);
+
+        ImGui.SetNextItemWidth(90f);
+        var changed = ImGui.InputFloat($"X##TitleBackground{label}X", ref x, 1f, 10f, "%.2f");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(90f);
+        changed |= ImGui.InputFloat($"Y##TitleBackground{label}Y", ref y, 1f, 10f, "%.2f");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(90f);
+        changed |= ImGui.InputFloat($"Z##TitleBackground{label}Z", ref z, 1f, 10f, "%.2f");
+
+        if (changed)
+        {
+            x = TitleBackgroundPreset.SanitizeCoordinate(x);
+            y = TitleBackgroundPreset.SanitizeCoordinate(y);
+            z = TitleBackgroundPreset.SanitizeCoordinate(z);
+        }
+
+        return changed;
+    }
+
+    private void ClearTitleBackgroundInputs()
+    {
+        _configuration.TitleBackgroundOverrideEnabled = false;
+        _configuration.TitleBackgroundTerritoryPath = string.Empty;
+        _configuration.TitleBackgroundTerritoryTypeId = 0;
+        _configuration.TitleBackgroundLayoutTerritoryTypeId = 0;
+        _configuration.TitleBackgroundLayoutLayerFilterKey = 0;
+        _configuration.TitleBackgroundCharacterPositionX = 0f;
+        _configuration.TitleBackgroundCharacterPositionY = 0f;
+        _configuration.TitleBackgroundCharacterPositionZ = 0f;
+        _configuration.TitleBackgroundCharacterRotation = 0f;
+        _configuration.TitleBackgroundCameraX = 0f;
+        _configuration.TitleBackgroundCameraY = 0f;
+        _configuration.TitleBackgroundCameraZ = 0f;
+        _configuration.TitleBackgroundFocusX = 0f;
+        _configuration.TitleBackgroundFocusY = 0f;
+        _configuration.TitleBackgroundFocusZ = 0f;
+        _configuration.TitleBackgroundFovY = TitleBackgroundPreset.DefaultFovY;
+        _configuration.TitleBackgroundWeatherId = 0;
+        _configuration.TitleBackgroundTimeOffset = 0;
+        _configuration.TitleBackgroundBgmPath = string.Empty;
+        _configuration.TitleBackgroundCreateSceneSignature = string.Empty;
+        _configuration.TitleBackgroundFixOnSignature = string.Empty;
+        _configuration.TitleBackgroundLobbyUpdateSignature = string.Empty;
+        _configuration.TitleBackgroundLoadLobbySceneSignature = string.Empty;
+        _configuration.TitleBackgroundLobbyCurrentMapSignature = string.Empty;
+        _configuration.Save();
+        _titleScreenBackgroundService.ReloadNativeIntegration();
     }
 
     private void DrawChecklistSettings()
@@ -918,6 +1200,7 @@ public sealed class SettingsTab : ITabComponent
                     _configuration.ApplyFrom(_pendingImportConfig);
                     _configuration.Save();
                     _charaSelectService.SyncFromConfiguration();
+                    _titleScreenBackgroundService.ReloadNativeIntegration();
                     SetConfigIoMessage("インポートしました。", false);
                 }
 

@@ -7,6 +7,7 @@ using Dalamud.Plugin;
 using System.Text;
 using System.Text.Json;
 using XivMiniUtil.Models.Checklist;
+using XivMiniUtil.Services.TitleBackground;
 
 namespace XivMiniUtil;
 
@@ -14,7 +15,7 @@ namespace XivMiniUtil;
 public sealed class Configuration : IPluginConfiguration
 {
     public const int ExportVersion = 1;
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -74,6 +75,33 @@ public sealed class Configuration : IPluginConfiguration
     public float CharaSelectOverridePositionZ { get; set; } = 0f;
     public bool CharaSelectShowLastDataCenterNameEnabled { get; set; } = false;
     public string CharaSelectLastDataCenterName { get; set; } = string.Empty;
+
+    // タイトル背景設定
+    public bool TitleBackgroundOverrideEnabled { get; set; } = false;
+    public TitleBackgroundRuntimeMode TitleBackgroundRuntimeMode { get; set; } = TitleBackgroundRuntimeMode.ResolveOnly;
+    public string TitleBackgroundTerritoryPath { get; set; } = string.Empty;
+    public uint TitleBackgroundTerritoryTypeId { get; set; } = 0;
+    public uint TitleBackgroundLayoutTerritoryTypeId { get; set; } = 0;
+    public uint TitleBackgroundLayoutLayerFilterKey { get; set; } = 0;
+    public float TitleBackgroundCharacterPositionX { get; set; } = 0f;
+    public float TitleBackgroundCharacterPositionY { get; set; } = 0f;
+    public float TitleBackgroundCharacterPositionZ { get; set; } = 0f;
+    public float TitleBackgroundCharacterRotation { get; set; } = 0f;
+    public float TitleBackgroundCameraX { get; set; } = 0f;
+    public float TitleBackgroundCameraY { get; set; } = 0f;
+    public float TitleBackgroundCameraZ { get; set; } = 0f;
+    public float TitleBackgroundFocusX { get; set; } = 0f;
+    public float TitleBackgroundFocusY { get; set; } = 0f;
+    public float TitleBackgroundFocusZ { get; set; } = 0f;
+    public float TitleBackgroundFovY { get; set; } = TitleBackgroundPreset.DefaultFovY;
+    public byte TitleBackgroundWeatherId { get; set; } = 0;
+    public ushort TitleBackgroundTimeOffset { get; set; } = 0;
+    public string TitleBackgroundBgmPath { get; set; } = string.Empty;
+    public string TitleBackgroundCreateSceneSignature { get; set; } = "E8 ?? ?? ?? ?? 66 89 3D ?? ?? ?? ?? E9";
+    public string TitleBackgroundFixOnSignature { get; set; } = "C6 81 ?? ?? ?? ?? ?? 0F 28 CB 8B 02";
+    public string TitleBackgroundLobbyUpdateSignature { get; set; } = "E8 ?? ?? ?? ?? 80 BF ?? ?? ?? ?? ?? 48 8D 35";
+    public string TitleBackgroundLoadLobbySceneSignature { get; set; } = "48 89 5C 24 ?? 57 48 83 EC ?? 8B D9 E8";
+    public string TitleBackgroundLobbyCurrentMapSignature { get; set; } = "66 89 05 ?? ?? ?? ?? 66 89 05 ?? ?? ?? ?? 66 89 05 ?? ?? ?? ?? 48 8B 4B";
 
     private IDalamudPluginInterface? _pluginInterface;
 
@@ -238,6 +266,31 @@ public sealed class Configuration : IPluginConfiguration
         CharaSelectOverridePositionZ = SanitizeCoordinate(source.CharaSelectOverridePositionZ);
         CharaSelectShowLastDataCenterNameEnabled = source.CharaSelectShowLastDataCenterNameEnabled;
         CharaSelectLastDataCenterName = source.CharaSelectLastDataCenterName ?? string.Empty;
+        TitleBackgroundOverrideEnabled = source.TitleBackgroundOverrideEnabled;
+        TitleBackgroundRuntimeMode = NormalizeTitleBackgroundRuntimeMode(source.TitleBackgroundRuntimeMode);
+        TitleBackgroundTerritoryPath = NormalizeTitleBackgroundTerritoryPath(source.TitleBackgroundTerritoryPath);
+        TitleBackgroundTerritoryTypeId = source.TitleBackgroundTerritoryTypeId;
+        TitleBackgroundLayoutTerritoryTypeId = source.TitleBackgroundLayoutTerritoryTypeId;
+        TitleBackgroundLayoutLayerFilterKey = source.TitleBackgroundLayoutLayerFilterKey;
+        TitleBackgroundCharacterPositionX = SanitizeCoordinate(source.TitleBackgroundCharacterPositionX);
+        TitleBackgroundCharacterPositionY = SanitizeCoordinate(source.TitleBackgroundCharacterPositionY);
+        TitleBackgroundCharacterPositionZ = SanitizeCoordinate(source.TitleBackgroundCharacterPositionZ);
+        TitleBackgroundCharacterRotation = SanitizeCoordinate(source.TitleBackgroundCharacterRotation);
+        TitleBackgroundCameraX = SanitizeCoordinate(source.TitleBackgroundCameraX);
+        TitleBackgroundCameraY = SanitizeCoordinate(source.TitleBackgroundCameraY);
+        TitleBackgroundCameraZ = SanitizeCoordinate(source.TitleBackgroundCameraZ);
+        TitleBackgroundFocusX = SanitizeCoordinate(source.TitleBackgroundFocusX);
+        TitleBackgroundFocusY = SanitizeCoordinate(source.TitleBackgroundFocusY);
+        TitleBackgroundFocusZ = SanitizeCoordinate(source.TitleBackgroundFocusZ);
+        TitleBackgroundFovY = SanitizeFovY(source.TitleBackgroundFovY);
+        TitleBackgroundWeatherId = source.TitleBackgroundWeatherId;
+        TitleBackgroundTimeOffset = source.TitleBackgroundTimeOffset;
+        TitleBackgroundBgmPath = NormalizeAssetPath(source.TitleBackgroundBgmPath);
+        TitleBackgroundCreateSceneSignature = NormalizeSignature(source.TitleBackgroundCreateSceneSignature);
+        TitleBackgroundFixOnSignature = NormalizeSignature(source.TitleBackgroundFixOnSignature);
+        TitleBackgroundLobbyUpdateSignature = NormalizeSignature(source.TitleBackgroundLobbyUpdateSignature);
+        TitleBackgroundLoadLobbySceneSignature = NormalizeSignature(source.TitleBackgroundLoadLobbySceneSignature);
+        TitleBackgroundLobbyCurrentMapSignature = NormalizeSignature(source.TitleBackgroundLobbyCurrentMapSignature);
         NormalizeAndMigrate();
     }
 
@@ -460,6 +513,78 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedTitleTerritoryPath = NormalizeTitleBackgroundTerritoryPath(TitleBackgroundTerritoryPath);
+        if (TitleBackgroundTerritoryPath != normalizedTitleTerritoryPath)
+        {
+            TitleBackgroundTerritoryPath = normalizedTitleTerritoryPath;
+            changed = true;
+        }
+
+        var normalizedTitleRuntimeMode = NormalizeTitleBackgroundRuntimeMode(TitleBackgroundRuntimeMode);
+        if (TitleBackgroundRuntimeMode != normalizedTitleRuntimeMode)
+        {
+            TitleBackgroundRuntimeMode = normalizedTitleRuntimeMode;
+            changed = true;
+        }
+
+        var normalizedTitleCharacterPositionX = SanitizeCoordinate(TitleBackgroundCharacterPositionX);
+        var normalizedTitleCharacterPositionY = SanitizeCoordinate(TitleBackgroundCharacterPositionY);
+        var normalizedTitleCharacterPositionZ = SanitizeCoordinate(TitleBackgroundCharacterPositionZ);
+        var normalizedTitleCharacterRotation = SanitizeCoordinate(TitleBackgroundCharacterRotation);
+        if (TitleBackgroundCharacterPositionX != normalizedTitleCharacterPositionX
+            || TitleBackgroundCharacterPositionY != normalizedTitleCharacterPositionY
+            || TitleBackgroundCharacterPositionZ != normalizedTitleCharacterPositionZ
+            || TitleBackgroundCharacterRotation != normalizedTitleCharacterRotation)
+        {
+            TitleBackgroundCharacterPositionX = normalizedTitleCharacterPositionX;
+            TitleBackgroundCharacterPositionY = normalizedTitleCharacterPositionY;
+            TitleBackgroundCharacterPositionZ = normalizedTitleCharacterPositionZ;
+            TitleBackgroundCharacterRotation = normalizedTitleCharacterRotation;
+            changed = true;
+        }
+
+        var normalizedTitleCameraX = SanitizeCoordinate(TitleBackgroundCameraX);
+        var normalizedTitleCameraY = SanitizeCoordinate(TitleBackgroundCameraY);
+        var normalizedTitleCameraZ = SanitizeCoordinate(TitleBackgroundCameraZ);
+        var normalizedTitleFocusX = SanitizeCoordinate(TitleBackgroundFocusX);
+        var normalizedTitleFocusY = SanitizeCoordinate(TitleBackgroundFocusY);
+        var normalizedTitleFocusZ = SanitizeCoordinate(TitleBackgroundFocusZ);
+        if (TitleBackgroundCameraX != normalizedTitleCameraX
+            || TitleBackgroundCameraY != normalizedTitleCameraY
+            || TitleBackgroundCameraZ != normalizedTitleCameraZ
+            || TitleBackgroundFocusX != normalizedTitleFocusX
+            || TitleBackgroundFocusY != normalizedTitleFocusY
+            || TitleBackgroundFocusZ != normalizedTitleFocusZ)
+        {
+            TitleBackgroundCameraX = normalizedTitleCameraX;
+            TitleBackgroundCameraY = normalizedTitleCameraY;
+            TitleBackgroundCameraZ = normalizedTitleCameraZ;
+            TitleBackgroundFocusX = normalizedTitleFocusX;
+            TitleBackgroundFocusY = normalizedTitleFocusY;
+            TitleBackgroundFocusZ = normalizedTitleFocusZ;
+            changed = true;
+        }
+
+        var normalizedTitleFovY = SanitizeFovY(TitleBackgroundFovY);
+        if (TitleBackgroundFovY != normalizedTitleFovY)
+        {
+            TitleBackgroundFovY = normalizedTitleFovY;
+            changed = true;
+        }
+
+        var normalizedTitleBgmPath = NormalizeAssetPath(TitleBackgroundBgmPath);
+        if (TitleBackgroundBgmPath != normalizedTitleBgmPath)
+        {
+            TitleBackgroundBgmPath = normalizedTitleBgmPath;
+            changed = true;
+        }
+
+        changed |= NormalizeSignatureProperty(TitleBackgroundCreateSceneSignature, value => TitleBackgroundCreateSceneSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundFixOnSignature, value => TitleBackgroundFixOnSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundLobbyUpdateSignature, value => TitleBackgroundLobbyUpdateSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundLoadLobbySceneSignature, value => TitleBackgroundLoadLobbySceneSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundLobbyCurrentMapSignature, value => TitleBackgroundLobbyCurrentMapSignature = value);
+
         return changed;
     }
 
@@ -506,6 +631,45 @@ public sealed class Configuration : IPluginConfiguration
     private static float SanitizeCoordinate(float value)
     {
         return float.IsFinite(value) ? Math.Clamp(value, -100000f, 100000f) : 0f;
+    }
+
+    private static float SanitizeFovY(float value)
+    {
+        return TitleBackgroundPreset.ClampFovY(value);
+    }
+
+    private static string NormalizeTitleBackgroundTerritoryPath(string? path)
+    {
+        return TitleBackgroundPathHelper.NormalizeTerritoryPathInput(path);
+    }
+
+    private static TitleBackgroundRuntimeMode NormalizeTitleBackgroundRuntimeMode(TitleBackgroundRuntimeMode mode)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundRuntimeMode), mode)
+            ? mode
+            : TitleBackgroundRuntimeMode.ResolveOnly;
+    }
+
+    private static string NormalizeAssetPath(string? path)
+    {
+        return (path ?? string.Empty).Trim().Replace('\\', '/');
+    }
+
+    private static string NormalizeSignature(string? signature)
+    {
+        return (signature ?? string.Empty).Trim();
+    }
+
+    private static bool NormalizeSignatureProperty(string signature, Action<string> setValue)
+    {
+        var normalized = NormalizeSignature(signature);
+        if (signature == normalized)
+        {
+            return false;
+        }
+
+        setValue(normalized);
+        return true;
     }
 
     private static bool DictionaryListEquals(Dictionary<ulong, List<uint>> left, Dictionary<ulong, List<uint>> right)

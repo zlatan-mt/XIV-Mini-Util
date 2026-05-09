@@ -4,6 +4,7 @@
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using XivMiniUtil.Services.CharaSelect;
+using XivMiniUtil.Services.TitleBackground;
 
 var failures = new List<string>();
 
@@ -199,6 +200,80 @@ Test("lobby position falls back when territory is missing", () =>
         new(1, 0, 100, 0),
     ];
     return CharaSelectLobbyPositionResolver.ResolveByTerritory(candidates, 200, 9) == 9;
+});
+
+Test("title background path normalizes bg lvb wrapper", () =>
+{
+    var normalized = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(
+        @" bg\ffxiv\area\region\level\sample.lvb ");
+    return normalized == "ffxiv/area/region/level/sample"
+        && TitleBackgroundPathHelper.BuildLvbPath(normalized) == "bg/ffxiv/area/region/level/sample.lvb";
+});
+
+Test("title background path validation requires ffxiv level path", () =>
+{
+    return TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("ffxiv/area/region/level/sample")
+        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("ffxiv/area/region/sample")
+        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("../ffxiv/area/region/level/sample")
+        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("bg/ffxiv/area/region/level/sample.lvb");
+});
+
+Test("title background preset normalizes path and clamps fov", () =>
+{
+    var preset = new TitleBackgroundPreset
+    {
+        Name = "  test  ",
+        TerritoryPath = "bg/ffxiv/area/region/level/sample.lvb",
+        CameraX = float.PositiveInfinity,
+        CameraY = -200000f,
+        FocusZ = 200000f,
+        FovY = 999f,
+        BgmPath = "  bgm/test.scd  ",
+    }.Normalize();
+
+    return preset.Name == "test"
+        && preset.TerritoryPath == "ffxiv/area/region/level/sample"
+        && preset.CameraX == 0f
+        && preset.CameraY == -100000f
+        && preset.FocusZ == 100000f
+        && preset.FovY == TitleBackgroundPreset.MaxFovY
+        && preset.BgmPath == "bgm/test.scd";
+});
+
+Test("title background preset validates normalized territory path", () =>
+{
+    var valid = new TitleBackgroundPreset
+    {
+        TerritoryPath = "ffxiv/area/region/level/sample",
+    };
+    var invalid = new TitleBackgroundPreset
+    {
+        TerritoryPath = "ffxiv/area/region/sample",
+    };
+
+    return valid.Validate(out _)
+        && !invalid.Validate(out var errorMessage)
+        && !string.IsNullOrWhiteSpace(errorMessage);
+});
+
+Test("title background fov clamp handles lower bound and non finite", () =>
+{
+    return TitleBackgroundPreset.ClampFovY(-1f) == TitleBackgroundPreset.MinFovY
+        && TitleBackgroundPreset.ClampFovY(float.NaN) == TitleBackgroundPreset.DefaultFovY;
+});
+
+Test("title chara select transition is isolated", () =>
+{
+    return GameLobbyTypeHelper.IsTitleCharaSelectTransition(GameLobbyType.Title, GameLobbyType.CharaSelect)
+        && GameLobbyTypeHelper.IsTitleCharaSelectTransition(GameLobbyType.CharaSelect, GameLobbyType.Title)
+        && !GameLobbyTypeHelper.IsTitleCharaSelectTransition(GameLobbyType.Title, GameLobbyType.LaNoscea);
+});
+
+Test("title chara select transition resets current map only when override enabled", () =>
+{
+    return GameLobbyTypeHelper.GetCurrentMapForTransition(GameLobbyType.Title, GameLobbyType.CharaSelect, overrideEnabled: true) == GameLobbyType.None
+        && GameLobbyTypeHelper.GetCurrentMapForTransition(GameLobbyType.Title, GameLobbyType.CharaSelect, overrideEnabled: false) == GameLobbyType.Title
+        && GameLobbyTypeHelper.GetCurrentMapForTransition(GameLobbyType.Title, GameLobbyType.LaNoscea, overrideEnabled: true) == GameLobbyType.Title;
 });
 
 if (failures.Count > 0)

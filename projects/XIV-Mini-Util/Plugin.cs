@@ -16,6 +16,7 @@ using XivMiniUtil.Services.Materia;
 using XivMiniUtil.Services.Notification;
 using XivMiniUtil.Services.Shop;
 using XivMiniUtil.Services.Submarine;
+using XivMiniUtil.Services.TitleBackground;
 using XivMiniUtil.Windows;
 
 namespace XivMiniUtil;
@@ -28,6 +29,8 @@ public sealed class Plugin : IDalamudPlugin
     private const string VersionCommandAlias = "/xmuv";
     private const string CharaSelectDiagnosticCommandName = "/xmucdiag";
     private const string CharaSelectDiagnosticCommandAlias = "/xmuc";
+    private const string TitleBackgroundDiagnosticCommandName = "/xmutbgdiag";
+    private const string TitleBackgroundDiagnosticCommandAlias = "/xmutbg";
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
     private readonly IChatGui _chatGui;
@@ -52,6 +55,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ChecklistService _checklistService;
     private readonly DutyReadyNotificationService _dutyReadyNotificationService;
     private readonly CharaSelectService _charaSelectService;
+    private readonly TitleScreenBackgroundService _titleScreenBackgroundService;
     private readonly MainWindow _mainWindow;
     private readonly ShopSearchResultWindow _shopSearchResultWindow;
 
@@ -67,6 +71,7 @@ public sealed class Plugin : IDalamudPlugin
         IGameGui gameGui,
         IAddonLifecycle addonLifecycle,
         IGameInteropProvider gameInteropProvider,
+        ISigScanner sigScanner,
         ICondition condition,
         IPluginLog pluginLog,
         IDataManager dataManager,
@@ -126,6 +131,12 @@ public sealed class Plugin : IDalamudPlugin
             dataManager,
             pluginLog,
             _configuration);
+        _titleScreenBackgroundService = new TitleScreenBackgroundService(
+            gameInteropProvider,
+            sigScanner,
+            dataManager,
+            pluginLog,
+            _configuration);
 
         _materiaService = new MateriaExtractService(
             framework,
@@ -177,6 +188,7 @@ public sealed class Plugin : IDalamudPlugin
             _discordService,
             _dutyReadyNotificationService,
             _charaSelectService,
+            _titleScreenBackgroundService,
             materiaFeatureEnabled,
             desynthFeatureEnabled);
         _shopSearchResultWindow = new ShopSearchResultWindow(_mapService, _teleportService, _configuration);
@@ -213,6 +225,14 @@ public sealed class Plugin : IDalamudPlugin
         {
             HelpMessage = "キャラ選択画面のエモート/声診断情報を表示します。",
         });
+        _commandManager.AddHandler(TitleBackgroundDiagnosticCommandName, new CommandInfo(OnTitleBackgroundDiagnosticCommand)
+        {
+            HelpMessage = "タイトル背景差し替えの診断情報を表示します。",
+        });
+        _commandManager.AddHandler(TitleBackgroundDiagnosticCommandAlias, new CommandInfo(OnTitleBackgroundDiagnosticCommand)
+        {
+            HelpMessage = "タイトル背景差し替えの診断情報を表示します。",
+        });
         _shopSearchService.OnSearchCompleted += OnShopSearchCompleted;
         _ = InitializeShopDataAsync();
     }
@@ -230,12 +250,15 @@ public sealed class Plugin : IDalamudPlugin
         _commandManager.RemoveHandler(VersionCommandAlias);
         _commandManager.RemoveHandler(CharaSelectDiagnosticCommandName);
         _commandManager.RemoveHandler(CharaSelectDiagnosticCommandAlias);
+        _commandManager.RemoveHandler(TitleBackgroundDiagnosticCommandName);
+        _commandManager.RemoveHandler(TitleBackgroundDiagnosticCommandAlias);
         _pluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         _pluginInterface.UiBuilder.OpenMainUi -= OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi -= OpenSettingsWindow;
 
         _mainWindow.Dispose();
         _shopSearchResultWindow.Dispose();
+        _titleScreenBackgroundService.Dispose();
         _charaSelectService.Dispose();
         _dutyReadyNotificationService.Dispose();
         _materiaService.Dispose();
@@ -326,6 +349,15 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private void OnTitleBackgroundDiagnosticCommand(string command, string args)
+    {
+        foreach (var line in _titleScreenBackgroundService.GetDiagnosticLines())
+        {
+            _chatGui.Print($"[XIV Mini Util] {line}");
+            _pluginLog.Information("TitleBackground diag: {Line}", line);
+        }
+    }
+
     private static string GetSubCommand(string args)
     {
         var trimmed = args?.Trim();
@@ -373,6 +405,7 @@ public sealed class Plugin : IDalamudPlugin
         _chatGui.Print("/xmuv : 読み込み中のDLLとビルド時刻を表示します。");
         _chatGui.Print("/xmuversion : 読み込み中のDLLとビルド時刻を表示します。");
         _chatGui.Print("/xmuc : キャラ選択画面のエモート/声診断情報を表示します。");
+        _chatGui.Print("/xmutbg : タイトル背景差し替えの診断情報を表示します。");
         _chatGui.Print("/xmu : /xivminiutil のエイリアス");
     }
 

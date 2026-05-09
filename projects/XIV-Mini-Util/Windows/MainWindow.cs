@@ -16,6 +16,7 @@ using XivMiniUtil.Services.Materia;
 using XivMiniUtil.Services.Notification;
 using XivMiniUtil.Services.Shop;
 using XivMiniUtil.Services.Submarine;
+using XivMiniUtil.Services.TitleBackground;
 using XivMiniUtil.Windows.Components;
 
 namespace XivMiniUtil.Windows;
@@ -44,6 +45,7 @@ public sealed class MainWindow : Window, IDisposable
         DiscordService discordService,
         DutyReadyNotificationService dutyReadyNotificationService,
         CharaSelectService charaSelectService,
+        TitleScreenBackgroundService titleScreenBackgroundService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
         : base($"XIV Mini Util [{BuildInfo}]")
@@ -52,7 +54,7 @@ public sealed class MainWindow : Window, IDisposable
         _searchTab = new SearchTab(shopDataCache, shopSearchService);
         _checklistTab = new ChecklistTab(configuration, checklistService);
         _submarineTab = new SubmarineTab(configuration, submarineDataStorage);
-        _settingsTab = new SettingsTab(configuration, materiaService, desynthService, shopDataCache, discordService, checklistService, dutyReadyNotificationService, charaSelectService, materiaFeatureEnabled, desynthFeatureEnabled);
+        _settingsTab = new SettingsTab(configuration, materiaService, desynthService, shopDataCache, discordService, checklistService, dutyReadyNotificationService, charaSelectService, titleScreenBackgroundService, materiaFeatureEnabled, desynthFeatureEnabled);
 
         SizeConstraints = new WindowSizeConstraints
         {
