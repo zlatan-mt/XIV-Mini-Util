@@ -259,7 +259,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _configuration.TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.HookProbe;
             _configuration.TitleBackgroundCreateSceneResolverMode = TitleBackgroundResolverMode.ManualDirectTextProbe;
             _configuration.TitleBackgroundLobbyUpdateResolverMode = TitleBackgroundResolverMode.ManualDirectTextProbe;
-            _configuration.Save();
             ReloadNativeIntegration();
             session.HookEnabledAtStart = AreAnyHooksEnabled();
 
@@ -376,6 +375,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _lastLobbyUpdateMapId = GameLobbyType.None;
         _currentMapWriteAttempted = false;
         _lastCurrentMapWriteSucceeded = false;
+        if (_activeProbeSession != null)
+        {
+            _activeProbeSession.OriginalSettings.ApplyTo(_configuration);
+            _activeProbeSession = null;
+        }
+
         DisposeHooks();
     }
 
@@ -845,7 +850,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         try
         {
             snapshot.ApplyTo(_configuration);
-            _configuration.Save();
             ReloadNativeIntegration();
             return "[Probe] original settings restored.";
         }
