@@ -453,6 +453,20 @@ public sealed class SettingsTab : ITabComponent
         ImGui.Spacing();
         ImGui.Separator();
 
+        DrawTitleBackgroundSettings();
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        DrawLegacyCharaSelectDiagnostics();
+    }
+
+    private void DrawLegacyCharaSelectDiagnostics()
+    {
+        if (!ImGui.CollapsingHeader("旧診断 / Legacy experiments"))
+        {
+            return;
+        }
+
         ImGui.Text("ログイン先エリア preload / 診断");
 
         var preloadEnabled = _configuration.CharaSelectPreloadTerritoryEnabled;
@@ -547,10 +561,6 @@ public sealed class SettingsTab : ITabComponent
 
         ImGui.Text($"最後に記録したDC: {(_configuration.CharaSelectLastDataCenterName.Length == 0 ? "なし" : _configuration.CharaSelectLastDataCenterName)}");
         ImGui.TextDisabled("DataCenter表示の置換は対象addon確認後に有効化します。");
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        DrawTitleBackgroundSettings();
     }
 
     private void DrawTitleBackgroundSettings()
@@ -593,67 +603,6 @@ public sealed class SettingsTab : ITabComponent
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
         }
-
-        var territoryTypeId = (int)_configuration.TitleBackgroundTerritoryTypeId;
-        ImGui.SetNextItemWidth(120f);
-        if (ImGui.InputInt("TerritoryTypeId##TitleBackgroundTerritoryTypeId", ref territoryTypeId))
-        {
-            _configuration.TitleBackgroundTerritoryTypeId = (uint)Math.Clamp(territoryTypeId, 0, int.MaxValue);
-            _configuration.Save();
-            _titleScreenBackgroundService.ApplyFromConfiguration();
-        }
-
-        var layoutTerritoryTypeId = (int)_configuration.TitleBackgroundLayoutTerritoryTypeId;
-        ImGui.SetNextItemWidth(120f);
-        if (ImGui.InputInt("LayoutTerritoryTypeId##TitleBackgroundLayoutTerritoryTypeId", ref layoutTerritoryTypeId))
-        {
-            _configuration.TitleBackgroundLayoutTerritoryTypeId = (uint)Math.Clamp(layoutTerritoryTypeId, 0, int.MaxValue);
-            _configuration.Save();
-            _titleScreenBackgroundService.ApplyFromConfiguration();
-        }
-
-        var layerFilterKey = (int)_configuration.TitleBackgroundLayoutLayerFilterKey;
-        ImGui.SetNextItemWidth(120f);
-        if (ImGui.InputInt("LayoutLayerFilterKey##TitleBackgroundLayoutLayerFilterKey", ref layerFilterKey))
-        {
-            _configuration.TitleBackgroundLayoutLayerFilterKey = (uint)Math.Clamp(layerFilterKey, 0, int.MaxValue);
-            _configuration.Save();
-            _titleScreenBackgroundService.ApplyFromConfiguration();
-        }
-
-        var characterX = _configuration.TitleBackgroundCharacterPositionX;
-        var characterY = _configuration.TitleBackgroundCharacterPositionY;
-        var characterZ = _configuration.TitleBackgroundCharacterPositionZ;
-        if (DrawTitleBackgroundVectorInput("Character", ref characterX, ref characterY, ref characterZ))
-        {
-            _configuration.TitleBackgroundCharacterPositionX = characterX;
-            _configuration.TitleBackgroundCharacterPositionY = characterY;
-            _configuration.TitleBackgroundCharacterPositionZ = characterZ;
-            _configuration.Save();
-            _titleScreenBackgroundService.ApplyFromConfiguration();
-        }
-
-        var cameraX = _configuration.TitleBackgroundCameraX;
-        var cameraY = _configuration.TitleBackgroundCameraY;
-        var cameraZ = _configuration.TitleBackgroundCameraZ;
-        if (DrawTitleBackgroundVectorInput("Camera", ref cameraX, ref cameraY, ref cameraZ))
-        {
-            _configuration.TitleBackgroundCameraX = cameraX;
-            _configuration.TitleBackgroundCameraY = cameraY;
-            _configuration.TitleBackgroundCameraZ = cameraZ;
-            _configuration.Save();
-            _titleScreenBackgroundService.ApplyFromConfiguration();
-        }
-
-        var fovY = _configuration.TitleBackgroundFovY;
-        ImGui.SetNextItemWidth(120f);
-        if (ImGui.InputFloat("FOV Y##TitleBackgroundFovY", ref fovY, 1f, 5f, "%.2f"))
-        {
-            _configuration.TitleBackgroundFovY = TitleBackgroundPreset.ClampFovY(fovY);
-            _configuration.Save();
-            _titleScreenBackgroundService.ApplyFromConfiguration();
-        }
-        ImGui.TextDisabled("Camera / Focus / FOV は Phase 2 予約値です。Phase 1 では scene path 差し替えのみを実行します。");
 
         if (ImGui.Button("適用"))
         {
@@ -699,7 +648,91 @@ public sealed class SettingsTab : ITabComponent
 
         ImGui.Spacing();
         ImGui.Separator();
-        ImGui.Text("native signature（上級者向け）");
+        DrawTitleBackgroundPhase2Settings();
+
+        ImGui.Spacing();
+        DrawTitleBackgroundAdvancedSettings();
+    }
+
+    private void DrawTitleBackgroundPhase2Settings()
+    {
+        if (!ImGui.CollapsingHeader("Phase 2: カメラ調整"))
+        {
+            return;
+        }
+
+        ImGui.TextDisabled("Camera / Focus / FOV は次フェーズの予約値です。現時点では scene path 差し替えのみを実行します。");
+
+        var characterX = _configuration.TitleBackgroundCharacterPositionX;
+        var characterY = _configuration.TitleBackgroundCharacterPositionY;
+        var characterZ = _configuration.TitleBackgroundCharacterPositionZ;
+        if (DrawTitleBackgroundVectorInput("Character", ref characterX, ref characterY, ref characterZ))
+        {
+            _configuration.TitleBackgroundCharacterPositionX = characterX;
+            _configuration.TitleBackgroundCharacterPositionY = characterY;
+            _configuration.TitleBackgroundCharacterPositionZ = characterZ;
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        var cameraX = _configuration.TitleBackgroundCameraX;
+        var cameraY = _configuration.TitleBackgroundCameraY;
+        var cameraZ = _configuration.TitleBackgroundCameraZ;
+        if (DrawTitleBackgroundVectorInput("Camera", ref cameraX, ref cameraY, ref cameraZ))
+        {
+            _configuration.TitleBackgroundCameraX = cameraX;
+            _configuration.TitleBackgroundCameraY = cameraY;
+            _configuration.TitleBackgroundCameraZ = cameraZ;
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        var fovY = _configuration.TitleBackgroundFovY;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputFloat("FOV Y##TitleBackgroundFovY", ref fovY, 1f, 5f, "%.2f"))
+        {
+            _configuration.TitleBackgroundFovY = TitleBackgroundPreset.ClampFovY(fovY);
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+    }
+
+    private void DrawTitleBackgroundAdvancedSettings()
+    {
+        if (!ImGui.CollapsingHeader("詳細設定 / 診断"))
+        {
+            return;
+        }
+
+        var territoryTypeId = (int)_configuration.TitleBackgroundTerritoryTypeId;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("TerritoryTypeId##TitleBackgroundTerritoryTypeId", ref territoryTypeId))
+        {
+            _configuration.TitleBackgroundTerritoryTypeId = (uint)Math.Clamp(territoryTypeId, 0, int.MaxValue);
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        var layoutTerritoryTypeId = (int)_configuration.TitleBackgroundLayoutTerritoryTypeId;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("LayoutTerritoryTypeId##TitleBackgroundLayoutTerritoryTypeId", ref layoutTerritoryTypeId))
+        {
+            _configuration.TitleBackgroundLayoutTerritoryTypeId = (uint)Math.Clamp(layoutTerritoryTypeId, 0, int.MaxValue);
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        var layerFilterKey = (int)_configuration.TitleBackgroundLayoutLayerFilterKey;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("LayoutLayerFilterKey##TitleBackgroundLayoutLayerFilterKey", ref layerFilterKey))
+        {
+            _configuration.TitleBackgroundLayoutLayerFilterKey = (uint)Math.Clamp(layerFilterKey, 0, int.MaxValue);
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("native signature");
         ImGui.TextDisabled("signature は場所IDやカットシーンIDではなく、ゲーム実行ファイル内の処理を探すための機械語の目印です。");
         ImGui.TextDisabled("現行clientで独自確認した値だけを入力します。既定では空のままfail-closedします。");
         DrawTitleBackgroundResolverModeInputs();
