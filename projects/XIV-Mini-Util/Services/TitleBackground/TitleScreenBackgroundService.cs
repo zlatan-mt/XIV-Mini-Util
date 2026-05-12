@@ -447,7 +447,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             var lobbyType = EffectiveLobbyType;
             var originalPath = territoryPath == null ? string.Empty : Marshal.PtrToStringUTF8((nint)territoryPath) ?? string.Empty;
             _lastObservedCreateScenePath = originalPath;
-            RecordProbeCreateScene(originalPath, territoryId, layerFilterKey);
+            RecordProbeCreateScene(lobbyType, originalPath, territoryId, layerFilterKey);
             _log.Debug("[XMU BG] CreateScene lobbyType={LobbyType}, path={Path}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", lobbyType, originalPath, territoryId, layerFilterKey);
 
             if (IsHookProbeMode())
@@ -886,19 +886,22 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"[Probe] hookEnabledAtStart={session.HookEnabledAtStart}",
             $"[Probe] runtimeError={runtimeError}",
             $"[Probe] createSceneCalls={session.CreateSceneCallCount}",
+            $"[Probe] createSceneCharaSelectCalls={session.CreateSceneCharaSelectCallCount}",
             $"[Probe] lobbyUpdateCalls={session.LobbyUpdateCallCount}",
             $"[Probe] loadLobbySceneCalls={session.LoadLobbySceneCallCount}",
+            $"[Probe] lastCreateSceneLobbyType={session.LastCreateSceneLobbyType}",
             $"[Probe] lastCreateScenePath={(string.IsNullOrWhiteSpace(session.LastCreateScenePath) ? "none" : session.LastCreateScenePath)}",
             $"[Probe] lastCreateSceneTerritoryId={session.LastCreateSceneTerritoryId}",
             $"[Probe] lastCreateSceneLayerFilterKey={session.LastCreateSceneLayerFilterKey}",
             $"[Probe] lastLobbyUpdateMapId={session.LastLobbyUpdateMapId}",
             $"[Probe] lastLobbyUpdateTime={session.LastLobbyUpdateTime}",
             $"[Probe] lastLoadLobbySceneMapId={session.LastLoadLobbySceneMapId}",
+            $"[Probe] createSceneHistory={FormatProbeHistory(session.CreateSceneHistory)}",
             $"[Probe] lastError={(string.IsNullOrWhiteSpace(session.LastError) ? "none" : session.LastError)}",
         ];
     }
 
-    private void RecordProbeCreateScene(string path, uint territoryId, uint layerFilterKey)
+    private void RecordProbeCreateScene(GameLobbyType lobbyType, string path, uint territoryId, uint layerFilterKey)
     {
         if (_activeProbeSession == null)
         {
@@ -906,9 +909,26 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
 
         _activeProbeSession.CreateSceneCallCount++;
+        if (lobbyType == GameLobbyType.CharaSelect)
+        {
+            _activeProbeSession.CreateSceneCharaSelectCallCount++;
+        }
+
+        _activeProbeSession.LastCreateSceneLobbyType = lobbyType;
         _activeProbeSession.LastCreateScenePath = path;
         _activeProbeSession.LastCreateSceneTerritoryId = territoryId;
         _activeProbeSession.LastCreateSceneLayerFilterKey = layerFilterKey;
+        _activeProbeSession.CreateSceneHistory.Add(
+            $"lobbyType={lobbyType},path={(string.IsNullOrWhiteSpace(path) ? "none" : path)},territoryId={territoryId},layerFilterKey={layerFilterKey}");
+        if (_activeProbeSession.CreateSceneHistory.Count > 5)
+        {
+            _activeProbeSession.CreateSceneHistory.RemoveAt(0);
+        }
+    }
+
+    private static string FormatProbeHistory(IReadOnlyList<string> history)
+    {
+        return history.Count == 0 ? "none" : string.Join(" | ", history);
     }
 
     private void RecordProbeLobbyUpdate(GameLobbyType mapId, int time)
@@ -976,11 +996,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         public bool RuntimeErrorOccurred { get; set; }
         public string LastError { get; set; } = string.Empty;
         public int CreateSceneCallCount { get; set; }
+        public int CreateSceneCharaSelectCallCount { get; set; }
         public int LobbyUpdateCallCount { get; set; }
         public int LoadLobbySceneCallCount { get; set; }
+        public GameLobbyType LastCreateSceneLobbyType { get; set; } = GameLobbyType.None;
         public string LastCreateScenePath { get; set; } = string.Empty;
         public uint LastCreateSceneTerritoryId { get; set; }
         public uint LastCreateSceneLayerFilterKey { get; set; }
+        public List<string> CreateSceneHistory { get; } = [];
         public GameLobbyType LastLobbyUpdateMapId { get; set; } = GameLobbyType.None;
         public int LastLobbyUpdateTime { get; set; }
         public GameLobbyType LastLoadLobbySceneMapId { get; set; } = GameLobbyType.None;
