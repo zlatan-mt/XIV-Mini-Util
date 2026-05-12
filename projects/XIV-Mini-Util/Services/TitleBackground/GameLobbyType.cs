@@ -35,7 +35,7 @@ internal static class TitleBackgroundRuntimeModeHelper
 {
     public static bool IsTitleOverrideImplemented(TitleBackgroundRuntimeMode mode)
     {
-        return false;
+        return mode == TitleBackgroundRuntimeMode.CharaSelectOnly;
     }
 
     public static bool ShouldCreateSceneHooks(TitleBackgroundRuntimeMode mode, bool overrideEnabled)

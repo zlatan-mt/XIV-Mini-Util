@@ -473,7 +473,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
                 overrideBytes = Encoding.UTF8.GetBytes(_validatedTerritoryPath + '\0');
                 _cameraApplyPending = true;
-                _log.Information("[XMU BG] Override CharaSelect scene path={Path}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", _validatedTerritoryPath, territoryId, layerFilterKey);
+                _log.Information("[XMU BG] Override CharaSelect scene lobbyType={LobbyType}, path={Path}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", lobbyType, _validatedTerritoryPath, territoryId, layerFilterKey);
             }
         }
         catch (Exception ex)
