@@ -34,6 +34,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private bool _disposed;
     private string _lastObservedCreateScenePath = string.Empty;
     private float? _lastObservedFixOnFovY;
+    private TitleBackgroundProbeSession? _activeProbeSession;
+    private TitleBackgroundProbeSession? _lastProbeSession;
 
     private GameLobbyType EffectiveLobbyType =>
         _loadingLobbyType != GameLobbyType.None
@@ -239,6 +241,94 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return lines;
     }
 
+    public IReadOnlyList<string> StartProbe()
+    {
+        if (_activeProbeSession != null)
+        {
+            return ["[Probe] already active; existing session was left unchanged."];
+        }
+
+        var session = new TitleBackgroundProbeSession(TitleBackgroundProbeSettingsSnapshot.Capture(_configuration));
+        _activeProbeSession = session;
+        _lastProbeSession = session;
+
+        try
+        {
+            _configuration.TitleBackgroundOverrideEnabled = true;
+            _configuration.TitleBackgroundCameraOverrideEnabled = false;
+            _configuration.TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.HookProbe;
+            _configuration.TitleBackgroundCreateSceneResolverMode = TitleBackgroundResolverMode.ManualDirectTextProbe;
+            _configuration.TitleBackgroundLobbyUpdateResolverMode = TitleBackgroundResolverMode.ManualDirectTextProbe;
+            _configuration.Save();
+            ReloadNativeIntegration();
+            session.HookEnabledAtStart = AreAnyHooksEnabled();
+
+            return
+            [
+                "[Probe] started.",
+                ..GetProbeReportLines(session, isActive: true),
+                "",
+                ..GetDiagnosticLines(),
+            ];
+        }
+        catch (Exception ex)
+        {
+            session.RuntimeErrorOccurred = true;
+            session.LastError = ex.Message;
+            var rollbackMessage = TryRestoreProbeSettings(session.OriginalSettings);
+            _activeProbeSession = null;
+            return
+            [
+                "[Probe] failed to start.",
+                rollbackMessage,
+                $"[Probe] error={ex.Message}",
+            ];
+        }
+    }
+
+    public IReadOnlyList<string> StopProbe()
+    {
+        if (_activeProbeSession == null)
+        {
+            return ["[Probe] no active session; nothing to stop."];
+        }
+
+        var session = _activeProbeSession;
+        _activeProbeSession = null;
+        session.HookEnabledAtEnd = AreAnyHooksEnabled();
+        var restoreMessage = TryRestoreProbeSettings(session.OriginalSettings);
+
+        return
+        [
+            restoreMessage,
+            ..GetProbeReportLines(session, isActive: false),
+        ];
+    }
+
+    public IReadOnlyList<string> GetProbeReportLines()
+    {
+        if (_activeProbeSession != null)
+        {
+            return
+            [
+                ..GetProbeReportLines(_activeProbeSession, isActive: true),
+                "",
+                ..GetDiagnosticLines(),
+            ];
+        }
+
+        if (_lastProbeSession != null)
+        {
+            return
+            [
+                "[Probe] last probe session report.",
+                ..GetProbeReportLines(_lastProbeSession, isActive: false),
+            ];
+        }
+
+        return ["[Probe] no probe session has been recorded."];
+    }
+
     public bool ValidateCurrentConfiguration(out string errorMessage)
     {
         var normalized = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(_configuration.TitleBackgroundTerritoryPath);
@@ -339,6 +429,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private void LoadLobbySceneDetour(GameLobbyType mapId)
     {
         _loadingLobbyType = mapId;
+        RecordProbeLoadLobbyScene(mapId);
         _log.Debug("[XMU BG] LoadLobbyScene mapId={MapId}", mapId);
         _loadLobbySceneHook?.Original(mapId);
     }
@@ -351,6 +442,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             var lobbyType = EffectiveLobbyType;
             var originalPath = territoryPath == null ? string.Empty : Marshal.PtrToStringUTF8((nint)territoryPath) ?? string.Empty;
             _lastObservedCreateScenePath = originalPath;
+            RecordProbeCreateScene(originalPath, territoryId, layerFilterKey);
             _log.Debug("[XMU BG] CreateScene lobbyType={LobbyType}, path={Path}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", lobbyType, originalPath, territoryId, layerFilterKey);
 
             if (IsHookProbeMode())
@@ -404,6 +496,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         try
         {
+            RecordProbeLobbyUpdate(mapId, time);
             if (IsHookProbeMode())
             {
                 return _lobbyUpdateHook?.Original(mapId, time) ?? 0;
@@ -631,6 +724,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _state = TitleBackgroundServiceState.RuntimeError;
         _stateReason = $"{hookName}: {ex.Message}";
         _cameraApplyPending = false;
+        if (_activeProbeSession != null)
+        {
+            _activeProbeSession.RuntimeErrorOccurred = true;
+            _activeProbeSession.LastError = _stateReason;
+        }
+
         _log.Warning(ex, "TitleBackground runtime error in {HookName}.", hookName);
     }
 
@@ -741,6 +840,104 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return (signature ?? string.Empty).Trim();
     }
 
+    private string TryRestoreProbeSettings(TitleBackgroundProbeSettingsSnapshot snapshot)
+    {
+        try
+        {
+            snapshot.ApplyTo(_configuration);
+            _configuration.Save();
+            ReloadNativeIntegration();
+            return "[Probe] original settings restored.";
+        }
+        catch (Exception ex)
+        {
+            if (_lastProbeSession != null)
+            {
+                _lastProbeSession.RuntimeErrorOccurred = true;
+                _lastProbeSession.LastError = $"restore failed: {ex.Message}";
+            }
+
+            _log.Warning(ex, "TitleBackground probe failed to restore original settings.");
+            return $"[Probe] failed to restore original settings: {ex.Message}";
+        }
+    }
+
+    private IReadOnlyList<string> GetProbeReportLines(TitleBackgroundProbeSession session, bool isActive)
+    {
+        var hooksEnabled = isActive ? AreAnyHooksEnabled() : session.HookEnabledAtEnd;
+        var runtimeError = session.RuntimeErrorOccurred || (isActive && _state == TitleBackgroundServiceState.RuntimeError);
+        var observedAnyDetour = session.CreateSceneCallCount > 0 || session.LobbyUpdateCallCount > 0;
+        var result = !hooksEnabled || runtimeError
+            ? "Failure"
+            : observedAnyDetour
+                ? "Success"
+                : "Warning";
+
+        return
+        [
+            $"[Probe] active={isActive}",
+            $"[Probe] startedAt={session.StartedAt:yyyy-MM-dd HH:mm:ss zzz}",
+            $"[Probe] result={result}",
+            $"[Probe] hooksEnabled={hooksEnabled}",
+            $"[Probe] hookEnabledAtStart={session.HookEnabledAtStart}",
+            $"[Probe] runtimeError={runtimeError}",
+            $"[Probe] createSceneCalls={session.CreateSceneCallCount}",
+            $"[Probe] lobbyUpdateCalls={session.LobbyUpdateCallCount}",
+            $"[Probe] loadLobbySceneCalls={session.LoadLobbySceneCallCount}",
+            $"[Probe] lastCreateScenePath={(string.IsNullOrWhiteSpace(session.LastCreateScenePath) ? "none" : session.LastCreateScenePath)}",
+            $"[Probe] lastCreateSceneTerritoryId={session.LastCreateSceneTerritoryId}",
+            $"[Probe] lastCreateSceneLayerFilterKey={session.LastCreateSceneLayerFilterKey}",
+            $"[Probe] lastLobbyUpdateMapId={session.LastLobbyUpdateMapId}",
+            $"[Probe] lastLobbyUpdateTime={session.LastLobbyUpdateTime}",
+            $"[Probe] lastLoadLobbySceneMapId={session.LastLoadLobbySceneMapId}",
+            $"[Probe] lastError={(string.IsNullOrWhiteSpace(session.LastError) ? "none" : session.LastError)}",
+        ];
+    }
+
+    private void RecordProbeCreateScene(string path, uint territoryId, uint layerFilterKey)
+    {
+        if (_activeProbeSession == null)
+        {
+            return;
+        }
+
+        _activeProbeSession.CreateSceneCallCount++;
+        _activeProbeSession.LastCreateScenePath = path;
+        _activeProbeSession.LastCreateSceneTerritoryId = territoryId;
+        _activeProbeSession.LastCreateSceneLayerFilterKey = layerFilterKey;
+    }
+
+    private void RecordProbeLobbyUpdate(GameLobbyType mapId, int time)
+    {
+        if (_activeProbeSession == null)
+        {
+            return;
+        }
+
+        _activeProbeSession.LobbyUpdateCallCount++;
+        _activeProbeSession.LastLobbyUpdateMapId = mapId;
+        _activeProbeSession.LastLobbyUpdateTime = time;
+    }
+
+    private void RecordProbeLoadLobbyScene(GameLobbyType mapId)
+    {
+        if (_activeProbeSession == null)
+        {
+            return;
+        }
+
+        _activeProbeSession.LoadLobbySceneCallCount++;
+        _activeProbeSession.LastLoadLobbySceneMapId = mapId;
+    }
+
+    private bool AreAnyHooksEnabled()
+    {
+        return IsHookEnabled(_createSceneHook)
+            || IsHookEnabled(_lobbyUpdateHook)
+            || IsHookEnabled(_loadLobbySceneHook)
+            || IsHookEnabled(_cameraFixOnHook);
+    }
+
     private static TitleBackgroundResolverMode NormalizeResolverMode(TitleBackgroundResolverMode mode)
     {
         return Enum.IsDefined(typeof(TitleBackgroundResolverMode), mode)
@@ -760,4 +957,55 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     // UNVERIFIED ABI - DO NOT ENABLE BY DEFAULT. Phase 1 does not create this hook.
     private delegate nint LobbyCameraFixOnDelegate(nint self, float* cameraPos, float* focusPos, float fovY);
+
+    private sealed class TitleBackgroundProbeSession
+    {
+        public TitleBackgroundProbeSession(TitleBackgroundProbeSettingsSnapshot originalSettings)
+        {
+            OriginalSettings = originalSettings;
+        }
+
+        public DateTimeOffset StartedAt { get; } = DateTimeOffset.Now;
+        public TitleBackgroundProbeSettingsSnapshot OriginalSettings { get; }
+        public bool HookEnabledAtStart { get; set; }
+        public bool HookEnabledAtEnd { get; set; }
+        public bool RuntimeErrorOccurred { get; set; }
+        public string LastError { get; set; } = string.Empty;
+        public int CreateSceneCallCount { get; set; }
+        public int LobbyUpdateCallCount { get; set; }
+        public int LoadLobbySceneCallCount { get; set; }
+        public string LastCreateScenePath { get; set; } = string.Empty;
+        public uint LastCreateSceneTerritoryId { get; set; }
+        public uint LastCreateSceneLayerFilterKey { get; set; }
+        public GameLobbyType LastLobbyUpdateMapId { get; set; } = GameLobbyType.None;
+        public int LastLobbyUpdateTime { get; set; }
+        public GameLobbyType LastLoadLobbySceneMapId { get; set; } = GameLobbyType.None;
+    }
+
+    private sealed record TitleBackgroundProbeSettingsSnapshot(
+        bool OverrideEnabled,
+        bool CameraOverrideEnabled,
+        TitleBackgroundRuntimeMode RuntimeMode,
+        TitleBackgroundResolverMode CreateSceneResolverMode,
+        TitleBackgroundResolverMode LobbyUpdateResolverMode)
+    {
+        public static TitleBackgroundProbeSettingsSnapshot Capture(Configuration configuration)
+        {
+            return new TitleBackgroundProbeSettingsSnapshot(
+                configuration.TitleBackgroundOverrideEnabled,
+                configuration.TitleBackgroundCameraOverrideEnabled,
+                configuration.TitleBackgroundRuntimeMode,
+                configuration.TitleBackgroundCreateSceneResolverMode,
+                configuration.TitleBackgroundLobbyUpdateResolverMode);
+        }
+
+        public void ApplyTo(Configuration configuration)
+        {
+            configuration.TitleBackgroundOverrideEnabled = OverrideEnabled;
+            configuration.TitleBackgroundCameraOverrideEnabled = CameraOverrideEnabled;
+            configuration.TitleBackgroundRuntimeMode = RuntimeMode;
+            configuration.TitleBackgroundCreateSceneResolverMode = CreateSceneResolverMode;
+            configuration.TitleBackgroundLobbyUpdateResolverMode = LobbyUpdateResolverMode;
+        }
+    }
 }

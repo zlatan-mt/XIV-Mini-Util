@@ -31,6 +31,7 @@ public sealed class Plugin : IDalamudPlugin
     private const string CharaSelectDiagnosticCommandAlias = "/xmuc";
     private const string TitleBackgroundDiagnosticCommandName = "/xmutbgdiag";
     private const string TitleBackgroundDiagnosticCommandAlias = "/xmutbg";
+    private const string TitleBackgroundProbeCommandName = "/xmutbgprobe";
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
     private readonly IChatGui _chatGui;
@@ -233,6 +234,10 @@ public sealed class Plugin : IDalamudPlugin
         {
             HelpMessage = "タイトル背景差し替えの診断情報を表示します。",
         });
+        _commandManager.AddHandler(TitleBackgroundProbeCommandName, new CommandInfo(OnTitleBackgroundProbeCommand)
+        {
+            HelpMessage = "タイトル背景hook probeを開始/停止/表示します。サブコマンド: on / report / off",
+        });
         _shopSearchService.OnSearchCompleted += OnShopSearchCompleted;
         _ = InitializeShopDataAsync();
     }
@@ -252,6 +257,7 @@ public sealed class Plugin : IDalamudPlugin
         _commandManager.RemoveHandler(CharaSelectDiagnosticCommandAlias);
         _commandManager.RemoveHandler(TitleBackgroundDiagnosticCommandName);
         _commandManager.RemoveHandler(TitleBackgroundDiagnosticCommandAlias);
+        _commandManager.RemoveHandler(TitleBackgroundProbeCommandName);
         _pluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         _pluginInterface.UiBuilder.OpenMainUi -= OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi -= OpenSettingsWindow;
@@ -355,6 +361,27 @@ public sealed class Plugin : IDalamudPlugin
         {
             _chatGui.Print($"[XIV Mini Util] {line}");
             _pluginLog.Information("TitleBackground diag: {Line}", line);
+        }
+    }
+
+    private void OnTitleBackgroundProbeCommand(string command, string args)
+    {
+        var subCommand = GetSubCommand(args);
+        IReadOnlyList<string> lines = subCommand switch
+        {
+            "" or "report" => _titleScreenBackgroundService.GetProbeReportLines(),
+            "on" or "start" => _titleScreenBackgroundService.StartProbe(),
+            "off" or "stop" => _titleScreenBackgroundService.StopProbe(),
+            _ =>
+            [
+                "[Probe] usage: /xmutbgprobe on | report | off",
+            ],
+        };
+
+        foreach (var line in lines)
+        {
+            _chatGui.Print($"[XIV Mini Util] {line}");
+            _pluginLog.Information("TitleBackground probe: {Line}", line);
         }
     }
 
