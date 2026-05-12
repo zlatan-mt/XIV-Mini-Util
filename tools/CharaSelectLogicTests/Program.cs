@@ -3,6 +3,8 @@
 // Reason: 実機なしで再生判定とEmoteMode変換の退行を検出するため
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using System.Numerics;
+using XivMiniUtil;
 using XivMiniUtil.Services.CharaSelect;
 using XivMiniUtil.Services.TitleBackground;
 
@@ -260,6 +262,130 @@ Test("title background fov clamp handles lower bound and non finite", () =>
 {
     return TitleBackgroundPreset.ClampFovY(-1f) == TitleBackgroundPreset.MinFovY
         && TitleBackgroundPreset.ClampFovY(float.NaN) == TitleBackgroundPreset.DefaultFovY;
+});
+
+Test("title background camera override plan uses focus fields", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundCameraX = 1f,
+        TitleBackgroundCameraY = 2f,
+        TitleBackgroundCameraZ = 3f,
+        TitleBackgroundFocusX = 4f,
+        TitleBackgroundFocusY = 5f,
+        TitleBackgroundFocusZ = 6f,
+        TitleBackgroundCharacterPositionX = 40f,
+        TitleBackgroundCharacterPositionY = 50f,
+        TitleBackgroundCharacterPositionZ = 60f,
+        TitleBackgroundFovY = 1.2f,
+    };
+
+    var plan = TitleBackgroundCameraOverridePlan.FromConfiguration(configuration);
+    return plan.Camera == new Vector3(1f, 2f, 3f)
+        && plan.Focus == new Vector3(4f, 5f, 6f)
+        && plan.Focus != new Vector3(40f, 50f, 60f)
+        && Math.Abs(plan.FovY - 1.2f) < 0.0001f;
+});
+
+Test("title background camera override plan clamps fov", () =>
+{
+    var plan = TitleBackgroundCameraOverridePlan.Create(
+        new Vector3(1f, 2f, 3f),
+        new Vector3(4f, 5f, 6f),
+        999f);
+    return plan.FovY == TitleBackgroundPreset.MaxFovY;
+});
+
+Test("title background camera apply requires pending chara select and skips hook probe", () =>
+{
+    return TitleBackgroundCameraOverridePlan.ShouldApply(
+            cameraOverrideEnabled: true,
+            isHookProbeMode: false,
+            cameraApplyPending: true,
+            stateReady: true,
+            currentMapAvailable: true,
+            currentMap: GameLobbyType.CharaSelect)
+        && !TitleBackgroundCameraOverridePlan.ShouldApply(
+            cameraOverrideEnabled: true,
+            isHookProbeMode: true,
+            cameraApplyPending: true,
+            stateReady: true,
+            currentMapAvailable: true,
+            currentMap: GameLobbyType.CharaSelect)
+        && !TitleBackgroundCameraOverridePlan.ShouldApply(
+            cameraOverrideEnabled: true,
+            isHookProbeMode: false,
+            cameraApplyPending: false,
+            stateReady: true,
+            currentMapAvailable: true,
+            currentMap: GameLobbyType.CharaSelect)
+        && !TitleBackgroundCameraOverridePlan.ShouldApply(
+            cameraOverrideEnabled: true,
+            isHookProbeMode: false,
+            cameraApplyPending: true,
+            stateReady: true,
+            currentMapAvailable: true,
+            currentMap: GameLobbyType.Title);
+});
+
+Test("title background capture preset builder keeps existing fov when unavailable", () =>
+{
+    var existing = new TitleBackgroundPreset
+    {
+        TerritoryPath = "ffxiv/old/region/level/old",
+        FovY = 1.5f,
+        CharacterPosition = new Vector3(9f, 9f, 9f),
+        CharacterRotation = 0.25f,
+    }.Normalize();
+    var draft = new TitleBackgroundCameraCaptureDraft(
+        "bg/ffxiv/area/region/level/sample.lvb",
+        777,
+        new Vector3(1f, 2f, 3f),
+        new Vector3(4f, 5f, 6f),
+        null,
+        777,
+        null,
+        null,
+        null);
+
+    return TitleBackgroundCameraCapturePresetBuilder.TryBuild(
+            draft,
+            existing,
+            out var preset,
+            out var fovState,
+            out _,
+            out _)
+        && preset.TerritoryPath == "ffxiv/area/region/level/sample"
+        && preset.TerritoryTypeId == 777
+        && preset.FovY == 1.5f
+        && fovState == TitleBackgroundCaptureValueState.KeptExisting
+        && preset.CharacterPosition == new Vector3(9f, 9f, 9f)
+        && Math.Abs(preset.CharacterRotation - 0.25f) < 0.0001f;
+});
+
+Test("title background capture preset builder fails closed on invalid required values", () =>
+{
+    var existing = new TitleBackgroundPreset { FovY = 1f }.Normalize();
+    var invalidPath = new TitleBackgroundCameraCaptureDraft(
+        "../bad",
+        777,
+        new Vector3(1f, 2f, 3f),
+        new Vector3(4f, 5f, 6f),
+        1f,
+        null,
+        null,
+        null,
+        null);
+    var invalidCamera = invalidPath with
+    {
+        TerritoryPath = "ffxiv/area/region/level/sample",
+        Camera = new Vector3(float.NaN, 2f, 3f),
+    };
+
+    return !TitleBackgroundCameraCapturePresetBuilder.TryBuild(invalidPath, existing, out _, out _, out _, out var pathError)
+        && !string.IsNullOrWhiteSpace(pathError)
+        && !TitleBackgroundCameraCapturePresetBuilder.TryBuild(invalidCamera, existing, out _, out _, out _, out var cameraError)
+        && cameraError.Contains("Camera", StringComparison.Ordinal);
 });
 
 Test("title chara select transition is isolated", () =>

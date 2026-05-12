@@ -613,6 +613,9 @@ public sealed class SettingsTab : ITabComponent
             _configuration.TitleBackgroundCameraX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraX);
             _configuration.TitleBackgroundCameraY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraY);
             _configuration.TitleBackgroundCameraZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraZ);
+            _configuration.TitleBackgroundFocusX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusX);
+            _configuration.TitleBackgroundFocusY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusY);
+            _configuration.TitleBackgroundFocusZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusZ);
             _configuration.TitleBackgroundFovY = TitleBackgroundPreset.ClampFovY(_configuration.TitleBackgroundFovY);
             NormalizeTitleBackgroundSignatures();
             _configuration.Save();
@@ -661,19 +664,29 @@ public sealed class SettingsTab : ITabComponent
             return;
         }
 
-        ImGui.TextDisabled("Camera / Focus / FOV は次フェーズの予約値です。現時点では scene path 差し替えのみを実行します。");
+        ImGui.TextDisabled("ログイン中に好きな場所とカメラ構図を決めて保存できます。保存値はキャラ選択背景差し替え時の Camera / Focus / FOV に使います。");
+        ImGui.TextDisabled("CharacterPosition は将来のキャラクター配置用で、Camera Focus とは別の値です。");
 
-        var characterX = _configuration.TitleBackgroundCharacterPositionX;
-        var characterY = _configuration.TitleBackgroundCharacterPositionY;
-        var characterZ = _configuration.TitleBackgroundCharacterPositionZ;
-        if (DrawTitleBackgroundVectorInput("Character", ref characterX, ref characterY, ref characterZ))
+        if (ImGui.Button("現在の場所とカメラを保存"))
         {
-            _configuration.TitleBackgroundCharacterPositionX = characterX;
-            _configuration.TitleBackgroundCharacterPositionY = characterY;
-            _configuration.TitleBackgroundCharacterPositionZ = characterZ;
-            _configuration.Save();
-            _titleScreenBackgroundService.ApplyFromConfiguration();
+            _titleScreenBackgroundService.CaptureCurrentLocationAndCamera();
         }
+
+        ImGui.SameLine();
+        var cameraOverrideEnabled = _configuration.TitleBackgroundCameraOverrideEnabled;
+        if (ImGui.Checkbox("カメラ調整を有効化（実験）", ref cameraOverrideEnabled))
+        {
+            _titleScreenBackgroundService.SetCameraOverrideEnabled(cameraOverrideEnabled);
+        }
+
+        ImGui.TextDisabled(cameraOverrideEnabled
+            ? "Camera override: ON。CharaSelectOnly の scene 差し替え後に FixOn hook で適用します。"
+            : "Camera override: OFF。現状どおり scene path 差し替えのみです。");
+        ImGui.TextDisabled("hook状態と保存失敗理由は /xmutbgdiag でも確認できます。");
+
+        DrawTitleBackgroundCaptureResult();
+
+        ImGui.Spacing();
 
         var cameraX = _configuration.TitleBackgroundCameraX;
         var cameraY = _configuration.TitleBackgroundCameraY;
@@ -687,6 +700,19 @@ public sealed class SettingsTab : ITabComponent
             _titleScreenBackgroundService.ApplyFromConfiguration();
         }
 
+        var focusX = _configuration.TitleBackgroundFocusX;
+        var focusY = _configuration.TitleBackgroundFocusY;
+        var focusZ = _configuration.TitleBackgroundFocusZ;
+        if (DrawTitleBackgroundVectorInput("Focus", ref focusX, ref focusY, ref focusZ))
+        {
+            _configuration.TitleBackgroundFocusX = focusX;
+            _configuration.TitleBackgroundFocusY = focusY;
+            _configuration.TitleBackgroundFocusZ = focusZ;
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+        ImGui.TextDisabled("Focus はカメラ注視点です。FixOn hook の focus 引数にはこの値を渡します。");
+
         var fovY = _configuration.TitleBackgroundFovY;
         ImGui.SetNextItemWidth(120f);
         if (ImGui.InputFloat("FOV Y##TitleBackgroundFovY", ref fovY, 1f, 5f, "%.2f"))
@@ -694,6 +720,53 @@ public sealed class SettingsTab : ITabComponent
             _configuration.TitleBackgroundFovY = TitleBackgroundPreset.ClampFovY(fovY);
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        ImGui.Spacing();
+        var characterX = _configuration.TitleBackgroundCharacterPositionX;
+        var characterY = _configuration.TitleBackgroundCharacterPositionY;
+        var characterZ = _configuration.TitleBackgroundCharacterPositionZ;
+        if (DrawTitleBackgroundVectorInput("Character", ref characterX, ref characterY, ref characterZ))
+        {
+            _configuration.TitleBackgroundCharacterPositionX = characterX;
+            _configuration.TitleBackgroundCharacterPositionY = characterY;
+            _configuration.TitleBackgroundCharacterPositionZ = characterZ;
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+        ImGui.TextDisabled("Character は将来の配置/preset補助用です。Focus の代用には使いません。");
+
+        if (ImGui.Button("カメラ値を適用"))
+        {
+            _configuration.TitleBackgroundCameraX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraX);
+            _configuration.TitleBackgroundCameraY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraY);
+            _configuration.TitleBackgroundCameraZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraZ);
+            _configuration.TitleBackgroundFocusX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusX);
+            _configuration.TitleBackgroundFocusY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusY);
+            _configuration.TitleBackgroundFocusZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusZ);
+            _configuration.TitleBackgroundFovY = TitleBackgroundPreset.ClampFovY(_configuration.TitleBackgroundFovY);
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+    }
+
+    private void DrawTitleBackgroundCaptureResult()
+    {
+        var result = _titleScreenBackgroundService.LastCameraCaptureResult;
+        if (!result.HasRun)
+        {
+            ImGui.TextDisabled("最後の保存結果: なし");
+            return;
+        }
+
+        var color = result.Success
+            ? new Vector4(0.3f, 0.8f, 0.45f, 1f)
+            : new Vector4(1f, 0.45f, 0.45f, 1f);
+        ImGui.TextColored(color, result.Success ? "最後の保存結果: 成功" : $"最後の保存結果: 失敗 - {result.FailureReason}");
+
+        foreach (var message in result.Messages.Take(10))
+        {
+            ImGui.TextDisabled(message);
         }
     }
 
@@ -757,7 +830,7 @@ public sealed class SettingsTab : ITabComponent
             _titleScreenBackgroundService.ReloadNativeIntegration();
         }
 
-        ImGui.TextDisabled("BGM / 天候 / 時刻 / 現在地とカメラ保存は後続接続用の設定枠です。");
+        ImGui.TextDisabled("BGM / 天候 / 時刻は後続接続用の設定枠です。今回のカメラ保存には使いません。");
     }
 
     private void DrawTitleBackgroundSignatureInputs()

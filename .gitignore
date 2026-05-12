@@ -93,6 +93,8 @@ projects/DailyRoutines.ModulesPublic/
 
 # Temporary planning files
 plans/
+docs/notes/codex-*.md
+docs/notes/codex-*.html
 
 # Archived docs
 docs/archive/

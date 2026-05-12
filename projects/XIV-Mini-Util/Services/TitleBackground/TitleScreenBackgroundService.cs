@@ -5,6 +5,7 @@ using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.LayoutEngine;
 using System.Runtime.InteropServices;
+using System.Numerics;
 using System.Text;
 
 namespace XivMiniUtil.Services.TitleBackground;
@@ -17,6 +18,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private readonly IPluginLog _log;
     private readonly Configuration _configuration;
     private readonly TitleBackgroundAddressResolver _addressResolver = new();
+    private readonly TitleBackgroundCameraCaptureService _cameraCaptureService;
 
     private Hook<CreateSceneDelegate>? _createSceneHook;
     private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
@@ -33,7 +35,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private bool _lastCurrentMapWriteSucceeded;
     private bool _disposed;
     private string _lastObservedCreateScenePath = string.Empty;
+    private Vector3? _lastObservedFixOnCamera;
+    private Vector3? _lastObservedFixOnFocus;
     private float? _lastObservedFixOnFovY;
+    private bool _lastCameraOverrideApplied;
+    private Vector3? _lastAppliedCamera;
+    private Vector3? _lastAppliedFocus;
+    private float? _lastAppliedFovY;
+    private TitleBackgroundCameraCaptureResult _lastCameraCaptureResult = TitleBackgroundCameraCaptureResult.NotRun;
     private TitleBackgroundProbeSession? _activeProbeSession;
     private TitleBackgroundProbeSession? _lastProbeSession;
 
@@ -45,6 +54,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     public TitleScreenBackgroundService(
         IGameInteropProvider gameInteropProvider,
         ISigScanner sigScanner,
+        IClientState clientState,
+        IObjectTable objectTable,
         IDataManager dataManager,
         IPluginLog log,
         Configuration configuration)
@@ -54,6 +65,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _dataManager = dataManager;
         _log = log;
         _configuration = configuration;
+        _cameraCaptureService = new TitleBackgroundCameraCaptureService(clientState, objectTable, dataManager, log);
 
         InitializeHooks();
         ApplyFromConfiguration();
@@ -64,6 +76,40 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundOverrideEnabled = enabled;
         _configuration.Save();
         ReloadNativeIntegration();
+    }
+
+    public void SetCameraOverrideEnabled(bool enabled)
+    {
+        _configuration.TitleBackgroundCameraOverrideEnabled = enabled;
+        _configuration.Save();
+        ReloadNativeIntegration();
+    }
+
+    internal TitleBackgroundCameraCaptureResult LastCameraCaptureResult => _lastCameraCaptureResult;
+
+    internal TitleBackgroundCameraCaptureResult CaptureCurrentLocationAndCamera()
+    {
+        var result = _cameraCaptureService.Capture(_configuration);
+        _lastCameraCaptureResult = result;
+
+        if (!result.Success || result.Preset == null)
+        {
+            _log.Warning(
+                "[XMU BG] Camera capture failed. reason={Reason}",
+                string.IsNullOrWhiteSpace(result.FailureReason) ? "unknown" : result.FailureReason);
+            return result;
+        }
+
+        ApplyCapturedPreset(result.Preset);
+        _configuration.Save();
+        ApplyFromConfiguration();
+        _log.Information(
+            "[XMU BG] Camera capture saved. territoryPath={TerritoryPath}, camera={Camera}, focus={Focus}, fovY={FovY}",
+            result.Preset.TerritoryPath,
+            FormatVector(new Vector3(result.Preset.CameraX, result.Preset.CameraY, result.Preset.CameraZ)),
+            FormatVector(new Vector3(result.Preset.FocusX, result.Preset.FocusY, result.Preset.FocusZ)),
+            result.Preset.FovY);
+        return result;
     }
 
     public void ApplyFromConfiguration()
@@ -110,6 +156,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             return;
         }
 
+        if (IsCameraHookRequired() && !AreCameraHookReady())
+        {
+            _state = TitleBackgroundServiceState.HookCreateFailed;
+            _stateReason = "camera hook unavailable";
+            return;
+        }
+
         _state = TitleBackgroundServiceState.Ready;
         _stateReason = "準備完了";
     }
@@ -117,6 +170,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     public void ReloadNativeIntegration()
     {
         _cameraApplyPending = false;
+        ResetCameraOverrideObservation();
         _loadingLobbyType = GameLobbyType.None;
         DisposeHooks();
         InitializeHooks();
@@ -128,6 +182,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundOverrideEnabled = false;
         _configuration.Save();
         _cameraApplyPending = false;
+        ResetCameraOverrideObservation();
         DisposeHooks();
         _state = TitleBackgroundServiceState.Disabled;
         _stateReason = "無効";
@@ -152,15 +207,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         var sceneHooksReady = AreSceneHooksReady();
         var cameraHookReady = AreCameraHookReady();
-        var shouldCreateCameraHook = TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(
-            _configuration.TitleBackgroundRuntimeMode,
-            _configuration.TitleBackgroundOverrideEnabled,
-            _configuration.TitleBackgroundCameraOverrideEnabled);
-        var hooksReady = sceneHooksReady && (!shouldCreateCameraHook || cameraHookReady);
+        var cameraHookRequired = IsCameraHookRequired();
+        var hooksReady = sceneHooksReady && (!cameraHookRequired || cameraHookReady);
         var hooksEnabled = IsHookEnabled(_createSceneHook)
             || IsHookEnabled(_lobbyUpdateHook)
             || IsHookEnabled(_loadLobbySceneHook)
             || IsHookEnabled(_cameraFixOnHook);
+        var capturePreset = _lastCameraCaptureResult.Preset;
         var lines = new List<string>
         {
             $"runtimeMode={_configuration.TitleBackgroundRuntimeMode}",
@@ -171,8 +224,25 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"hooksReady={hooksReady}",
             $"sceneHooksReady={sceneHooksReady}",
             $"cameraHookReady={cameraHookReady}",
+            $"cameraHookRequired={cameraHookRequired}",
             $"cameraHookEnabled={IsHookEnabled(_cameraFixOnHook)}",
             $"cameraOverrideEnabled={_configuration.TitleBackgroundCameraOverrideEnabled}",
+            $"cameraOverrideApplyPending={_cameraApplyPending}",
+            $"cameraCapture.lastStatus={_lastCameraCaptureResult.Status}",
+            $"cameraCapture.lastFailureReason={FormatNone(_lastCameraCaptureResult.FailureReason)}",
+            $"cameraCapture.lastFovState={_lastCameraCaptureResult.FovState}",
+            $"lastCapturedTerritoryPath={(capturePreset == null ? "none" : capturePreset.TerritoryPath)}",
+            $"lastCapturedCamera={FormatVector(capturePreset == null ? null : new Vector3(capturePreset.CameraX, capturePreset.CameraY, capturePreset.CameraZ))}",
+            $"lastCapturedFocus={FormatVector(capturePreset == null ? null : new Vector3(capturePreset.FocusX, capturePreset.FocusY, capturePreset.FocusZ))}",
+            $"lastCapturedFovY={(capturePreset == null ? "none" : capturePreset.FovY.ToString("0.###"))}",
+            $"lastObservedFixOnCamera={FormatVector(_lastObservedFixOnCamera)}",
+            $"lastObservedFixOnFocus={FormatVector(_lastObservedFixOnFocus)}",
+            $"lastObservedFixOnFovY={(_lastObservedFixOnFovY.HasValue ? _lastObservedFixOnFovY.Value.ToString("0.###") : "none")}",
+            $"lastFixOnFovY={(_lastObservedFixOnFovY.HasValue ? _lastObservedFixOnFovY.Value.ToString("0.###") : "none")}",
+            $"lastCameraOverrideApplied={_lastCameraOverrideApplied}",
+            $"lastAppliedCamera={FormatVector(_lastAppliedCamera)}",
+            $"lastAppliedFocus={FormatVector(_lastAppliedFocus)}",
+            $"lastAppliedFovY={(_lastAppliedFovY.HasValue ? _lastAppliedFovY.Value.ToString("0.###") : "none")}",
             $"titleOverrideImplemented={TitleBackgroundRuntimeModeHelper.IsTitleOverrideImplemented(_configuration.TitleBackgroundRuntimeMode)}",
             "fixOnAbiVerified=False",
             $"hooksEnabled={hooksEnabled}",
@@ -229,7 +299,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"loadingLobbyType={_loadingLobbyType}",
             $"effectiveLobbyType={EffectiveLobbyType}",
             $"lastCreateScenePath={(_lastObservedCreateScenePath.Length == 0 ? "none" : _lastObservedCreateScenePath)}",
-            $"lastFixOnFovY={(_lastObservedFixOnFovY.HasValue ? _lastObservedFixOnFovY.Value.ToString("0.###") : "none")}",
             $"resolverError={(_addressResolver.LastError.Length == 0 ? "none" : _addressResolver.LastError)}",
         };
 
@@ -362,6 +431,26 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return true;
     }
 
+    private void ApplyCapturedPreset(TitleBackgroundPreset preset)
+    {
+        var normalized = preset.Normalize();
+        _configuration.TitleBackgroundTerritoryPath = normalized.TerritoryPath;
+        _configuration.TitleBackgroundTerritoryTypeId = normalized.TerritoryTypeId;
+        _configuration.TitleBackgroundLayoutTerritoryTypeId = normalized.LayoutTerritoryTypeId;
+        _configuration.TitleBackgroundLayoutLayerFilterKey = normalized.LayoutLayerFilterKey;
+        _configuration.TitleBackgroundCharacterPositionX = normalized.CharacterPosition.X;
+        _configuration.TitleBackgroundCharacterPositionY = normalized.CharacterPosition.Y;
+        _configuration.TitleBackgroundCharacterPositionZ = normalized.CharacterPosition.Z;
+        _configuration.TitleBackgroundCharacterRotation = normalized.CharacterRotation;
+        _configuration.TitleBackgroundCameraX = normalized.CameraX;
+        _configuration.TitleBackgroundCameraY = normalized.CameraY;
+        _configuration.TitleBackgroundCameraZ = normalized.CameraZ;
+        _configuration.TitleBackgroundFocusX = normalized.FocusX;
+        _configuration.TitleBackgroundFocusY = normalized.FocusY;
+        _configuration.TitleBackgroundFocusZ = normalized.FocusZ;
+        _configuration.TitleBackgroundFovY = normalized.FovY;
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -371,6 +460,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
         _disposed = true;
         _cameraApplyPending = false;
+        ResetCameraOverrideObservation();
         _loadingLobbyType = GameLobbyType.None;
         _lastLobbyUpdateMapId = GameLobbyType.None;
         _currentMapWriteAttempted = false;
@@ -407,10 +497,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _createSceneHook = _gameInteropProvider.HookFromAddress<CreateSceneDelegate>(_addressResolver.CreateScene, CreateSceneDetour);
             _lobbyUpdateHook = _gameInteropProvider.HookFromAddress<LobbyUpdateDelegate>(_addressResolver.LobbyUpdate, LobbyUpdateDetour);
             _loadLobbySceneHook = _gameInteropProvider.HookFromAddress<LoadLobbySceneDelegate>(_addressResolver.LoadLobbyScene, LoadLobbySceneDetour);
-            if (TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(
-                _configuration.TitleBackgroundRuntimeMode,
-                _configuration.TitleBackgroundOverrideEnabled,
-                _configuration.TitleBackgroundCameraOverrideEnabled))
+            if (IsCameraHookRequired())
             {
                 _cameraFixOnHook = _gameInteropProvider.HookFromAddress<LobbyCameraFixOnDelegate>(_addressResolver.FixOn, LobbyCameraFixOnDetour);
             }
@@ -419,6 +506,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _lobbyUpdateHook.Enable();
             _loadLobbySceneHook.Enable();
             _cameraFixOnHook?.Enable();
+            if (_cameraFixOnHook != null)
+            {
+                _log.Information(
+                    "[XMU BG] LobbyCameraFixOn hook resolved/enabled. address={Address}, enabled={Enabled}",
+                    FormatAddress(_addressResolver.FixOn),
+                    _cameraFixOnHook.IsEnabled);
+            }
+
             _state = TitleBackgroundServiceState.Disabled;
             _stateReason = "無効";
         }
@@ -533,23 +628,35 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var overrideFovY = fovY;
         try
         {
+            _lastObservedFixOnCamera = TryReadVector(cameraPos);
+            _lastObservedFixOnFocus = TryReadVector(focusPos);
             _lastObservedFixOnFovY = fovY;
             if (ShouldOverrideCamera())
             {
                 _cameraApplyPending = false;
+                var plan = TitleBackgroundCameraOverridePlan.FromConfiguration(_configuration);
                 cameraOverride =
                 [
-                    _configuration.TitleBackgroundCameraX,
-                    _configuration.TitleBackgroundCameraY,
-                    _configuration.TitleBackgroundCameraZ,
+                    plan.Camera.X,
+                    plan.Camera.Y,
+                    plan.Camera.Z,
                 ];
                 focusOverride =
                 [
-                    _configuration.TitleBackgroundCharacterPositionX,
-                    _configuration.TitleBackgroundCharacterPositionY,
-                    _configuration.TitleBackgroundCharacterPositionZ,
+                    plan.Focus.X,
+                    plan.Focus.Y,
+                    plan.Focus.Z,
                 ];
-                overrideFovY = _configuration.TitleBackgroundFovY;
+                overrideFovY = plan.FovY;
+                _lastCameraOverrideApplied = true;
+                _lastAppliedCamera = plan.Camera;
+                _lastAppliedFocus = plan.Focus;
+                _lastAppliedFovY = plan.FovY;
+                _log.Information(
+                    "[XMU BG] Camera override applied. camera={Camera}, focus={Focus}, fovY={FovY}",
+                    FormatVector(plan.Camera),
+                    FormatVector(plan.Focus),
+                    plan.FovY);
             }
         }
         catch (Exception ex)
@@ -594,12 +701,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private bool ShouldOverrideCamera()
     {
-        return _configuration.TitleBackgroundCameraOverrideEnabled
-            && !IsHookProbeMode()
-            && _cameraApplyPending
-            && _state == TitleBackgroundServiceState.Ready
-            && TryReadCurrentLobbyMap(out var currentMap)
-            && currentMap == GameLobbyType.CharaSelect;
+        var currentMapAvailable = TryReadCurrentLobbyMap(out var currentMap);
+        return TitleBackgroundCameraOverridePlan.ShouldApply(
+            _configuration.TitleBackgroundCameraOverrideEnabled,
+            IsHookProbeMode(),
+            _cameraApplyPending,
+            _state == TitleBackgroundServiceState.Ready,
+            currentMapAvailable,
+            currentMap);
     }
 
     private bool TryReadCurrentLobbyMap(out GameLobbyType map)
@@ -676,8 +785,16 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private bool AreCameraHookReady()
     {
-        return _configuration.TitleBackgroundCameraOverrideEnabled
+        return IsCameraHookRequired()
             && _cameraFixOnHook != null;
+    }
+
+    private bool IsCameraHookRequired()
+    {
+        return TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(
+            _configuration.TitleBackgroundRuntimeMode,
+            _configuration.TitleBackgroundOverrideEnabled,
+            _configuration.TitleBackgroundCameraOverrideEnabled);
     }
 
     private bool AreNativeSceneAddressesReady()
@@ -736,6 +853,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
 
         _log.Warning(ex, "TitleBackground runtime error in {HookName}.", hookName);
+    }
+
+    private void ResetCameraOverrideObservation()
+    {
+        _lastCameraOverrideApplied = false;
+        _lastAppliedCamera = null;
+        _lastAppliedFocus = null;
+        _lastAppliedFovY = null;
     }
 
     private void DisposeHooks()
@@ -838,6 +963,34 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private static string FormatAddress(nint address)
     {
         return address == nint.Zero ? "0x0" : $"0x{address.ToInt64():X}";
+    }
+
+    private static string FormatNone(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "none" : value;
+    }
+
+    private static string FormatVector(Vector3? value)
+    {
+        return value.HasValue ? FormatVector(value.Value) : "none";
+    }
+
+    private static string FormatVector(Vector3 value)
+    {
+        return $"({value.X:0.###}, {value.Y:0.###}, {value.Z:0.###})";
+    }
+
+    private static Vector3? TryReadVector(float* values)
+    {
+        if (values == null)
+        {
+            return null;
+        }
+
+        var vector = new Vector3(values[0], values[1], values[2]);
+        return float.IsFinite(vector.X) && float.IsFinite(vector.Y) && float.IsFinite(vector.Z)
+            ? vector
+            : null;
     }
 
     private static string NormalizeSignature(string? signature)

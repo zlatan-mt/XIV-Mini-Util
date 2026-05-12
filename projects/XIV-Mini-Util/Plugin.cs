@@ -136,6 +136,8 @@ public sealed class Plugin : IDalamudPlugin
         _titleScreenBackgroundService = new TitleScreenBackgroundService(
             gameInteropProvider,
             sigScanner,
+            clientState,
+            objectTable,
             dataManager,
             pluginLog,
             _configuration);
