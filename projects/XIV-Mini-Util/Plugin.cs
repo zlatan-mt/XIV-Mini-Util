@@ -7,6 +7,7 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Interface.Windowing;
 using System.Reflection;
+using ImGui = Dalamud.Bindings.ImGui.ImGui;
 using XivMiniUtil.Services.Common;
 using XivMiniUtil.Services.Checklist;
 using XivMiniUtil.Services.CharaSelect;
@@ -228,11 +229,11 @@ public sealed class Plugin : IDalamudPlugin
         });
         _commandManager.AddHandler(TitleBackgroundDiagnosticCommandName, new CommandInfo(OnTitleBackgroundDiagnosticCommand)
         {
-            HelpMessage = "タイトル背景差し替えの診断情報を表示します。",
+            HelpMessage = "タイトル背景差し替えの診断情報を表示します。サブコマンド: copy",
         });
         _commandManager.AddHandler(TitleBackgroundDiagnosticCommandAlias, new CommandInfo(OnTitleBackgroundDiagnosticCommand)
         {
-            HelpMessage = "タイトル背景差し替えの診断情報を表示します。",
+            HelpMessage = "タイトル背景差し替えの診断情報を表示します。サブコマンド: copy",
         });
         _commandManager.AddHandler(TitleBackgroundProbeCommandName, new CommandInfo(OnTitleBackgroundProbeCommand)
         {
@@ -357,11 +358,26 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnTitleBackgroundDiagnosticCommand(string command, string args)
     {
-        foreach (var line in _titleScreenBackgroundService.GetDiagnosticLines())
+        var lines = _titleScreenBackgroundService.GetDiagnosticLines();
+        if (ShouldCopyCommandOutput(args))
+        {
+            CopyTitleBackgroundDiagnosticLines(lines);
+            return;
+        }
+
+        foreach (var line in lines)
         {
             _chatGui.Print($"[XIV Mini Util] {line}");
             _pluginLog.Information("TitleBackground diag: {Line}", line);
         }
+    }
+
+    private void CopyTitleBackgroundDiagnosticLines(IReadOnlyList<string> lines)
+    {
+        var text = string.Join(Environment.NewLine, lines.Select(line => $"[XIV Mini Util] {line}"));
+        ImGui.SetClipboardText(text);
+        _chatGui.Print($"[XIV Mini Util] title background diagnostic copied to clipboard. lines={lines.Count}");
+        _pluginLog.Information("TitleBackground diag copied to clipboard. lines={LineCount}", lines.Count);
     }
 
     private void OnTitleBackgroundProbeCommand(string command, string args)
@@ -395,6 +411,11 @@ public sealed class Plugin : IDalamudPlugin
 
         var separatorIndex = trimmed.IndexOfAny([' ', '\t', '　']);
         return (separatorIndex < 0 ? trimmed : trimmed[..separatorIndex]).ToLowerInvariant();
+    }
+
+    private static bool ShouldCopyCommandOutput(string args)
+    {
+        return GetSubCommand(args) is "copy" or "clip" or "clipboard";
     }
 
     private static TimeZoneInfo GetDisplayTimeZone()
@@ -433,6 +454,7 @@ public sealed class Plugin : IDalamudPlugin
         _chatGui.Print("/xmuversion : 読み込み中のDLLとビルド時刻を表示します。");
         _chatGui.Print("/xmuc : キャラ選択画面のエモート/声診断情報を表示します。");
         _chatGui.Print("/xmutbg : タイトル背景差し替えの診断情報を表示します。");
+        _chatGui.Print("/xmutbg copy : タイトル背景差し替えの診断情報をクリップボードへコピーします。");
         _chatGui.Print("/xmu : /xivminiutil のエイリアス");
     }
 

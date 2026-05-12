@@ -285,6 +285,7 @@ Test("title background resolve only does not create hooks", () =>
 Test("title background hook probe creates scene hooks only", () =>
 {
     return TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(TitleBackgroundRuntimeMode.HookProbe, overrideEnabled: true)
+        && TitleBackgroundRuntimeModeHelper.ShouldAllowDirectTextHookTargets(TitleBackgroundRuntimeMode.HookProbe, overrideEnabled: false)
         && !TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(TitleBackgroundRuntimeMode.HookProbe, overrideEnabled: true, cameraOverrideEnabled: true)
         && !TitleBackgroundRuntimeModeHelper.ShouldValidateSceneOverrideConfiguration(TitleBackgroundRuntimeMode.HookProbe);
 });
@@ -292,6 +293,8 @@ Test("title background hook probe creates scene hooks only", () =>
 Test("title background chara select scene readiness does not require fix on", () =>
 {
     return TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: true)
+        && TitleBackgroundRuntimeModeHelper.ShouldAllowDirectTextHookTargets(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: true)
+        && !TitleBackgroundRuntimeModeHelper.ShouldAllowDirectTextHookTargets(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: false)
         && TitleBackgroundRuntimeModeHelper.AreSceneHooksReady(createSceneReady: true, lobbyUpdateReady: true, loadLobbySceneReady: true)
         && !TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: true, cameraOverrideEnabled: false);
 });
@@ -356,7 +359,7 @@ Test("title background direct text candidate requires nonzero match", () =>
         && !TitleBackgroundAddressResolver.ShouldRecordDirectTextCandidate(nint.Zero);
 });
 
-Test("title background direct text hook target requires manual probe opt in", () =>
+Test("title background direct text hook target supports probe and chara select runtime", () =>
 {
     return TitleBackgroundAddressResolver.ShouldPromoteDirectTextCandidateForProbe(
             new nint(0x1000),
@@ -366,10 +369,14 @@ Test("title background direct text hook target requires manual probe opt in", ()
             new nint(0x1000),
             TitleBackgroundResolverMode.AutoDiagnosticOnly,
             allowDirectTextProbeTarget: true)
-        && !TitleBackgroundAddressResolver.ShouldPromoteDirectTextCandidateForProbe(
+        && TitleBackgroundAddressResolver.ShouldPromoteDirectTextCandidateForHook(
+            new nint(0x1000),
+            TitleBackgroundResolverMode.AutoDiagnosticOnly,
+            allowDirectTextHookTarget: true)
+        && !TitleBackgroundAddressResolver.ShouldPromoteDirectTextCandidateForHook(
             new nint(0x1000),
             TitleBackgroundResolverMode.ManualDirectTextProbe,
-            allowDirectTextProbeTarget: false);
+            allowDirectTextHookTarget: false);
 });
 
 Test("title background prologue hint classifies common msvc prologue", () =>

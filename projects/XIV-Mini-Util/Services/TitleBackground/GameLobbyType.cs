@@ -43,6 +43,12 @@ internal static class TitleBackgroundRuntimeModeHelper
         return overrideEnabled && mode is TitleBackgroundRuntimeMode.CharaSelectOnly or TitleBackgroundRuntimeMode.HookProbe;
     }
 
+    public static bool ShouldAllowDirectTextHookTargets(TitleBackgroundRuntimeMode mode, bool overrideEnabled)
+    {
+        return mode == TitleBackgroundRuntimeMode.HookProbe
+            || (overrideEnabled && mode == TitleBackgroundRuntimeMode.CharaSelectOnly);
+    }
+
     public static bool ShouldCreateCameraHook(TitleBackgroundRuntimeMode mode, bool overrideEnabled, bool cameraOverrideEnabled)
     {
         return mode == TitleBackgroundRuntimeMode.CharaSelectOnly

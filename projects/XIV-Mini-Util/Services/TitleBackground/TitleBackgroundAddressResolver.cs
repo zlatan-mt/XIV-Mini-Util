@@ -38,13 +38,15 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         LastError = string.Empty;
         _scanResults.Clear();
 
-        var allowDirectTextProbeTargets = configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.HookProbe;
+        var allowDirectTextHookTargets = TitleBackgroundRuntimeModeHelper.ShouldAllowDirectTextHookTargets(
+            configuration.TitleBackgroundRuntimeMode,
+            configuration.TitleBackgroundOverrideEnabled);
         var createSceneResolved = TryResolveE8Call(
             sigScanner,
             configuration.TitleBackgroundCreateSceneSignature,
             nameof(CreateScene),
             configuration.TitleBackgroundCreateSceneResolverMode,
-            allowDirectTextProbeTargets,
+            allowDirectTextHookTargets,
             out var createSceneMatch,
             out var createScene);
         var lobbyUpdateResolved = TryResolveE8Call(
@@ -52,7 +54,7 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             configuration.TitleBackgroundLobbyUpdateSignature,
             nameof(LobbyUpdate),
             configuration.TitleBackgroundLobbyUpdateResolverMode,
-            allowDirectTextProbeTargets,
+            allowDirectTextHookTargets,
             out var lobbyUpdateMatch,
             out var lobbyUpdate);
         var loadLobbySceneResolved = TryResolveText(sigScanner, configuration.TitleBackgroundLoadLobbySceneSignature, nameof(LoadLobbyScene), out var loadLobbyScene);
@@ -133,24 +135,27 @@ internal sealed unsafe class TitleBackgroundAddressResolver
 
         if (!TryFindE8Callsite(sigScanner, match, out var callsite))
         {
-            if (ShouldPromoteDirectTextCandidateForProbe(match, resolverMode, allowDirectTextProbeTarget))
+            if (ShouldPromoteDirectTextCandidateForHook(match, resolverMode, allowDirectTextProbeTarget))
             {
                 var candidateDiagnostics = BuildCandidateDiagnostics(match);
                 hookTarget = match;
+                var isProbeTarget = resolverMode == TitleBackgroundResolverMode.ManualDirectTextProbe;
                 _scanResults.Add(new TitleBackgroundSignatureScanResult(
                     name,
-                    "TryScanText+ManualDirectTextProbe",
-                    "resolved-probe",
+                    isProbeTarget ? "TryScanText+ManualDirectTextProbe" : "TryScanText+DirectTextRuntime",
+                    isProbeTarget ? "resolved-probe" : "resolved-direct",
                     match,
                     match,
                     hookTarget,
                     false,
                     true,
-                    "ManualDirectTextProbe",
+                    isProbeTarget ? "ManualDirectTextProbe" : "CharaSelectOnlyDirectText",
                     IsWithinText(sigScanner, match),
                     IsWithinText(sigScanner, match),
                     IsWithinText(sigScanner, match),
-                    $"{name} manual DirectText probe target is enabled; hook may observe calls but detours must not mutate state.",
+                    isProbeTarget
+                        ? $"{name} manual DirectText probe target is enabled; hook may observe calls but detours must not mutate state."
+                        : $"{name} DirectText target is enabled for CharaSelectOnly; scene mutation remains gated by lobby type.",
                     candidateDiagnostics));
                 return true;
             }
@@ -392,6 +397,17 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         return match != nint.Zero
             && allowDirectTextProbeTarget
             && resolverMode == TitleBackgroundResolverMode.ManualDirectTextProbe;
+    }
+
+    internal static bool ShouldPromoteDirectTextCandidateForHook(
+        nint match,
+        TitleBackgroundResolverMode resolverMode,
+        bool allowDirectTextHookTarget)
+    {
+        return ShouldPromoteDirectTextCandidateForProbe(match, resolverMode, allowDirectTextHookTarget)
+            || (match != nint.Zero
+                && allowDirectTextHookTarget
+                && resolverMode == TitleBackgroundResolverMode.AutoDiagnosticOnly);
     }
 
     internal static string ClassifyFunctionPrologue(ReadOnlySpan<byte> bytes)
