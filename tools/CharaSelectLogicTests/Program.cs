@@ -328,6 +328,48 @@ Test("title background camera apply requires pending chara select and skips hook
             currentMap: GameLobbyType.Title);
 });
 
+Test("title background fix on invocation mode is explicit", () =>
+{
+    return TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(overrideApplied: false) == "passthrough"
+        && TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(overrideApplied: true) == "override-applied";
+});
+
+Test("title background post fix on focus derives from normalized look vector and distance", () =>
+{
+    return TitleBackgroundCameraMath.TryDeriveFocus(
+            new Vector3(1f, 2f, 3f),
+            new Vector3(0f, 0f, 2f),
+            5f,
+            out var focus,
+            out _)
+        && focus == new Vector3(1f, 2f, 8f);
+});
+
+Test("title background post fix on focus fails closed on invalid inputs", () =>
+{
+    return !TitleBackgroundCameraMath.TryDeriveFocus(
+            new Vector3(1f, 2f, 3f),
+            Vector3.Zero,
+            5f,
+            out _,
+            out var zeroLookError)
+        && !string.IsNullOrWhiteSpace(zeroLookError)
+        && !TitleBackgroundCameraMath.TryDeriveFocus(
+            new Vector3(1f, 2f, 3f),
+            new Vector3(0f, 0f, 1f),
+            float.NaN,
+            out _,
+            out var distanceError)
+        && !string.IsNullOrWhiteSpace(distanceError)
+        && !TitleBackgroundCameraMath.TryDeriveFocus(
+            new Vector3(float.NaN, 2f, 3f),
+            new Vector3(0f, 0f, 1f),
+            5f,
+            out _,
+            out var cameraError)
+        && !string.IsNullOrWhiteSpace(cameraError);
+});
+
 Test("title background capture preset builder keeps existing fov when unavailable", () =>
 {
     var existing = new TitleBackgroundPreset

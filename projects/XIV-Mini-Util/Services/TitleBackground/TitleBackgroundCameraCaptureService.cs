@@ -12,7 +12,6 @@ namespace XivMiniUtil.Services.TitleBackground;
 
 internal sealed unsafe class TitleBackgroundCameraCaptureService
 {
-    private const float MinFocusDistance = 0.001f;
     private readonly IClientState _clientState;
     private readonly IObjectTable _objectTable;
     private readonly IDataManager _dataManager;
@@ -170,13 +169,13 @@ internal sealed unsafe class TitleBackgroundCameraCaptureService
 
         camera = ToNumerics(activeCamera->CameraBase.SceneCamera.Position);
         var lookAtVector = ToNumerics(activeCamera->CameraBase.SceneCamera.LookAtVector);
-        if (!IsFiniteVector(camera))
+        if (!TitleBackgroundCameraMath.IsFiniteVector(camera))
         {
             errorMessage = "Camera eye position に不正値が含まれています。";
             return false;
         }
 
-        if (!TryDeriveFocus(camera, lookAtVector, activeCamera->Distance, out focus, out var focusMessage))
+        if (!TitleBackgroundCameraMath.TryDeriveFocus(camera, lookAtVector, activeCamera->Distance, out focus, out var focusMessage))
         {
             errorMessage = focusMessage;
             return false;
@@ -213,7 +212,7 @@ internal sealed unsafe class TitleBackgroundCameraCaptureService
 
         var position = localPlayer.Position;
         var captured = new Vector3(position.X, position.Y, position.Z);
-        if (!IsFiniteVector(captured))
+        if (!TitleBackgroundCameraMath.IsFiniteVector(captured))
         {
             return null;
         }
@@ -276,53 +275,8 @@ internal sealed unsafe class TitleBackgroundCameraCaptureService
         }
     }
 
-    private static bool TryDeriveFocus(
-        Vector3 camera,
-        Vector3 lookAtVector,
-        float distance,
-        out Vector3 focus,
-        out string message)
-    {
-        focus = default;
-        if (!IsFiniteVector(lookAtVector))
-        {
-            message = "Focus 取得失敗: camera look-at vector に不正値が含まれています。";
-            return false;
-        }
-
-        if (!float.IsFinite(distance) || distance <= MinFocusDistance)
-        {
-            message = "Focus 取得失敗: camera distance が取得不能または 0 です。";
-            return false;
-        }
-
-        var length = lookAtVector.Length();
-        if (!float.IsFinite(length) || length <= MinFocusDistance)
-        {
-            message = "Focus 取得失敗: camera look-at vector が 0 です。";
-            return false;
-        }
-
-        focus = camera + (lookAtVector / length * distance);
-        if (!IsFiniteVector(focus))
-        {
-            message = "Focus 取得失敗: 導出した focus point に不正値が含まれています。";
-            return false;
-        }
-
-        message = "Focus source: SceneCamera.LookAtVector + active camera Distance から安全に導出";
-        return true;
-    }
-
     private static Vector3 ToNumerics(ClientVector3 value)
     {
         return new Vector3(value.X, value.Y, value.Z);
-    }
-
-    private static bool IsFiniteVector(Vector3 value)
-    {
-        return float.IsFinite(value.X)
-            && float.IsFinite(value.Y)
-            && float.IsFinite(value.Z);
     }
 }

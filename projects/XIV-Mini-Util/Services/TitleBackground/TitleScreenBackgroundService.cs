@@ -3,10 +3,12 @@
 // Reason: HaselTweaks相当のemote/pet/preload機能から背景差し替えを分離するため
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.Game.Control;
 using FFXIVClientStructs.FFXIV.Client.LayoutEngine;
 using System.Runtime.InteropServices;
 using System.Numerics;
 using System.Text;
+using ClientVector3 = FFXIVClientStructs.FFXIV.Common.Math.Vector3;
 
 namespace XivMiniUtil.Services.TitleBackground;
 
@@ -42,6 +44,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private Vector3? _lastAppliedCamera;
     private Vector3? _lastAppliedFocus;
     private float? _lastAppliedFovY;
+    private string _lastFixOnInvocationMode = "not-run";
+    private string _lastPostFixOnCameraCaptureStatus = "not-run";
+    private string _lastPostFixOnCameraCaptureError = string.Empty;
+    private Vector3? _lastPostFixOnSceneCameraPosition;
+    private Vector3? _lastPostFixOnLookAtVector;
+    private float? _lastPostFixOnDistance;
+    private Vector3? _lastPostFixOnDerivedFocus;
+    private float? _lastPostFixOnFovY;
     private TitleBackgroundCameraCaptureResult _lastCameraCaptureResult = TitleBackgroundCameraCaptureResult.NotRun;
     private TitleBackgroundProbeSession? _activeProbeSession;
     private TitleBackgroundProbeSession? _lastProbeSession;
@@ -243,6 +253,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"lastAppliedCamera={FormatVector(_lastAppliedCamera)}",
             $"lastAppliedFocus={FormatVector(_lastAppliedFocus)}",
             $"lastAppliedFovY={(_lastAppliedFovY.HasValue ? _lastAppliedFovY.Value.ToString("0.###") : "none")}",
+            $"lastFixOnInvocationMode={_lastFixOnInvocationMode}",
+            $"postFixOnCameraCaptureStatus={_lastPostFixOnCameraCaptureStatus}",
+            $"postFixOnCameraCaptureError={FormatNone(_lastPostFixOnCameraCaptureError)}",
+            $"postFixOnSceneCameraPosition={FormatVector(_lastPostFixOnSceneCameraPosition)}",
+            $"postFixOnLookAtVector={FormatVector(_lastPostFixOnLookAtVector)}",
+            $"postFixOnDistance={(_lastPostFixOnDistance.HasValue ? _lastPostFixOnDistance.Value.ToString("0.###") : "none")}",
+            $"postFixOnDerivedFocus={FormatVector(_lastPostFixOnDerivedFocus)}",
+            $"postFixOnFovY={(_lastPostFixOnFovY.HasValue ? _lastPostFixOnFovY.Value.ToString("0.###") : "none")}",
             $"titleOverrideImplemented={TitleBackgroundRuntimeModeHelper.IsTitleOverrideImplemented(_configuration.TitleBackgroundRuntimeMode)}",
             "fixOnAbiVerified=False",
             $"hooksEnabled={hooksEnabled}",
@@ -497,7 +515,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _createSceneHook = _gameInteropProvider.HookFromAddress<CreateSceneDelegate>(_addressResolver.CreateScene, CreateSceneDetour);
             _lobbyUpdateHook = _gameInteropProvider.HookFromAddress<LobbyUpdateDelegate>(_addressResolver.LobbyUpdate, LobbyUpdateDetour);
             _loadLobbySceneHook = _gameInteropProvider.HookFromAddress<LoadLobbySceneDelegate>(_addressResolver.LoadLobbyScene, LoadLobbySceneDetour);
-            if (IsCameraHookRequired())
+            if (ShouldCreateCameraHook())
             {
                 _cameraFixOnHook = _gameInteropProvider.HookFromAddress<LobbyCameraFixOnDelegate>(_addressResolver.FixOn, LobbyCameraFixOnDetour);
             }
@@ -626,6 +644,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         float[]? cameraOverride = null;
         float[]? focusOverride = null;
         var overrideFovY = fovY;
+        var invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(false);
         try
         {
             _lastObservedFixOnCamera = TryReadVector(cameraPos);
@@ -649,6 +668,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 ];
                 overrideFovY = plan.FovY;
                 _lastCameraOverrideApplied = true;
+                invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(true);
                 _lastAppliedCamera = plan.Camera;
                 _lastAppliedFocus = plan.Focus;
                 _lastAppliedFovY = plan.FovY;
@@ -665,18 +685,88 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             cameraOverride = null;
             focusOverride = null;
             overrideFovY = fovY;
+            invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(false);
         }
 
+        _lastFixOnInvocationMode = invocationMode;
+        nint result;
         if (cameraOverride != null && focusOverride != null)
         {
             fixed (float* cameraPointer = cameraOverride)
             fixed (float* focusPointer = focusOverride)
             {
-                return _cameraFixOnHook?.Original(self, cameraPointer, focusPointer, overrideFovY) ?? nint.Zero;
+                result = _cameraFixOnHook?.Original(self, cameraPointer, focusPointer, overrideFovY) ?? nint.Zero;
             }
         }
+        else
+        {
+            result = _cameraFixOnHook?.Original(self, cameraPos, focusPos, fovY) ?? nint.Zero;
+        }
 
-        return _cameraFixOnHook?.Original(self, cameraPos, focusPos, fovY) ?? nint.Zero;
+        CapturePostFixOnCameraState();
+        return result;
+    }
+
+    private void CapturePostFixOnCameraState()
+    {
+        ClearPostFixOnCameraObservation();
+        try
+        {
+            var cameraManager = CameraManager.Instance();
+            if (cameraManager == null)
+            {
+                MarkPostFixOnCameraCaptureFailed("CameraManager.Instance() unavailable");
+                return;
+            }
+
+            var activeCamera = cameraManager->GetActiveCamera();
+            if (activeCamera == null)
+            {
+                MarkPostFixOnCameraCaptureFailed("active camera unavailable");
+                return;
+            }
+
+            var sceneCameraPosition = ToNumerics(activeCamera->CameraBase.SceneCamera.Position);
+            var lookAtVector = ToNumerics(activeCamera->CameraBase.SceneCamera.LookAtVector);
+            var distance = activeCamera->Distance;
+            var fovY = activeCamera->FoV;
+            _lastPostFixOnSceneCameraPosition = sceneCameraPosition;
+            _lastPostFixOnLookAtVector = lookAtVector;
+            _lastPostFixOnDistance = float.IsFinite(distance) ? distance : null;
+            _lastPostFixOnFovY = float.IsFinite(fovY) ? fovY : null;
+
+            if (!TitleBackgroundCameraMath.TryDeriveFocus(sceneCameraPosition, lookAtVector, distance, out var derivedFocus, out var focusMessage))
+            {
+                MarkPostFixOnCameraCaptureFailed(focusMessage);
+                return;
+            }
+
+            _lastPostFixOnDerivedFocus = derivedFocus;
+            _lastPostFixOnCameraCaptureStatus = "success";
+            _lastPostFixOnCameraCaptureError = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            MarkPostFixOnCameraCaptureFailed(ex.Message);
+            _log.Warning(ex, "TitleBackground post-FixOn camera capture failed.");
+        }
+    }
+
+    private void MarkPostFixOnCameraCaptureFailed(string reason)
+    {
+        _lastPostFixOnCameraCaptureStatus = "failed";
+        _lastPostFixOnCameraCaptureError = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
+    }
+
+    private void ClearPostFixOnCameraObservation()
+    {
+        _lastPostFixOnCameraCaptureStatus = "unavailable";
+        _lastPostFixOnCameraCaptureError = string.Empty;
+        _lastPostFixOnSceneCameraPosition = null;
+        _lastPostFixOnLookAtVector = null;
+        _lastPostFixOnDistance = null;
+        _lastPostFixOnDerivedFocus = null;
+        _lastPostFixOnFovY = null;
     }
 
     private bool ShouldResetCurrentMapForReload(GameLobbyType nextMap)
@@ -785,8 +875,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private bool AreCameraHookReady()
     {
-        return IsCameraHookRequired()
-            && _cameraFixOnHook != null;
+        return _cameraFixOnHook != null;
     }
 
     private bool IsCameraHookRequired()
@@ -795,6 +884,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _configuration.TitleBackgroundRuntimeMode,
             _configuration.TitleBackgroundOverrideEnabled,
             _configuration.TitleBackgroundCameraOverrideEnabled);
+    }
+
+    private bool ShouldCreateCameraHook()
+    {
+        return IsCameraHookRequired()
+            || (ShouldCreateSceneHooks()
+                && !IsHookProbeMode()
+                && _addressResolver.FixOn != nint.Zero);
     }
 
     private bool AreNativeSceneAddressesReady()
@@ -838,7 +935,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _configuration.TitleBackgroundRuntimeMode,
             _configuration.TitleBackgroundOverrideEnabled,
             _configuration.TitleBackgroundCameraOverrideEnabled);
-        return shouldCreateCameraHook == (_cameraFixOnHook != null);
+        var shouldCreateOptionalCameraHook = ShouldCreateSceneHooks()
+            && !IsHookProbeMode()
+            && _addressResolver.FixOn != nint.Zero;
+        return (shouldCreateCameraHook || shouldCreateOptionalCameraHook) == (_cameraFixOnHook != null);
     }
 
     private void MarkRuntimeError(Exception ex, string hookName)
@@ -861,6 +961,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _lastAppliedCamera = null;
         _lastAppliedFocus = null;
         _lastAppliedFovY = null;
+        _lastFixOnInvocationMode = "not-run";
+        ClearPostFixOnCameraObservation();
+        _lastPostFixOnCameraCaptureStatus = "not-run";
     }
 
     private void DisposeHooks()
@@ -991,6 +1094,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return float.IsFinite(vector.X) && float.IsFinite(vector.Y) && float.IsFinite(vector.Z)
             ? vector
             : null;
+    }
+
+    private static Vector3 ToNumerics(ClientVector3 value)
+    {
+        return new Vector3(value.X, value.Y, value.Z);
     }
 
     private static string NormalizeSignature(string? signature)

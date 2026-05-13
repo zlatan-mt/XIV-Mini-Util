@@ -48,6 +48,11 @@ internal readonly record struct TitleBackgroundCameraOverridePlan(
             && currentMap == GameLobbyType.CharaSelect;
     }
 
+    public static string GetFixOnInvocationMode(bool overrideApplied)
+    {
+        return overrideApplied ? "override-applied" : "passthrough";
+    }
+
     private static Vector3 SanitizeVector(Vector3 value)
     {
         return new Vector3(
