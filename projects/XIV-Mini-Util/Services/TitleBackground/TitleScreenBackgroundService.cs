@@ -50,7 +50,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private Vector3? _lastPostFixOnSceneCameraPosition;
     private Vector3? _lastPostFixOnLookAtVector;
     private float? _lastPostFixOnDistance;
-    private Vector3? _lastPostFixOnDerivedFocus;
     private float? _lastPostFixOnFovY;
     private TitleBackgroundCameraCaptureResult _lastCameraCaptureResult = TitleBackgroundCameraCaptureResult.NotRun;
     private TitleBackgroundProbeSession? _activeProbeSession;
@@ -258,8 +257,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"postFixOnCameraCaptureError={FormatNone(_lastPostFixOnCameraCaptureError)}",
             $"postFixOnSceneCameraPosition={FormatVector(_lastPostFixOnSceneCameraPosition)}",
             $"postFixOnLookAtVector={FormatVector(_lastPostFixOnLookAtVector)}",
+            "postFixOnLookAtVectorMeaning=raw SceneCamera.LookAtVector; meaning unverified, but live observation showed FixOn focusPos matched this field",
             $"postFixOnDistance={(_lastPostFixOnDistance.HasValue ? _lastPostFixOnDistance.Value.ToString("0.###") : "none")}",
-            $"postFixOnDerivedFocus={FormatVector(_lastPostFixOnDerivedFocus)}",
             $"postFixOnFovY={(_lastPostFixOnFovY.HasValue ? _lastPostFixOnFovY.Value.ToString("0.###") : "none")}",
             $"titleOverrideImplemented={TitleBackgroundRuntimeModeHelper.IsTitleOverrideImplemented(_configuration.TitleBackgroundRuntimeMode)}",
             "fixOnAbiVerified=False",
@@ -735,13 +734,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _lastPostFixOnDistance = float.IsFinite(distance) ? distance : null;
             _lastPostFixOnFovY = float.IsFinite(fovY) ? fovY : null;
 
-            if (!TitleBackgroundCameraMath.TryDeriveFocus(sceneCameraPosition, lookAtVector, distance, out var derivedFocus, out var focusMessage))
+            if (!TitleBackgroundCameraMath.IsFiniteVector(sceneCameraPosition))
             {
-                MarkPostFixOnCameraCaptureFailed(focusMessage);
+                MarkPostFixOnCameraCaptureFailed("SceneCamera.Position contains non-finite values");
                 return;
             }
 
-            _lastPostFixOnDerivedFocus = derivedFocus;
+            if (!TitleBackgroundCameraMath.IsFiniteVector(lookAtVector))
+            {
+                MarkPostFixOnCameraCaptureFailed("SceneCamera.LookAtVector contains non-finite values");
+                return;
+            }
+
             _lastPostFixOnCameraCaptureStatus = "success";
             _lastPostFixOnCameraCaptureError = string.Empty;
         }
@@ -765,7 +769,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _lastPostFixOnSceneCameraPosition = null;
         _lastPostFixOnLookAtVector = null;
         _lastPostFixOnDistance = null;
-        _lastPostFixOnDerivedFocus = null;
         _lastPostFixOnFovY = null;
     }
 

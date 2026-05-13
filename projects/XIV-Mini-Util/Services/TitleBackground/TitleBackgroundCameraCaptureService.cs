@@ -175,16 +175,17 @@ internal sealed unsafe class TitleBackgroundCameraCaptureService
             return false;
         }
 
-        if (!TitleBackgroundCameraMath.TryDeriveFocus(camera, lookAtVector, activeCamera->Distance, out focus, out var focusMessage))
+        if (!TitleBackgroundCameraMath.IsFiniteVector(lookAtVector))
         {
-            errorMessage = focusMessage;
+            errorMessage = "FixOn focus 候補の SceneCamera.LookAtVector に不正値が含まれています。";
             return false;
         }
 
+        focus = lookAtVector;
         var capturedMessages = new List<string>
         {
             "Camera source: CameraManager.GetActiveCamera().CameraBase.SceneCamera.Position",
-            focusMessage,
+            "Focus source: SceneCamera.LookAtVector raw field。実機観測では FixOn focusPos が post-FixOn LookAtVector に反映されたため、注視点への導出は行いません。",
         };
 
         if (float.IsFinite(activeCamera->FoV) && activeCamera->FoV > 0f)

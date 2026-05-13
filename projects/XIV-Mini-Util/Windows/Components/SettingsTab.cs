@@ -711,7 +711,7 @@ public sealed class SettingsTab : ITabComponent
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
         }
-        ImGui.TextDisabled("Focus はカメラ注視点です。FixOn hook の focus 引数にはこの値を渡します。");
+        ImGui.TextDisabled("Focus は FixOn focus 引数へ渡す値です。実機観測では post-FixOn LookAtVector に反映されます。");
 
         var fovY = _configuration.TitleBackgroundFovY;
         ImGui.SetNextItemWidth(120f);
