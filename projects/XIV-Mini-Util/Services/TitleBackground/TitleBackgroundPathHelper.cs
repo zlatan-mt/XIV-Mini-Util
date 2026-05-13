@@ -56,7 +56,7 @@ internal static class TitleBackgroundPathHelper
             return false;
         }
 
-        return normalizedTerritoryPath.StartsWith("ffxiv/", StringComparison.OrdinalIgnoreCase)
+        return HasValidPackRoot(normalizedTerritoryPath)
             && normalizedTerritoryPath.Contains("/level/", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -71,11 +71,41 @@ internal static class TitleBackgroundPathHelper
 
         if (!IsLikelyValidNormalizedTerritoryPath(normalizedTerritoryPath))
         {
-            errorMessage = "TerritoryPath は ffxiv/.../level/... 形式で指定してください。";
+            errorMessage = "TerritoryPath は <pack>/.../level/... 形式で指定してください。";
             return false;
         }
 
         errorMessage = string.Empty;
+        return true;
+    }
+
+    private static bool HasValidPackRoot(string normalizedTerritoryPath)
+    {
+        var slashIndex = normalizedTerritoryPath.IndexOf('/', StringComparison.Ordinal);
+        if (slashIndex <= 0)
+        {
+            return false;
+        }
+
+        var root = normalizedTerritoryPath[..slashIndex];
+        if (string.Equals(root, "ffxiv", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!root.StartsWith("ex", StringComparison.OrdinalIgnoreCase) || root.Length == 2)
+        {
+            return false;
+        }
+
+        for (var i = 2; i < root.Length; i++)
+        {
+            if (!char.IsAsciiDigit(root[i]))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 }

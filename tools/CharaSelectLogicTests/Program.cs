@@ -208,17 +208,32 @@ Test("lobby position falls back when territory is missing", () =>
 Test("title background path normalizes bg lvb wrapper", () =>
 {
     var normalized = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(
-        @" bg\ffxiv\area\region\level\sample.lvb ");
-    return normalized == "ffxiv/area/region/level/sample"
-        && TitleBackgroundPathHelper.BuildLvbPath(normalized) == "bg/ffxiv/area/region/level/sample.lvb";
+        @" bg\ex5\01_xkt_x6\fld\x6f3\level\x6f3.lvb ");
+    return normalized == "ex5/01_xkt_x6/fld/x6f3/level/x6f3"
+        && TitleBackgroundPathHelper.BuildLvbPath(normalized) == "bg/ex5/01_xkt_x6/fld/x6f3/level/x6f3.lvb"
+        && TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath(normalized);
 });
 
-Test("title background path validation requires ffxiv level path", () =>
+Test("title background path validation accepts base and expansion pack roots", () =>
 {
     return TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("ffxiv/area/region/level/sample")
+        && TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("ex5/01_xkt_x6/fld/x6f3/level/x6f3")
+        && TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("ex6/foo/bar/level/baz")
+        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("abc/foo/bar/level/baz")
         && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("ffxiv/area/region/sample")
         && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("../ffxiv/area/region/level/sample")
-        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("bg/ffxiv/area/region/level/sample.lvb");
+        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("bg/ex5/01_xkt_x6/fld/x6f3/level/x6f3.lvb");
+});
+
+Test("title background path validation rejects unsafe normalized paths", () =>
+{
+    return !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath(string.Empty)
+        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath(@"ex5\01_xkt_x6\fld\x6f3\level\x6f3")
+        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("ex5/01_xkt_x6//fld/x6f3/level/x6f3")
+        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("ex5/01_xkt_x6/../x6f3/level/x6f3")
+        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("ex5:/01_xkt_x6/fld/x6f3/level/x6f3")
+        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("/ex5/01_xkt_x6/fld/x6f3/level/x6f3")
+        && !TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath("ex5/01_xkt_x6/fld/x6f3/level/x6f3/");
 });
 
 Test("title background preset normalizes path and clamps fov", () =>
@@ -247,16 +262,16 @@ Test("title background preset validates normalized territory path", () =>
 {
     var valid = new TitleBackgroundPreset
     {
-        TerritoryPath = "ffxiv/area/region/level/sample",
+        TerritoryPath = "ex5/01_xkt_x6/fld/x6f3/level/x6f3",
     };
     var invalid = new TitleBackgroundPreset
     {
-        TerritoryPath = "ffxiv/area/region/sample",
+        TerritoryPath = "abc/foo/bar/level/baz",
     };
 
     return valid.Validate(out _)
         && !invalid.Validate(out var errorMessage)
-        && !string.IsNullOrWhiteSpace(errorMessage);
+        && errorMessage == "TerritoryPath は <pack>/.../level/... 形式で指定してください。";
 });
 
 Test("title background built-in preset catalog ids are stable and unique", () =>
@@ -536,6 +551,34 @@ Test("title background capture preset builder keeps existing fov when unavailabl
         && fovState == TitleBackgroundCaptureValueState.KeptExisting
         && preset.CharacterPosition == new Vector3(9f, 9f, 9f)
         && Math.Abs(preset.CharacterRotation - 0.25f) < 0.0001f;
+});
+
+Test("title background capture preset builder accepts expansion pack bg path", () =>
+{
+    var existing = new TitleBackgroundPreset { FovY = 1f }.Normalize();
+    var draft = new TitleBackgroundCameraCaptureDraft(
+        "ex5/01_xkt_x6/fld/x6f3/level/x6f3",
+        1234,
+        new Vector3(1f, 2f, 3f),
+        new Vector3(4f, 5f, 6f),
+        1.1f,
+        1234,
+        7,
+        null,
+        null);
+
+    return TitleBackgroundCameraCapturePresetBuilder.TryBuild(
+            draft,
+            existing,
+            out var preset,
+            out var fovState,
+            out _,
+            out _)
+        && preset.TerritoryPath == "ex5/01_xkt_x6/fld/x6f3/level/x6f3"
+        && preset.TerritoryTypeId == 1234
+        && preset.LayoutTerritoryTypeId == 1234
+        && preset.LayoutLayerFilterKey == 7
+        && fovState == TitleBackgroundCaptureValueState.Captured;
 });
 
 Test("title background capture preset builder fails closed on invalid required values", () =>
