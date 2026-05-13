@@ -46,6 +46,8 @@ public sealed class SettingsTab : ITabComponent
     private string _titleBackgroundPendingPresetId = string.Empty;
     private string _titleBackgroundPresetMessage = string.Empty;
     private Vector4 _titleBackgroundPresetMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
+    private string _titleBackgroundSceneCopyMessage = string.Empty;
+    private Vector4 _titleBackgroundSceneCopyMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
 
     // Submarine Settings State
 
@@ -866,6 +868,29 @@ public sealed class SettingsTab : ITabComponent
             _configuration.TitleBackgroundLayoutLayerFilterKey = (uint)Math.Clamp(layerFilterKey, 0, int.MaxValue);
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        ImGui.Spacing();
+        if (ImGui.Button("最後に観測した scene を override 値へコピー（検証用）"))
+        {
+            if (_titleScreenBackgroundService.TryCopyLastObservedCreateSceneToOverrideConfiguration(out var errorMessage))
+            {
+                _titleBackgroundPendingPresetId = string.Empty;
+                _titleBackgroundSceneCopyMessage = "最後に観測した scene を override 値へコピーしました。";
+                _titleBackgroundSceneCopyMessageColor = new Vector4(0.3f, 0.8f, 0.45f, 1f);
+            }
+            else
+            {
+                _titleBackgroundSceneCopyMessage = $"scene コピー失敗: {errorMessage}";
+                _titleBackgroundSceneCopyMessageColor = new Vector4(1f, 0.45f, 0.45f, 1f);
+            }
+        }
+
+        ImGui.TextDisabled("同じ scene を再指定する smoke test 用です。見た目の変化は想定しません。");
+        ImGui.TextDisabled("CharaSelectOnly smoke ではカメラ調整を無効のままにしてください。コピー時にも Camera override は OFF にします。");
+        if (!string.IsNullOrWhiteSpace(_titleBackgroundSceneCopyMessage))
+        {
+            ImGui.TextColored(_titleBackgroundSceneCopyMessageColor, _titleBackgroundSceneCopyMessage);
         }
 
         ImGui.Spacing();

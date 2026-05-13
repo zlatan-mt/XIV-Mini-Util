@@ -37,6 +37,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private bool _lastCurrentMapWriteSucceeded;
     private bool _disposed;
     private string _lastObservedCreateScenePath = string.Empty;
+    private bool _lastOverrideApplied;
+    private GameLobbyType _lastOverrideLobbyType = GameLobbyType.None;
+    private string _lastOverrideOriginalPath = string.Empty;
+    private string _lastOverrideNewPath = string.Empty;
     private Vector3? _lastObservedFixOnCamera;
     private Vector3? _lastObservedFixOnFocus;
     private float? _lastObservedFixOnFovY;
@@ -97,6 +101,52 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     }
 
     internal TitleBackgroundCameraCaptureResult LastCameraCaptureResult => _lastCameraCaptureResult;
+
+    internal bool TryCopyLastObservedCreateSceneToOverrideConfiguration(out string errorMessage)
+    {
+        var lastPath = _automaticProbeCounters.LastCreateScenePath;
+        if (string.IsNullOrWhiteSpace(lastPath))
+        {
+            errorMessage = "HookProbe で観測した CreateScene path がありません。";
+            return false;
+        }
+
+        if (!TitleBackgroundPathHelper.TryNormalizeAndValidateTerritoryPath(lastPath, out var normalizedPath, out errorMessage))
+        {
+            return false;
+        }
+
+        var lvbPath = TitleBackgroundPathHelper.BuildLvbPath(normalizedPath);
+        try
+        {
+            if (!_dataManager.FileExists(lvbPath))
+            {
+                errorMessage = $"LVB が見つかりません: {lvbPath}";
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"LVB validation failed: {ex.Message}";
+            return false;
+        }
+
+        _configuration.TitleBackgroundSelectedPresetId = string.Empty;
+        _configuration.TitleBackgroundCameraOverrideEnabled = false;
+        _configuration.TitleBackgroundTerritoryPath = normalizedPath;
+        _configuration.TitleBackgroundTerritoryTypeId = _automaticProbeCounters.LastCreateSceneTerritoryId;
+        _configuration.TitleBackgroundLayoutTerritoryTypeId = _automaticProbeCounters.LastCreateSceneTerritoryId;
+        _configuration.TitleBackgroundLayoutLayerFilterKey = _automaticProbeCounters.LastCreateSceneLayerFilterKey;
+        _configuration.Save();
+        ApplyFromConfiguration();
+        _log.Information(
+            "[XMU BG] Copied observed CreateScene values to override configuration. path={Path}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}",
+            normalizedPath,
+            _configuration.TitleBackgroundLayoutTerritoryTypeId,
+            _configuration.TitleBackgroundLayoutLayerFilterKey);
+        errorMessage = string.Empty;
+        return true;
+    }
 
     internal bool TryApplyBuiltInPreset(string presetId, out string errorMessage)
     {
@@ -210,6 +260,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         _cameraApplyPending = false;
         ResetCameraOverrideObservation();
+        ResetSceneOverrideObservation();
         _loadingLobbyType = GameLobbyType.None;
         DisposeHooks();
         InitializeHooks();
@@ -222,6 +273,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.Save();
         _cameraApplyPending = false;
         ResetCameraOverrideObservation();
+        ResetSceneOverrideObservation();
         DisposeHooks();
         _state = TitleBackgroundServiceState.Disabled;
         _stateReason = "無効";
@@ -259,6 +311,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         Vector3? currentLookAtVector = currentCameraCaptured ? currentCamera.LookAtVector : null;
         float? currentDistance = currentCameraCaptured ? currentCamera.Distance : null;
         float? currentFovY = currentCameraCaptured ? currentCamera.FovY : null;
+        var effectiveOverrideTerritoryId = GetEffectiveOverrideTerritoryId();
         var lines = new List<string>
         {
             $"runtimeMode={_configuration.TitleBackgroundRuntimeMode}",
@@ -276,6 +329,15 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"LobbyUpdateProbe.lastTime={_automaticProbeCounters.LastLobbyUpdateTime}",
             $"LoadLobbySceneProbe.callCount={_automaticProbeCounters.LoadLobbySceneCallCount}",
             $"LoadLobbySceneProbe.lastMapId={_automaticProbeCounters.LastLoadLobbySceneMapId}",
+            $"sceneOverrideEnabled={IsSceneOverrideEnabled()}",
+            $"overrideMutationBranchArmed={IsOverrideMutationBranchArmed()}",
+            $"overrideTerritoryPath={FormatNone(_configuration.TitleBackgroundTerritoryPath)}",
+            $"overrideTerritoryId={effectiveOverrideTerritoryId}",
+            $"overrideLayerFilterKey={_configuration.TitleBackgroundLayoutLayerFilterKey}",
+            $"lastOverrideApplied={_lastOverrideApplied}",
+            $"lastOverrideLobbyType={_lastOverrideLobbyType}",
+            $"lastOverrideOriginalPath={FormatNone(_lastOverrideOriginalPath)}",
+            $"lastOverrideNewPath={FormatNone(_lastOverrideNewPath)}",
             $"hooksReady={hooksReady}",
             $"sceneHooksReady={sceneHooksReady}",
             $"cameraHookReady={cameraHookReady}",
@@ -608,9 +670,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             if (ShouldOverrideCharaSelect(lobbyType))
             {
                 LayoutWorld.UnloadPrefetchLayout();
-                var presetTerritoryId = _configuration.TitleBackgroundLayoutTerritoryTypeId != 0
-                    ? _configuration.TitleBackgroundLayoutTerritoryTypeId
-                    : _configuration.TitleBackgroundTerritoryTypeId;
+                var presetTerritoryId = GetEffectiveOverrideTerritoryId();
                 if (presetTerritoryId != 0)
                 {
                     territoryId = presetTerritoryId;
@@ -623,7 +683,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
                 overrideBytes = Encoding.UTF8.GetBytes(_validatedTerritoryPath + '\0');
                 _cameraApplyPending = true;
-                _log.Information("[XMU BG] Override CharaSelect scene lobbyType={LobbyType}, path={Path}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", lobbyType, _validatedTerritoryPath, territoryId, layerFilterKey);
+                _lastOverrideApplied = true;
+                _lastOverrideLobbyType = lobbyType;
+                _lastOverrideOriginalPath = originalPath;
+                _lastOverrideNewPath = _validatedTerritoryPath;
+                _log.Information("[XMU BG] Override CharaSelect scene lobbyType={LobbyType}, originalPath={OriginalPath}, newPath={NewPath}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", lobbyType, originalPath, _validatedTerritoryPath, territoryId, layerFilterKey);
             }
         }
         catch (Exception ex)
@@ -838,12 +902,30 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private bool ShouldOverrideCharaSelect(GameLobbyType lobbyType)
     {
+        return IsOverrideMutationBranchArmed()
+            && lobbyType == GameLobbyType.CharaSelect;
+    }
+
+    private bool IsSceneOverrideEnabled()
+    {
+        return _configuration.TitleBackgroundOverrideEnabled
+            && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly;
+    }
+
+    private bool IsOverrideMutationBranchArmed()
+    {
         return _state == TitleBackgroundServiceState.Ready
             && !IsHookProbeMode()
             && _configuration.TitleBackgroundOverrideEnabled
             && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
-            && lobbyType == GameLobbyType.CharaSelect
             && !string.IsNullOrWhiteSpace(_validatedTerritoryPath);
+    }
+
+    private uint GetEffectiveOverrideTerritoryId()
+    {
+        return _configuration.TitleBackgroundLayoutTerritoryTypeId != 0
+            ? _configuration.TitleBackgroundLayoutTerritoryTypeId
+            : _configuration.TitleBackgroundTerritoryTypeId;
     }
 
     private bool ShouldOverrideCamera()
@@ -1022,6 +1104,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _lastFixOnInvocationMode = "not-run";
         ClearPostFixOnCameraObservation();
         _lastPostFixOnCameraCaptureStatus = "not-run";
+    }
+
+    private void ResetSceneOverrideObservation()
+    {
+        _lastOverrideApplied = false;
+        _lastOverrideLobbyType = GameLobbyType.None;
+        _lastOverrideOriginalPath = string.Empty;
+        _lastOverrideNewPath = string.Empty;
     }
 
     private void UpdateAutomaticProbeCounterState()
