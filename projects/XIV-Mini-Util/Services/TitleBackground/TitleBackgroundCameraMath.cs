@@ -13,4 +13,26 @@ internal static class TitleBackgroundCameraMath
             && float.IsFinite(value.Y)
             && float.IsFinite(value.Z);
     }
+
+    public static Vector3? CalculateVectorDelta(Vector3? current, Vector3? baseline)
+    {
+        if (!current.HasValue || !baseline.HasValue)
+        {
+            return null;
+        }
+
+        var delta = current.Value - baseline.Value;
+        return IsFiniteVector(delta) ? delta : null;
+    }
+
+    public static float? CalculateFloatDelta(float? current, float? baseline)
+    {
+        if (!current.HasValue || !baseline.HasValue)
+        {
+            return null;
+        }
+
+        var delta = current.Value - baseline.Value;
+        return float.IsFinite(delta) ? delta : null;
+    }
 }

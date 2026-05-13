@@ -223,6 +223,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             || IsHookEnabled(_loadLobbySceneHook)
             || IsHookEnabled(_cameraFixOnHook);
         var capturePreset = _lastCameraCaptureResult.Preset;
+        var currentCameraCaptured = TryCaptureActiveCameraSnapshot(out var currentCamera, out var currentCaptureError);
+        var currentCaptureStatus = currentCameraCaptured ? "success" : "failed";
+        Vector3? currentSceneCameraPosition = currentCameraCaptured ? currentCamera.SceneCameraPosition : null;
+        Vector3? currentLookAtVector = currentCameraCaptured ? currentCamera.LookAtVector : null;
+        float? currentDistance = currentCameraCaptured ? currentCamera.Distance : null;
+        float? currentFovY = currentCameraCaptured ? currentCamera.FovY : null;
         var lines = new List<string>
         {
             $"runtimeMode={_configuration.TitleBackgroundRuntimeMode}",
@@ -260,6 +266,17 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             "postFixOnLookAtVectorMeaning=raw SceneCamera.LookAtVector; meaning unverified, but live observation showed FixOn focusPos matched this field",
             $"postFixOnDistance={(_lastPostFixOnDistance.HasValue ? _lastPostFixOnDistance.Value.ToString("0.###") : "none")}",
             $"postFixOnFovY={(_lastPostFixOnFovY.HasValue ? _lastPostFixOnFovY.Value.ToString("0.###") : "none")}",
+            $"currentCameraCaptureStatus={currentCaptureStatus}",
+            $"currentCameraCaptureError={FormatNone(currentCaptureError)}",
+            $"currentSceneCameraPosition={FormatVector(currentSceneCameraPosition)}",
+            $"currentLookAtVector={FormatVector(currentLookAtVector)}",
+            "currentLookAtVectorMeaning=raw SceneCamera.LookAtVector; meaning unverified",
+            $"currentDistance={FormatFloat(currentDistance)}",
+            $"currentFovY={FormatFloat(currentFovY)}",
+            $"currentVsPostFixOnCameraDelta={FormatVectorDelta(currentSceneCameraPosition, _lastPostFixOnSceneCameraPosition)}",
+            $"currentVsPostFixOnLookAtDelta={FormatVectorDelta(currentLookAtVector, _lastPostFixOnLookAtVector)}",
+            $"currentVsPostFixOnDistanceDelta={FormatFloatDelta(currentDistance, _lastPostFixOnDistance)}",
+            $"currentVsPostFixOnFovYDelta={FormatFloatDelta(currentFovY, _lastPostFixOnFovY)}",
             $"titleOverrideImplemented={TitleBackgroundRuntimeModeHelper.IsTitleOverrideImplemented(_configuration.TitleBackgroundRuntimeMode)}",
             "fixOnAbiVerified=False",
             $"hooksEnabled={hooksEnabled}",
@@ -709,50 +726,66 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private void CapturePostFixOnCameraState()
     {
         ClearPostFixOnCameraObservation();
+        if (!TryCaptureActiveCameraSnapshot(out var snapshot, out var errorMessage))
+        {
+            MarkPostFixOnCameraCaptureFailed(errorMessage);
+            return;
+        }
+
+        _lastPostFixOnSceneCameraPosition = snapshot.SceneCameraPosition;
+        _lastPostFixOnLookAtVector = snapshot.LookAtVector;
+        _lastPostFixOnDistance = snapshot.Distance;
+        _lastPostFixOnFovY = snapshot.FovY;
+        _lastPostFixOnCameraCaptureStatus = "success";
+        _lastPostFixOnCameraCaptureError = string.Empty;
+    }
+
+    private bool TryCaptureActiveCameraSnapshot(out TitleBackgroundActiveCameraSnapshot snapshot, out string errorMessage)
+    {
+        snapshot = default;
+        errorMessage = string.Empty;
         try
         {
             var cameraManager = CameraManager.Instance();
             if (cameraManager == null)
             {
-                MarkPostFixOnCameraCaptureFailed("CameraManager.Instance() unavailable");
-                return;
+                errorMessage = "CameraManager.Instance() unavailable";
+                return false;
             }
 
             var activeCamera = cameraManager->GetActiveCamera();
             if (activeCamera == null)
             {
-                MarkPostFixOnCameraCaptureFailed("active camera unavailable");
-                return;
+                errorMessage = "active camera unavailable";
+                return false;
             }
 
             var sceneCameraPosition = ToNumerics(activeCamera->CameraBase.SceneCamera.Position);
-            var lookAtVector = ToNumerics(activeCamera->CameraBase.SceneCamera.LookAtVector);
-            var distance = activeCamera->Distance;
-            var fovY = activeCamera->FoV;
-            _lastPostFixOnSceneCameraPosition = sceneCameraPosition;
-            _lastPostFixOnLookAtVector = lookAtVector;
-            _lastPostFixOnDistance = float.IsFinite(distance) ? distance : null;
-            _lastPostFixOnFovY = float.IsFinite(fovY) ? fovY : null;
-
             if (!TitleBackgroundCameraMath.IsFiniteVector(sceneCameraPosition))
             {
-                MarkPostFixOnCameraCaptureFailed("SceneCamera.Position contains non-finite values");
-                return;
+                errorMessage = "SceneCamera.Position contains non-finite values";
+                return false;
             }
 
+            var lookAtVector = ToNumerics(activeCamera->CameraBase.SceneCamera.LookAtVector);
             if (!TitleBackgroundCameraMath.IsFiniteVector(lookAtVector))
             {
-                MarkPostFixOnCameraCaptureFailed("SceneCamera.LookAtVector contains non-finite values");
-                return;
+                errorMessage = "SceneCamera.LookAtVector contains non-finite values";
+                return false;
             }
 
-            _lastPostFixOnCameraCaptureStatus = "success";
-            _lastPostFixOnCameraCaptureError = string.Empty;
+            snapshot = new TitleBackgroundActiveCameraSnapshot(
+                sceneCameraPosition,
+                lookAtVector,
+                float.IsFinite(activeCamera->Distance) ? activeCamera->Distance : null,
+                float.IsFinite(activeCamera->FoV) ? activeCamera->FoV : null);
+            return true;
         }
         catch (Exception ex)
         {
-            MarkPostFixOnCameraCaptureFailed(ex.Message);
-            _log.Warning(ex, "TitleBackground post-FixOn camera capture failed.");
+            errorMessage = ex.Message;
+            _log.Warning(ex, "TitleBackground active camera capture failed.");
+            return false;
         }
     }
 
@@ -1086,6 +1119,21 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return $"({value.X:0.###}, {value.Y:0.###}, {value.Z:0.###})";
     }
 
+    private static string FormatFloat(float? value)
+    {
+        return value.HasValue ? value.Value.ToString("0.###") : "none";
+    }
+
+    private static string FormatVectorDelta(Vector3? current, Vector3? baseline)
+    {
+        return FormatVector(TitleBackgroundCameraMath.CalculateVectorDelta(current, baseline));
+    }
+
+    private static string FormatFloatDelta(float? current, float? baseline)
+    {
+        return FormatFloat(TitleBackgroundCameraMath.CalculateFloatDelta(current, baseline));
+    }
+
     private static Vector3? TryReadVector(float* values)
     {
         if (values == null)
@@ -1245,6 +1293,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     // UNVERIFIED ABI - DO NOT ENABLE BY DEFAULT. Phase 1 does not create this hook.
     private delegate nint LobbyCameraFixOnDelegate(nint self, float* cameraPos, float* focusPos, float fovY);
+
+    private readonly record struct TitleBackgroundActiveCameraSnapshot(
+        Vector3 SceneCameraPosition,
+        Vector3 LookAtVector,
+        float? Distance,
+        float? FovY);
 
     private sealed class TitleBackgroundProbeSession
     {

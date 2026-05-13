@@ -341,6 +341,16 @@ Test("title background camera math accepts finite vectors only", () =>
         && !TitleBackgroundCameraMath.IsFiniteVector(new Vector3(1f, float.PositiveInfinity, 3f));
 });
 
+Test("title background camera math calculates nullable deltas", () =>
+{
+    return TitleBackgroundCameraMath.CalculateVectorDelta(
+            new Vector3(5f, 3f, 1f),
+            new Vector3(2f, 1f, 4f)) == new Vector3(3f, 2f, -3f)
+        && TitleBackgroundCameraMath.CalculateVectorDelta(null, new Vector3(1f, 1f, 1f)) == null
+        && TitleBackgroundCameraMath.CalculateFloatDelta(5f, 2.5f) == 2.5f
+        && TitleBackgroundCameraMath.CalculateFloatDelta(null, 2.5f) == null;
+});
+
 Test("title background capture preset builder keeps existing fov when unavailable", () =>
 {
     var existing = new TitleBackgroundPreset
