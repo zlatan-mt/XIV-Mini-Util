@@ -258,6 +258,146 @@ Test("title background preset validates normalized territory path", () =>
         && !string.IsNullOrWhiteSpace(errorMessage);
 });
 
+Test("title background built-in preset catalog ids are stable and unique", () =>
+{
+    var ids = TitleBackgroundBuiltInPresetCatalog.Presets
+        .Select(entry => TitleBackgroundBuiltInPresetCatalog.NormalizeId(entry.Id))
+        .ToList();
+
+    return ids.All(id => !string.IsNullOrWhiteSpace(id))
+        && ids.Count == ids.Distinct(StringComparer.Ordinal).Count()
+        && TitleBackgroundBuiltInPresetCatalog.Presets.All(entry =>
+            entry.Id == TitleBackgroundBuiltInPresetCatalog.NormalizeId(entry.Id)
+            && !string.IsNullOrWhiteSpace(entry.DisplayName)
+            && entry.Preset.Normalize().Validate(out _));
+});
+
+Test("title background preset applicator expands selected preset atomically", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundSelectedPresetId = "old",
+        TitleBackgroundTerritoryPath = "ffxiv/old/region/level/old",
+        TitleBackgroundCameraX = 99f,
+    };
+    var preset = new TitleBackgroundPreset
+    {
+        TerritoryPath = "bg/ffxiv/area/region/level/sample.lvb",
+        TerritoryTypeId = 777,
+        LayoutTerritoryTypeId = 778,
+        LayoutLayerFilterKey = 9,
+        CharacterPosition = new Vector3(1f, 2f, 3f),
+        CharacterRotation = 0.5f,
+        CameraX = 4f,
+        CameraY = 5f,
+        CameraZ = 6f,
+        FocusX = 7f,
+        FocusY = 8f,
+        FocusZ = 9f,
+        FovY = 1.2f,
+    };
+
+    return TitleBackgroundPresetApplicator.TryApplyPreset(
+            configuration,
+            preset,
+            "verified-a",
+            path => path == "bg/ffxiv/area/region/level/sample.lvb",
+            out _)
+        && configuration.TitleBackgroundSelectedPresetId == "verified-a"
+        && configuration.TitleBackgroundTerritoryPath == "ffxiv/area/region/level/sample"
+        && configuration.TitleBackgroundTerritoryTypeId == 777
+        && configuration.TitleBackgroundLayoutTerritoryTypeId == 778
+        && configuration.TitleBackgroundLayoutLayerFilterKey == 9
+        && configuration.TitleBackgroundCharacterPositionX == 1f
+        && configuration.TitleBackgroundCameraX == 4f
+        && configuration.TitleBackgroundFocusZ == 9f
+        && Math.Abs(configuration.TitleBackgroundFovY - 1.2f) < 0.0001f;
+});
+
+Test("title background preset applicator keeps configuration on invalid preset", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundSelectedPresetId = "old",
+        TitleBackgroundTerritoryPath = "ffxiv/old/region/level/old",
+        TitleBackgroundCameraX = 99f,
+    };
+    var invalidPreset = new TitleBackgroundPreset
+    {
+        TerritoryPath = "ffxiv/area/region/sample",
+        CameraX = 4f,
+    };
+
+    return !TitleBackgroundPresetApplicator.TryApplyPreset(
+            configuration,
+            invalidPreset,
+            "bad",
+            _ => true,
+            out var errorMessage)
+        && !string.IsNullOrWhiteSpace(errorMessage)
+        && configuration.TitleBackgroundSelectedPresetId == "old"
+        && configuration.TitleBackgroundTerritoryPath == "ffxiv/old/region/level/old"
+        && configuration.TitleBackgroundCameraX == 99f;
+});
+
+Test("title background preset applicator keeps configuration when lvb is missing", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundSelectedPresetId = "old",
+        TitleBackgroundTerritoryPath = "ffxiv/old/region/level/old",
+        TitleBackgroundCameraX = 99f,
+    };
+    var preset = new TitleBackgroundPreset
+    {
+        TerritoryPath = "ffxiv/area/region/level/sample",
+        CameraX = 4f,
+    };
+
+    return !TitleBackgroundPresetApplicator.TryApplyPreset(
+            configuration,
+            preset,
+            "missing-lvb",
+            _ => false,
+            out var errorMessage)
+        && errorMessage.Contains("LVB", StringComparison.Ordinal)
+        && configuration.TitleBackgroundSelectedPresetId == "old"
+        && configuration.TitleBackgroundTerritoryPath == "ffxiv/old/region/level/old"
+        && configuration.TitleBackgroundCameraX == 99f;
+});
+
+Test("title background unknown selected preset id falls back to custom", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundSelectedPresetId = "missing",
+        TitleBackgroundTerritoryPath = "ffxiv/area/region/level/sample",
+    };
+
+    return TitleBackgroundPresetApplicator.ClearInvalidSelectedPreset(configuration)
+        && configuration.TitleBackgroundSelectedPresetId == string.Empty
+        && configuration.TitleBackgroundTerritoryPath == "ffxiv/area/region/level/sample";
+});
+
+Test("title background debug capture clears selected preset id", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundSelectedPresetId = "verified-a",
+        TitleBackgroundTerritoryPath = "ffxiv/old/region/level/old",
+    };
+    var preset = new TitleBackgroundPreset
+    {
+        TerritoryPath = "ffxiv/area/region/level/sample",
+        CameraX = 1f,
+    };
+
+    TitleBackgroundPresetApplicator.ApplyDebugPreset(configuration, preset);
+    return configuration.TitleBackgroundSelectedPresetId == string.Empty
+        && configuration.TitleBackgroundTerritoryPath == "ffxiv/area/region/level/sample"
+        && configuration.TitleBackgroundCameraX == 1f;
+});
+
 Test("title background fov clamp handles lower bound and non finite", () =>
 {
     return TitleBackgroundPreset.ClampFovY(-1f) == TitleBackgroundPreset.MinFovY

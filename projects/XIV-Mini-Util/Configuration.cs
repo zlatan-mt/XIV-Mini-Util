@@ -15,7 +15,7 @@ namespace XivMiniUtil;
 public sealed class Configuration : IPluginConfiguration
 {
     public const int ExportVersion = 1;
-    public const int CurrentVersion = 6;
+    public const int CurrentVersion = 7;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -79,6 +79,7 @@ public sealed class Configuration : IPluginConfiguration
     // タイトル背景設定
     public bool TitleBackgroundOverrideEnabled { get; set; } = false;
     public bool TitleBackgroundCameraOverrideEnabled { get; set; } = false;
+    public string TitleBackgroundSelectedPresetId { get; set; } = string.Empty;
     public TitleBackgroundRuntimeMode TitleBackgroundRuntimeMode { get; set; } = TitleBackgroundRuntimeMode.ResolveOnly;
     public TitleBackgroundResolverMode TitleBackgroundCreateSceneResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
     public TitleBackgroundResolverMode TitleBackgroundLobbyUpdateResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
@@ -271,6 +272,7 @@ public sealed class Configuration : IPluginConfiguration
         CharaSelectLastDataCenterName = source.CharaSelectLastDataCenterName ?? string.Empty;
         TitleBackgroundOverrideEnabled = source.TitleBackgroundOverrideEnabled;
         TitleBackgroundCameraOverrideEnabled = source.TitleBackgroundCameraOverrideEnabled;
+        TitleBackgroundSelectedPresetId = TitleBackgroundBuiltInPresetCatalog.NormalizeId(source.TitleBackgroundSelectedPresetId);
         TitleBackgroundRuntimeMode = NormalizeTitleBackgroundRuntimeMode(source.TitleBackgroundRuntimeMode);
         TitleBackgroundCreateSceneResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundCreateSceneResolverMode);
         TitleBackgroundLobbyUpdateResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundLobbyUpdateResolverMode);
@@ -526,6 +528,13 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedSelectedPresetId = TitleBackgroundBuiltInPresetCatalog.NormalizeId(TitleBackgroundSelectedPresetId);
+        if (TitleBackgroundSelectedPresetId != normalizedSelectedPresetId)
+        {
+            TitleBackgroundSelectedPresetId = normalizedSelectedPresetId;
+            changed = true;
+        }
+
         var normalizedTitleRuntimeMode = NormalizeTitleBackgroundRuntimeMode(TitleBackgroundRuntimeMode);
         if (TitleBackgroundRuntimeMode != normalizedTitleRuntimeMode)
         {
@@ -600,6 +609,7 @@ public sealed class Configuration : IPluginConfiguration
         changed |= NormalizeSignatureProperty(TitleBackgroundLobbyUpdateSignature, value => TitleBackgroundLobbyUpdateSignature = value);
         changed |= NormalizeSignatureProperty(TitleBackgroundLoadLobbySceneSignature, value => TitleBackgroundLoadLobbySceneSignature = value);
         changed |= NormalizeSignatureProperty(TitleBackgroundLobbyCurrentMapSignature, value => TitleBackgroundLobbyCurrentMapSignature = value);
+        changed |= TitleBackgroundPresetApplicator.ClearInvalidSelectedPreset(this);
 
         return changed;
     }

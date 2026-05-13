@@ -96,6 +96,33 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     internal TitleBackgroundCameraCaptureResult LastCameraCaptureResult => _lastCameraCaptureResult;
 
+    internal bool TryApplyBuiltInPreset(string presetId, out string errorMessage)
+    {
+        if (!TitleBackgroundBuiltInPresetCatalog.TryGetById(presetId, out var entry))
+        {
+            errorMessage = "preset が見つかりません。";
+            return false;
+        }
+
+        if (!TitleBackgroundPresetApplicator.TryApplyPreset(
+            _configuration,
+            entry.Preset,
+            entry.Id,
+            _dataManager.FileExists,
+            out errorMessage))
+        {
+            return false;
+        }
+
+        _configuration.Save();
+        ApplyFromConfiguration();
+        _log.Information(
+            "[XMU BG] Built-in preset applied. presetId={PresetId}, territoryPath={TerritoryPath}",
+            entry.Id,
+            _configuration.TitleBackgroundTerritoryPath);
+        return true;
+    }
+
     internal TitleBackgroundCameraCaptureResult CaptureCurrentLocationAndCamera()
     {
         var result = _cameraCaptureService.Capture(_configuration);
@@ -109,7 +136,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             return result;
         }
 
-        ApplyCapturedPreset(result.Preset);
+        TitleBackgroundPresetApplicator.ApplyDebugPreset(_configuration, result.Preset);
         _configuration.Save();
         ApplyFromConfiguration();
         _log.Information(
@@ -242,6 +269,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"cameraHookRequired={cameraHookRequired}",
             $"cameraHookEnabled={IsHookEnabled(_cameraFixOnHook)}",
             $"cameraOverrideEnabled={_configuration.TitleBackgroundCameraOverrideEnabled}",
+            $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
             $"cameraCapture.lastStatus={_lastCameraCaptureResult.Status}",
             $"cameraCapture.lastFailureReason={FormatNone(_lastCameraCaptureResult.FailureReason)}",
@@ -463,26 +491,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _validatedTerritoryPath = normalized;
         errorMessage = string.Empty;
         return true;
-    }
-
-    private void ApplyCapturedPreset(TitleBackgroundPreset preset)
-    {
-        var normalized = preset.Normalize();
-        _configuration.TitleBackgroundTerritoryPath = normalized.TerritoryPath;
-        _configuration.TitleBackgroundTerritoryTypeId = normalized.TerritoryTypeId;
-        _configuration.TitleBackgroundLayoutTerritoryTypeId = normalized.LayoutTerritoryTypeId;
-        _configuration.TitleBackgroundLayoutLayerFilterKey = normalized.LayoutLayerFilterKey;
-        _configuration.TitleBackgroundCharacterPositionX = normalized.CharacterPosition.X;
-        _configuration.TitleBackgroundCharacterPositionY = normalized.CharacterPosition.Y;
-        _configuration.TitleBackgroundCharacterPositionZ = normalized.CharacterPosition.Z;
-        _configuration.TitleBackgroundCharacterRotation = normalized.CharacterRotation;
-        _configuration.TitleBackgroundCameraX = normalized.CameraX;
-        _configuration.TitleBackgroundCameraY = normalized.CameraY;
-        _configuration.TitleBackgroundCameraZ = normalized.CameraZ;
-        _configuration.TitleBackgroundFocusX = normalized.FocusX;
-        _configuration.TitleBackgroundFocusY = normalized.FocusY;
-        _configuration.TitleBackgroundFocusZ = normalized.FocusZ;
-        _configuration.TitleBackgroundFovY = normalized.FovY;
     }
 
     public void Dispose()
@@ -887,6 +895,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundLobbyUpdateSignature = NormalizeSignature(_configuration.TitleBackgroundLobbyUpdateSignature);
         _configuration.TitleBackgroundLoadLobbySceneSignature = NormalizeSignature(_configuration.TitleBackgroundLoadLobbySceneSignature);
         _configuration.TitleBackgroundLobbyCurrentMapSignature = NormalizeSignature(_configuration.TitleBackgroundLobbyCurrentMapSignature);
+        TitleBackgroundPresetApplicator.ClearInvalidSelectedPreset(_configuration);
     }
 
     private bool AreSceneReady()

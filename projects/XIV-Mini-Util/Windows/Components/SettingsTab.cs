@@ -43,6 +43,9 @@ public sealed class SettingsTab : ITabComponent
     private Configuration? _pendingImportConfig;
     private string? _configIoMessage;
     private Vector4 _configIoMessageColor = new(0.9f, 0.9f, 0.9f, 1f);
+    private string _titleBackgroundPendingPresetId = string.Empty;
+    private string _titleBackgroundPresetMessage = string.Empty;
+    private Vector4 _titleBackgroundPresetMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
 
     // Submarine Settings State
 
@@ -596,33 +599,8 @@ public sealed class SettingsTab : ITabComponent
         }
         ImGui.TextDisabled("Title + CharaSelect は未実装のため、実機確認までは選択肢から外しています。");
 
-        var territoryPath = _configuration.TitleBackgroundTerritoryPath;
-        if (ImGui.InputTextWithHint("TerritoryPath##TitleBackgroundTerritoryPath", "ffxiv/.../level/...", ref territoryPath, 256))
-        {
-            _configuration.TitleBackgroundTerritoryPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(territoryPath);
-            _configuration.Save();
-            _titleScreenBackgroundService.ApplyFromConfiguration();
-        }
+        DrawTitleBackgroundPresetSettings();
 
-        if (ImGui.Button("適用"))
-        {
-            _configuration.TitleBackgroundTerritoryPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(_configuration.TitleBackgroundTerritoryPath);
-            _configuration.TitleBackgroundCharacterPositionX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCharacterPositionX);
-            _configuration.TitleBackgroundCharacterPositionY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCharacterPositionY);
-            _configuration.TitleBackgroundCharacterPositionZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCharacterPositionZ);
-            _configuration.TitleBackgroundCameraX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraX);
-            _configuration.TitleBackgroundCameraY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraY);
-            _configuration.TitleBackgroundCameraZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraZ);
-            _configuration.TitleBackgroundFocusX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusX);
-            _configuration.TitleBackgroundFocusY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusY);
-            _configuration.TitleBackgroundFocusZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundFocusZ);
-            _configuration.TitleBackgroundFovY = TitleBackgroundPreset.ClampFovY(_configuration.TitleBackgroundFovY);
-            NormalizeTitleBackgroundSignatures();
-            _configuration.Save();
-            _titleScreenBackgroundService.ApplyFromConfiguration();
-        }
-
-        ImGui.SameLine();
         if (ImGui.Button("解除"))
         {
             _titleScreenBackgroundService.ClearOverride();
@@ -657,17 +635,95 @@ public sealed class SettingsTab : ITabComponent
         DrawTitleBackgroundAdvancedSettings();
     }
 
+    private void DrawTitleBackgroundPresetSettings()
+    {
+        var selectedPresetId = string.IsNullOrEmpty(_titleBackgroundPendingPresetId)
+            ? _configuration.TitleBackgroundSelectedPresetId
+            : _titleBackgroundPendingPresetId;
+        var selectedLabel = "未選択 / Custom";
+        if (TitleBackgroundBuiltInPresetCatalog.TryGetById(selectedPresetId, out var selectedEntry))
+        {
+            selectedLabel = selectedEntry.DisplayName;
+            if (!string.IsNullOrEmpty(_titleBackgroundPendingPresetId))
+            {
+                selectedLabel += " (未適用)";
+            }
+        }
+
+        if (ImGui.BeginCombo("背景 preset##TitleBackgroundPreset", selectedLabel))
+        {
+            if (ImGui.Selectable("未選択 / Custom", string.IsNullOrEmpty(selectedPresetId)))
+            {
+                _titleBackgroundPendingPresetId = string.Empty;
+                _configuration.TitleBackgroundSelectedPresetId = string.Empty;
+                _configuration.Save();
+            }
+
+            foreach (var entry in TitleBackgroundBuiltInPresetCatalog.Presets)
+            {
+                if (ImGui.Selectable(entry.DisplayName, string.Equals(selectedPresetId, entry.Id, StringComparison.Ordinal)))
+                {
+                    _titleBackgroundPendingPresetId = entry.Id;
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        if (TitleBackgroundBuiltInPresetCatalog.Presets.Count == 0)
+        {
+            ImGui.TextDisabled("実機確認済みの built-in preset はまだありません。");
+        }
+
+        if (ImGui.Button("preset を適用"))
+        {
+            var presetId = string.IsNullOrWhiteSpace(_titleBackgroundPendingPresetId)
+                ? _configuration.TitleBackgroundSelectedPresetId
+                : _titleBackgroundPendingPresetId;
+            if (string.IsNullOrWhiteSpace(presetId))
+            {
+                _titleBackgroundPresetMessage = "preset が未選択です。";
+                _titleBackgroundPresetMessageColor = new Vector4(1f, 0.75f, 0.35f, 1f);
+            }
+            else if (_titleScreenBackgroundService.TryApplyBuiltInPreset(presetId, out var errorMessage))
+            {
+                _titleBackgroundPendingPresetId = string.Empty;
+                _titleBackgroundPresetMessage = "preset を適用しました。";
+                _titleBackgroundPresetMessageColor = new Vector4(0.3f, 0.8f, 0.45f, 1f);
+            }
+            else
+            {
+                _titleBackgroundPresetMessage = $"preset 適用失敗: {errorMessage}";
+                _titleBackgroundPresetMessageColor = new Vector4(1f, 0.45f, 0.45f, 1f);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_titleBackgroundPresetMessage))
+        {
+            ImGui.TextColored(_titleBackgroundPresetMessageColor, _titleBackgroundPresetMessage);
+        }
+    }
+
     private void DrawTitleBackgroundPhase2Settings()
     {
-        if (!ImGui.CollapsingHeader("Phase 2: カメラ調整"))
+        if (!ImGui.CollapsingHeader("詳細設定 / 診断"))
         {
             return;
         }
 
-        ImGui.TextDisabled("ログイン中に好きな場所とカメラ構図を決めて保存できます。保存値はキャラ選択背景差し替え時の Camera / Focus / FOV に使います。");
+        ImGui.TextDisabled("手入力と現在値保存は debug 補助です。通常は built-in preset を選んで適用します。");
         ImGui.TextDisabled("CharacterPosition は将来のキャラクター配置用で、Camera Focus とは別の値です。");
 
-        if (ImGui.Button("現在の場所とカメラを保存"))
+        var territoryPath = _configuration.TitleBackgroundTerritoryPath;
+        if (ImGui.InputTextWithHint("TerritoryPath##TitleBackgroundTerritoryPath", "ffxiv/.../level/...", ref territoryPath, 256))
+        {
+            ClearTitleBackgroundSelectedPreset();
+            _configuration.TitleBackgroundTerritoryPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(territoryPath);
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        if (ImGui.Button("現在値を debug 保存"))
         {
             _titleScreenBackgroundService.CaptureCurrentLocationAndCamera();
         }
@@ -693,6 +749,7 @@ public sealed class SettingsTab : ITabComponent
         var cameraZ = _configuration.TitleBackgroundCameraZ;
         if (DrawTitleBackgroundVectorInput("Camera", ref cameraX, ref cameraY, ref cameraZ))
         {
+            ClearTitleBackgroundSelectedPreset();
             _configuration.TitleBackgroundCameraX = cameraX;
             _configuration.TitleBackgroundCameraY = cameraY;
             _configuration.TitleBackgroundCameraZ = cameraZ;
@@ -705,6 +762,7 @@ public sealed class SettingsTab : ITabComponent
         var focusZ = _configuration.TitleBackgroundFocusZ;
         if (DrawTitleBackgroundVectorInput("Focus", ref focusX, ref focusY, ref focusZ))
         {
+            ClearTitleBackgroundSelectedPreset();
             _configuration.TitleBackgroundFocusX = focusX;
             _configuration.TitleBackgroundFocusY = focusY;
             _configuration.TitleBackgroundFocusZ = focusZ;
@@ -717,6 +775,7 @@ public sealed class SettingsTab : ITabComponent
         ImGui.SetNextItemWidth(120f);
         if (ImGui.InputFloat("FOV Y##TitleBackgroundFovY", ref fovY, 1f, 5f, "%.2f"))
         {
+            ClearTitleBackgroundSelectedPreset();
             _configuration.TitleBackgroundFovY = TitleBackgroundPreset.ClampFovY(fovY);
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
@@ -728,6 +787,7 @@ public sealed class SettingsTab : ITabComponent
         var characterZ = _configuration.TitleBackgroundCharacterPositionZ;
         if (DrawTitleBackgroundVectorInput("Character", ref characterX, ref characterY, ref characterZ))
         {
+            ClearTitleBackgroundSelectedPreset();
             _configuration.TitleBackgroundCharacterPositionX = characterX;
             _configuration.TitleBackgroundCharacterPositionY = characterY;
             _configuration.TitleBackgroundCharacterPositionZ = characterZ;
@@ -738,6 +798,7 @@ public sealed class SettingsTab : ITabComponent
 
         if (ImGui.Button("カメラ値を適用"))
         {
+            ClearTitleBackgroundSelectedPreset();
             _configuration.TitleBackgroundCameraX = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraX);
             _configuration.TitleBackgroundCameraY = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraY);
             _configuration.TitleBackgroundCameraZ = TitleBackgroundPreset.SanitizeCoordinate(_configuration.TitleBackgroundCameraZ);
@@ -772,7 +833,7 @@ public sealed class SettingsTab : ITabComponent
 
     private void DrawTitleBackgroundAdvancedSettings()
     {
-        if (!ImGui.CollapsingHeader("詳細設定 / 診断"))
+        if (!ImGui.CollapsingHeader("native 診断"))
         {
             return;
         }
@@ -781,6 +842,7 @@ public sealed class SettingsTab : ITabComponent
         ImGui.SetNextItemWidth(120f);
         if (ImGui.InputInt("TerritoryTypeId##TitleBackgroundTerritoryTypeId", ref territoryTypeId))
         {
+            ClearTitleBackgroundSelectedPreset();
             _configuration.TitleBackgroundTerritoryTypeId = (uint)Math.Clamp(territoryTypeId, 0, int.MaxValue);
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
@@ -790,6 +852,7 @@ public sealed class SettingsTab : ITabComponent
         ImGui.SetNextItemWidth(120f);
         if (ImGui.InputInt("LayoutTerritoryTypeId##TitleBackgroundLayoutTerritoryTypeId", ref layoutTerritoryTypeId))
         {
+            ClearTitleBackgroundSelectedPreset();
             _configuration.TitleBackgroundLayoutTerritoryTypeId = (uint)Math.Clamp(layoutTerritoryTypeId, 0, int.MaxValue);
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
@@ -799,6 +862,7 @@ public sealed class SettingsTab : ITabComponent
         ImGui.SetNextItemWidth(120f);
         if (ImGui.InputInt("LayoutLayerFilterKey##TitleBackgroundLayoutLayerFilterKey", ref layerFilterKey))
         {
+            ClearTitleBackgroundSelectedPreset();
             _configuration.TitleBackgroundLayoutLayerFilterKey = (uint)Math.Clamp(layerFilterKey, 0, int.MaxValue);
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
@@ -911,6 +975,20 @@ public sealed class SettingsTab : ITabComponent
         _configuration.TitleBackgroundLobbyCurrentMapSignature = (_configuration.TitleBackgroundLobbyCurrentMapSignature ?? string.Empty).Trim();
     }
 
+    private void ClearTitleBackgroundSelectedPreset()
+    {
+        if (string.IsNullOrEmpty(_configuration.TitleBackgroundSelectedPresetId)
+            && string.IsNullOrEmpty(_titleBackgroundPendingPresetId))
+        {
+            return;
+        }
+
+        _configuration.TitleBackgroundSelectedPresetId = string.Empty;
+        _titleBackgroundPendingPresetId = string.Empty;
+        _titleBackgroundPresetMessage = "手入力により preset 選択を解除しました。";
+        _titleBackgroundPresetMessageColor = new Vector4(1f, 0.75f, 0.35f, 1f);
+    }
+
     private static string GetTitleBackgroundRuntimeModeLabel(TitleBackgroundRuntimeMode mode)
     {
         return mode switch
@@ -961,6 +1039,8 @@ public sealed class SettingsTab : ITabComponent
     {
         _configuration.TitleBackgroundOverrideEnabled = false;
         _configuration.TitleBackgroundCameraOverrideEnabled = false;
+        _configuration.TitleBackgroundSelectedPresetId = string.Empty;
+        _titleBackgroundPendingPresetId = string.Empty;
         _configuration.TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.ResolveOnly;
         _configuration.TitleBackgroundCreateSceneResolverMode = TitleBackgroundResolverMode.AutoDiagnosticOnly;
         _configuration.TitleBackgroundLobbyUpdateResolverMode = TitleBackgroundResolverMode.AutoDiagnosticOnly;
