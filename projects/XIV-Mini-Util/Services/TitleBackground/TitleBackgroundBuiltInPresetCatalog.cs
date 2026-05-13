@@ -15,6 +15,29 @@ internal static class TitleBackgroundBuiltInPresetCatalog
     public static IReadOnlyList<TitleBackgroundBuiltInPresetEntry> Presets { get; } =
     [
         // Verified preset values are intentionally added one by one after live visual checks.
+        // TODO(feasibility): Add the first verified preset here after Mona confirms the final
+        // CharaSelect composition at least three times with the same values.
+        //
+        // new TitleBackgroundBuiltInPresetEntry
+        // {
+        //     Id = "verified-001",
+        //     DisplayName = "Verified 001",
+        //     Preset = new TitleBackgroundPreset
+        //     {
+        //         Name = "Verified 001",
+        //         TerritoryPath = "ffxiv/.../level/...",
+        //         TerritoryTypeId = 0,
+        //         LayoutTerritoryTypeId = 0,
+        //         LayoutLayerFilterKey = 0,
+        //         CameraX = 0f,
+        //         CameraY = 0f,
+        //         CameraZ = 0f,
+        //         FocusX = 0f,
+        //         FocusY = 0f,
+        //         FocusZ = 0f,
+        //         FovY = TitleBackgroundPreset.DefaultFovY,
+        //     }.Normalize(),
+        // },
     ];
 
     public static bool TryGetById(string? id, out TitleBackgroundBuiltInPresetEntry entry)

@@ -4,6 +4,7 @@
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using System.Numerics;
+using System.Text;
 using XivMiniUtil;
 using XivMiniUtil.Services.CharaSelect;
 using XivMiniUtil.Services.TitleBackground;
@@ -396,6 +397,17 @@ Test("title background debug capture clears selected preset id", () =>
     return configuration.TitleBackgroundSelectedPresetId == string.Empty
         && configuration.TitleBackgroundTerritoryPath == "ffxiv/area/region/level/sample"
         && configuration.TitleBackgroundCameraX == 1f;
+});
+
+Test("title background selected preset id is present in export import payload", () =>
+{
+    var configuration = new Configuration();
+    var exported = configuration.ExportToBase64();
+    var json = Encoding.UTF8.GetString(Convert.FromBase64String(exported));
+
+    return json.Contains("\"TitleBackgroundSelectedPresetId\"", StringComparison.Ordinal)
+        && configuration.TryParseImport(exported, out var imported, out _)
+        && imported.TitleBackgroundSelectedPresetId == string.Empty;
 });
 
 Test("title background fov clamp handles lower bound and non finite", () =>
