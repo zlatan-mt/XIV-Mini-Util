@@ -54,6 +54,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private TitleBackgroundCameraCaptureResult _lastCameraCaptureResult = TitleBackgroundCameraCaptureResult.NotRun;
     private TitleBackgroundProbeSession? _activeProbeSession;
     private TitleBackgroundProbeSession? _lastProbeSession;
+    private TitleBackgroundProbeCounters _automaticProbeCounters = new();
+    private bool _automaticProbeCountersEnabled;
 
     private GameLobbyType EffectiveLobbyType =>
         _loadingLobbyType != GameLobbyType.None
@@ -151,6 +153,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     public void ApplyFromConfiguration()
     {
         NormalizeConfiguration();
+        UpdateAutomaticProbeCounterState();
         if (_configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly)
         {
             DisposeHooks();
@@ -263,6 +266,16 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"probeMutatesScene=False",
             $"probeWritesCurrentMap=False",
             $"probeEnablesCameraHook=False",
+            $"automaticProbeCountersEnabled={_automaticProbeCountersEnabled}",
+            $"CreateSceneProbe.callCount={_automaticProbeCounters.CreateSceneCallCount}",
+            $"CreateSceneProbe.lastPath={FormatNone(_automaticProbeCounters.LastCreateScenePath)}",
+            $"CreateSceneProbe.lastTerritoryId={_automaticProbeCounters.LastCreateSceneTerritoryId}",
+            $"CreateSceneProbe.lastLayerFilterKey={_automaticProbeCounters.LastCreateSceneLayerFilterKey}",
+            $"LobbyUpdateProbe.callCount={_automaticProbeCounters.LobbyUpdateCallCount}",
+            $"LobbyUpdateProbe.lastMapId={_automaticProbeCounters.LastLobbyUpdateMapId}",
+            $"LobbyUpdateProbe.lastTime={_automaticProbeCounters.LastLobbyUpdateTime}",
+            $"LoadLobbySceneProbe.callCount={_automaticProbeCounters.LoadLobbySceneCallCount}",
+            $"LoadLobbySceneProbe.lastMapId={_automaticProbeCounters.LastLoadLobbySceneMapId}",
             $"hooksReady={hooksReady}",
             $"sceneHooksReady={sceneHooksReady}",
             $"cameraHookReady={cameraHookReady}",
@@ -1011,6 +1024,21 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _lastPostFixOnCameraCaptureStatus = "not-run";
     }
 
+    private void UpdateAutomaticProbeCounterState()
+    {
+        var shouldEnable = TitleBackgroundRuntimeModeHelper.ShouldCollectAutomaticProbeCounters(
+            _configuration.TitleBackgroundRuntimeMode,
+            _configuration.TitleBackgroundOverrideEnabled,
+            _configuration.TitleBackgroundCreateSceneResolverMode,
+            _configuration.TitleBackgroundLobbyUpdateResolverMode);
+        if (shouldEnable && !_automaticProbeCountersEnabled)
+        {
+            _automaticProbeCounters = new TitleBackgroundProbeCounters();
+        }
+
+        _automaticProbeCountersEnabled = shouldEnable;
+    }
+
     private void DisposeHooks()
     {
         DisposeHook(_cameraFixOnHook, nameof(_cameraFixOnHook));
@@ -1224,6 +1252,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private void RecordProbeCreateScene(GameLobbyType lobbyType, string path, uint territoryId, uint layerFilterKey)
     {
+        if (_automaticProbeCountersEnabled)
+        {
+            _automaticProbeCounters.CreateSceneCallCount++;
+            _automaticProbeCounters.LastCreateScenePath = path;
+            _automaticProbeCounters.LastCreateSceneTerritoryId = territoryId;
+            _automaticProbeCounters.LastCreateSceneLayerFilterKey = layerFilterKey;
+        }
+
         if (_activeProbeSession == null)
         {
             return;
@@ -1254,6 +1290,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private void RecordProbeLobbyUpdate(GameLobbyType mapId, int time)
     {
+        if (_automaticProbeCountersEnabled)
+        {
+            _automaticProbeCounters.LobbyUpdateCallCount++;
+            _automaticProbeCounters.LastLobbyUpdateMapId = mapId;
+            _automaticProbeCounters.LastLobbyUpdateTime = time;
+        }
+
         if (_activeProbeSession == null)
         {
             return;
@@ -1266,6 +1309,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private void RecordProbeLoadLobbyScene(GameLobbyType mapId)
     {
+        if (_automaticProbeCountersEnabled)
+        {
+            _automaticProbeCounters.LoadLobbySceneCallCount++;
+            _automaticProbeCounters.LastLoadLobbySceneMapId = mapId;
+        }
+
         if (_activeProbeSession == null)
         {
             return;
@@ -1333,6 +1382,19 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         public List<string> CreateSceneHistory { get; } = [];
         public GameLobbyType LastLobbyUpdateMapId { get; set; } = GameLobbyType.None;
         public int LastLobbyUpdateTime { get; set; }
+        public GameLobbyType LastLoadLobbySceneMapId { get; set; } = GameLobbyType.None;
+    }
+
+    private sealed class TitleBackgroundProbeCounters
+    {
+        public int CreateSceneCallCount { get; set; }
+        public string LastCreateScenePath { get; set; } = string.Empty;
+        public uint LastCreateSceneTerritoryId { get; set; }
+        public uint LastCreateSceneLayerFilterKey { get; set; }
+        public int LobbyUpdateCallCount { get; set; }
+        public GameLobbyType LastLobbyUpdateMapId { get; set; } = GameLobbyType.None;
+        public int LastLobbyUpdateTime { get; set; }
+        public int LoadLobbySceneCallCount { get; set; }
         public GameLobbyType LastLoadLobbySceneMapId { get; set; } = GameLobbyType.None;
     }
 

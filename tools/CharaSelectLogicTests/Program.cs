@@ -634,6 +634,35 @@ Test("title background hook probe creates scene hooks only", () =>
         && !TitleBackgroundRuntimeModeHelper.ShouldValidateSceneOverrideConfiguration(TitleBackgroundRuntimeMode.HookProbe);
 });
 
+Test("title background automatic probe counters require hook probe manual direct text", () =>
+{
+    return TitleBackgroundRuntimeModeHelper.ShouldCollectAutomaticProbeCounters(
+            TitleBackgroundRuntimeMode.HookProbe,
+            true,
+            TitleBackgroundResolverMode.ManualDirectTextProbe,
+            TitleBackgroundResolverMode.ManualDirectTextProbe)
+        && !TitleBackgroundRuntimeModeHelper.ShouldCollectAutomaticProbeCounters(
+            TitleBackgroundRuntimeMode.HookProbe,
+            false,
+            TitleBackgroundResolverMode.ManualDirectTextProbe,
+            TitleBackgroundResolverMode.ManualDirectTextProbe)
+        && !TitleBackgroundRuntimeModeHelper.ShouldCollectAutomaticProbeCounters(
+            TitleBackgroundRuntimeMode.CharaSelectOnly,
+            true,
+            TitleBackgroundResolverMode.ManualDirectTextProbe,
+            TitleBackgroundResolverMode.ManualDirectTextProbe)
+        && !TitleBackgroundRuntimeModeHelper.ShouldCollectAutomaticProbeCounters(
+            TitleBackgroundRuntimeMode.HookProbe,
+            true,
+            TitleBackgroundResolverMode.AutoDiagnosticOnly,
+            TitleBackgroundResolverMode.ManualDirectTextProbe)
+        && !TitleBackgroundRuntimeModeHelper.ShouldCollectAutomaticProbeCounters(
+            TitleBackgroundRuntimeMode.HookProbe,
+            true,
+            TitleBackgroundResolverMode.ManualDirectTextProbe,
+            TitleBackgroundResolverMode.AutoDiagnosticOnly);
+});
+
 Test("title background chara select scene readiness does not require fix on", () =>
 {
     return TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: true)

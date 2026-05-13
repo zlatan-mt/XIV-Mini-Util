@@ -85,4 +85,16 @@ internal static class TitleBackgroundRuntimeModeHelper
     {
         return cameraOverrideEnabled;
     }
+
+    public static bool ShouldCollectAutomaticProbeCounters(
+        TitleBackgroundRuntimeMode mode,
+        bool overrideEnabled,
+        TitleBackgroundResolverMode createSceneResolverMode,
+        TitleBackgroundResolverMode lobbyUpdateResolverMode)
+    {
+        return overrideEnabled
+            && mode == TitleBackgroundRuntimeMode.HookProbe
+            && createSceneResolverMode == TitleBackgroundResolverMode.ManualDirectTextProbe
+            && lobbyUpdateResolverMode == TitleBackgroundResolverMode.ManualDirectTextProbe;
+    }
 }
