@@ -512,13 +512,19 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     public IReadOnlyList<string> GetProbeReportLines()
     {
+        var activeSession = _activeProbeSession;
+        var lastSession = activeSession ?? _lastProbeSession;
+        var reportInput = BuildProbeReportInput(lastSession, activeSession != null);
+        var summaryLines = BuildProbeReportSummaryLines(reportInput);
+
         if (_activeProbeSession != null)
         {
             return
             [
-                ..GetProbeReportLines(_activeProbeSession, isActive: true),
+                ..summaryLines,
                 "",
-                ..GetDiagnosticLines(),
+                "[Probe] Raw session",
+                ..GetProbeReportLines(_activeProbeSession, isActive: true),
             ];
         }
 
@@ -526,12 +532,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             return
             [
-                "[Probe] last probe session report.",
+                ..summaryLines,
+                "",
+                "[Probe] Raw session",
                 ..GetProbeReportLines(_lastProbeSession, isActive: false),
             ];
         }
 
-        return ["[Probe] no probe session has been recorded."];
+        return summaryLines;
     }
 
     public bool ValidateCurrentConfiguration(out string errorMessage)
@@ -1303,6 +1311,99 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _log.Warning(ex, "TitleBackground probe failed to restore original settings.");
             return $"[Probe] failed to restore original settings: {ex.Message}";
         }
+    }
+
+    private TitleBackgroundProbeReportInput BuildProbeReportInput(TitleBackgroundProbeSession? session, bool isActive)
+    {
+        var useAutomaticCounters = _automaticProbeCountersEnabled;
+        var hooksEnabled = isActive || session == null ? AreAnyHooksEnabled() : session.HookEnabledAtEnd;
+        var runtimeError = (isActive || session == null) && _state == TitleBackgroundServiceState.RuntimeError;
+        if (session != null)
+        {
+            runtimeError |= session.RuntimeErrorOccurred;
+        }
+
+        var lastError = session?.LastError ?? string.Empty;
+        var createSceneCallCount = useAutomaticCounters ? _automaticProbeCounters.CreateSceneCallCount : session?.CreateSceneCallCount ?? 0;
+        var lobbyUpdateCallCount = useAutomaticCounters ? _automaticProbeCounters.LobbyUpdateCallCount : session?.LobbyUpdateCallCount ?? 0;
+        var loadLobbySceneCallCount = useAutomaticCounters ? _automaticProbeCounters.LoadLobbySceneCallCount : session?.LoadLobbySceneCallCount ?? 0;
+        var lastCreateScenePath = useAutomaticCounters ? _automaticProbeCounters.LastCreateScenePath : session?.LastCreateScenePath ?? string.Empty;
+        var lastCreateSceneTerritoryId = useAutomaticCounters ? _automaticProbeCounters.LastCreateSceneTerritoryId : session?.LastCreateSceneTerritoryId ?? 0;
+        var lastCreateSceneLayerFilterKey = useAutomaticCounters ? _automaticProbeCounters.LastCreateSceneLayerFilterKey : session?.LastCreateSceneLayerFilterKey ?? 0;
+        var lastLobbyUpdateMapId = useAutomaticCounters ? _automaticProbeCounters.LastLobbyUpdateMapId : session?.LastLobbyUpdateMapId ?? GameLobbyType.None;
+        var lastLobbyUpdateTime = useAutomaticCounters ? _automaticProbeCounters.LastLobbyUpdateTime : session?.LastLobbyUpdateTime ?? 0;
+        var lastLoadLobbySceneMapId = useAutomaticCounters ? _automaticProbeCounters.LastLoadLobbySceneMapId : session?.LastLoadLobbySceneMapId ?? GameLobbyType.None;
+
+        return new TitleBackgroundProbeReportInput(
+            ProbeActive: isActive,
+            OverrideEnabled: _configuration.TitleBackgroundOverrideEnabled,
+            RuntimeMode: _configuration.TitleBackgroundRuntimeMode,
+            CreateSceneResolverMode: _configuration.TitleBackgroundCreateSceneResolverMode,
+            LobbyUpdateResolverMode: _configuration.TitleBackgroundLobbyUpdateResolverMode,
+            AutomaticCountersEnabled: _automaticProbeCountersEnabled,
+            HooksEnabled: hooksEnabled,
+            RuntimeError: runtimeError,
+            ResolverError: _addressResolver.LastError,
+            LastError: lastError,
+            CreateSceneCallCount: createSceneCallCount,
+            LobbyUpdateCallCount: lobbyUpdateCallCount,
+            LoadLobbySceneCallCount: loadLobbySceneCallCount,
+            LastCreateScenePath: lastCreateScenePath,
+            LastCreateSceneTerritoryId: lastCreateSceneTerritoryId,
+            LastCreateSceneLayerFilterKey: lastCreateSceneLayerFilterKey,
+            LastLobbyUpdateMapId: lastLobbyUpdateMapId,
+            LastLobbyUpdateTime: lastLobbyUpdateTime,
+            LastLoadLobbySceneMapId: lastLoadLobbySceneMapId);
+    }
+
+    private static IReadOnlyList<string> BuildProbeReportSummaryLines(TitleBackgroundProbeReportInput input)
+    {
+        var attentionItems = TitleBackgroundProbeReportHelper.GetAttentionItems(input);
+        var lines = new List<string>
+        {
+            "[Probe] Summary",
+            $"[Probe] active={input.ProbeActive}",
+            $"[Probe] status={TitleBackgroundProbeReportHelper.GetOverallStatus(input)}",
+            $"[Probe] modeStatus={TitleBackgroundProbeReportHelper.GetModeStatus(input)}",
+            $"[Probe] runtimeMode={input.RuntimeMode}",
+            $"[Probe] overrideEnabled={input.OverrideEnabled}",
+            $"[Probe] createSceneResolver={input.CreateSceneResolverMode}",
+            $"[Probe] lobbyUpdateResolver={input.LobbyUpdateResolverMode}",
+            $"[Probe] automaticCountersEnabled={input.AutomaticCountersEnabled}",
+            $"[Probe] hooksEnabled={input.HooksEnabled}",
+            "",
+            "[Probe] Observed",
+            $"[Probe] CreateScene.callCount={input.CreateSceneCallCount}",
+            $"[Probe] LobbyUpdate.callCount={input.LobbyUpdateCallCount}",
+            $"[Probe] LoadLobbyScene.callCount={input.LoadLobbySceneCallCount}",
+            "",
+            "[Probe] Latest Values",
+            $"[Probe] CreateScene.lastPath={FormatNone(input.LastCreateScenePath)}",
+            $"[Probe] CreateScene.lastTerritoryId={input.LastCreateSceneTerritoryId}",
+            $"[Probe] CreateScene.lastLayerFilterKey={input.LastCreateSceneLayerFilterKey}",
+            $"[Probe] LobbyUpdate.lastMapId={input.LastLobbyUpdateMapId}",
+            $"[Probe] LobbyUpdate.lastTime={input.LastLobbyUpdateTime}",
+            $"[Probe] LoadLobbyScene.lastMapId={input.LastLoadLobbySceneMapId}",
+            "",
+            "[Probe] Not Yet Observed / Attention",
+        };
+
+        if (attentionItems.Count == 0)
+        {
+            lines.Add("[Probe] none");
+        }
+        else
+        {
+            foreach (var item in attentionItems)
+            {
+                lines.Add($"[Probe] {item}");
+            }
+        }
+
+        lines.Add("");
+        lines.Add("[Probe] Next Check");
+        lines.Add($"[Probe] {TitleBackgroundProbeReportHelper.GetNextCheck(input)}");
+        return lines;
     }
 
     private IReadOnlyList<string> GetProbeReportLines(TitleBackgroundProbeSession session, bool isActive)

@@ -663,6 +663,91 @@ Test("title background automatic probe counters require hook probe manual direct
             TitleBackgroundResolverMode.AutoDiagnosticOnly);
 });
 
+Test("title background probe report classifies complete observation", () =>
+{
+    var input = new TitleBackgroundProbeReportInput(
+        ProbeActive: false,
+        OverrideEnabled: true,
+        RuntimeMode: TitleBackgroundRuntimeMode.HookProbe,
+        CreateSceneResolverMode: TitleBackgroundResolverMode.ManualDirectTextProbe,
+        LobbyUpdateResolverMode: TitleBackgroundResolverMode.ManualDirectTextProbe,
+        AutomaticCountersEnabled: true,
+        HooksEnabled: true,
+        RuntimeError: false,
+        ResolverError: string.Empty,
+        LastError: string.Empty,
+        CreateSceneCallCount: 2,
+        LobbyUpdateCallCount: 120,
+        LoadLobbySceneCallCount: 1,
+        LastCreateScenePath: "ex5/01_xkt_x6/fld/x6f3/level/x6f3",
+        LastCreateSceneTerritoryId: 1192,
+        LastCreateSceneLayerFilterKey: 0,
+        LastLobbyUpdateMapId: GameLobbyType.None,
+        LastLobbyUpdateTime: 0,
+        LastLoadLobbySceneMapId: GameLobbyType.CharaSelect);
+
+    return TitleBackgroundProbeReportHelper.GetModeStatus(input) == "ready"
+        && TitleBackgroundProbeReportHelper.GetOverallStatus(input) == "observed"
+        && TitleBackgroundProbeReportHelper.GetAttentionItems(input).Count == 0;
+});
+
+Test("title background probe report classifies missing detours", () =>
+{
+    var input = new TitleBackgroundProbeReportInput(
+        ProbeActive: false,
+        OverrideEnabled: true,
+        RuntimeMode: TitleBackgroundRuntimeMode.HookProbe,
+        CreateSceneResolverMode: TitleBackgroundResolverMode.ManualDirectTextProbe,
+        LobbyUpdateResolverMode: TitleBackgroundResolverMode.ManualDirectTextProbe,
+        AutomaticCountersEnabled: true,
+        HooksEnabled: true,
+        RuntimeError: false,
+        ResolverError: string.Empty,
+        LastError: string.Empty,
+        CreateSceneCallCount: 1,
+        LobbyUpdateCallCount: 0,
+        LoadLobbySceneCallCount: 0,
+        LastCreateScenePath: "ex5/01_xkt_x6/fld/x6f3/level/x6f3",
+        LastCreateSceneTerritoryId: 1192,
+        LastCreateSceneLayerFilterKey: 0,
+        LastLobbyUpdateMapId: GameLobbyType.None,
+        LastLobbyUpdateTime: 0,
+        LastLoadLobbySceneMapId: GameLobbyType.None);
+
+    var attentionItems = TitleBackgroundProbeReportHelper.GetAttentionItems(input);
+    return TitleBackgroundProbeReportHelper.GetOverallStatus(input) == "partial"
+        && attentionItems.Any(item => item.Contains("LobbyUpdate", StringComparison.Ordinal))
+        && attentionItems.Any(item => item.Contains("LoadLobbyScene", StringComparison.Ordinal));
+});
+
+Test("title background probe report flags wrong mode before counters", () =>
+{
+    var input = new TitleBackgroundProbeReportInput(
+        ProbeActive: false,
+        OverrideEnabled: true,
+        RuntimeMode: TitleBackgroundRuntimeMode.CharaSelectOnly,
+        CreateSceneResolverMode: TitleBackgroundResolverMode.ManualDirectTextProbe,
+        LobbyUpdateResolverMode: TitleBackgroundResolverMode.ManualDirectTextProbe,
+        AutomaticCountersEnabled: false,
+        HooksEnabled: true,
+        RuntimeError: false,
+        ResolverError: string.Empty,
+        LastError: string.Empty,
+        CreateSceneCallCount: 0,
+        LobbyUpdateCallCount: 0,
+        LoadLobbySceneCallCount: 0,
+        LastCreateScenePath: string.Empty,
+        LastCreateSceneTerritoryId: 0,
+        LastCreateSceneLayerFilterKey: 0,
+        LastLobbyUpdateMapId: GameLobbyType.None,
+        LastLobbyUpdateTime: 0,
+        LastLoadLobbySceneMapId: GameLobbyType.None);
+
+    return TitleBackgroundProbeReportHelper.GetModeStatus(input) == "attention"
+        && TitleBackgroundProbeReportHelper.GetAttentionItems(input)
+            .Any(item => item.Contains("HookProbe + ManualDirectTextProbe", StringComparison.Ordinal));
+});
+
 Test("title background chara select scene readiness does not require fix on", () =>
 {
     return TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: true)
