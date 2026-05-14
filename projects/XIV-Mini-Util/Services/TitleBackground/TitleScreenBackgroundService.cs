@@ -16,6 +16,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 {
     private readonly IGameInteropProvider _gameInteropProvider;
     private readonly ISigScanner _sigScanner;
+    private readonly IFramework _framework;
     private readonly IDataManager _dataManager;
     private readonly IPluginLog _log;
     private readonly Configuration _configuration;
@@ -60,6 +61,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private TitleBackgroundProbeSession? _lastProbeSession;
     private TitleBackgroundProbeCounters _automaticProbeCounters = new();
     private bool _automaticProbeCountersEnabled;
+    private TitleBackgroundCameraProbeSession? _cameraProbeSession;
+    private int _cameraProbeDelayedCaptureFramesRemaining;
+    private string _cameraProbeDelayedCaptureStatus = "not-run";
+    private string _cameraProbeDelayedCaptureError = string.Empty;
+    private Vector3? _cameraProbeDelayedSceneCameraPosition;
+    private Vector3? _cameraProbeDelayedLookAtVector;
 
     private GameLobbyType EffectiveLobbyType =>
         _loadingLobbyType != GameLobbyType.None
@@ -69,6 +76,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     public TitleScreenBackgroundService(
         IGameInteropProvider gameInteropProvider,
         ISigScanner sigScanner,
+        IFramework framework,
         IClientState clientState,
         IObjectTable objectTable,
         IDataManager dataManager,
@@ -77,10 +85,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         _gameInteropProvider = gameInteropProvider;
         _sigScanner = sigScanner;
+        _framework = framework;
         _dataManager = dataManager;
         _log = log;
         _configuration = configuration;
         _cameraCaptureService = new TitleBackgroundCameraCaptureService(clientState, objectTable, dataManager, log);
+        _framework.Update += OnFrameworkUpdate;
 
         InitializeHooks();
         ApplyFromConfiguration();
@@ -359,7 +369,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"lastFixOnFovY={(_lastObservedFixOnFovY.HasValue ? _lastObservedFixOnFovY.Value.ToString("0.###") : "none")}",
             $"lastCameraOverrideApplied={_lastCameraOverrideApplied}",
             $"lastAppliedCamera={FormatVector(_lastAppliedCamera)}",
+            "cameraInputMeaning=FixOn camera argument; not yet verified as final stable camera position",
             $"lastAppliedFocus={FormatVector(_lastAppliedFocus)}",
+            "focusInputMeaning=FixOn focus argument; observed relation exists, but semantics remain under verification",
             $"lastAppliedFovY={(_lastAppliedFovY.HasValue ? _lastAppliedFovY.Value.ToString("0.###") : "none")}",
             $"lastFixOnInvocationMode={_lastFixOnInvocationMode}",
             $"postFixOnCameraCaptureStatus={_lastPostFixOnCameraCaptureStatus}",
@@ -376,6 +388,22 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             "currentLookAtVectorMeaning=raw SceneCamera.LookAtVector; meaning unverified",
             $"currentDistance={FormatFloat(currentDistance)}",
             $"currentFovY={FormatFloat(currentFovY)}",
+            $"cameraDelta.appliedToPostFixOn={FormatVectorDelta(_lastPostFixOnSceneCameraPosition, _lastAppliedCamera)}",
+            $"cameraDelta.appliedToPostFixOn.x={FormatVectorAxisDelta(_lastPostFixOnSceneCameraPosition, _lastAppliedCamera, 0)}",
+            $"cameraDelta.appliedToPostFixOn.y={FormatVectorAxisDelta(_lastPostFixOnSceneCameraPosition, _lastAppliedCamera, 1)}",
+            $"cameraDelta.appliedToPostFixOn.z={FormatVectorAxisDelta(_lastPostFixOnSceneCameraPosition, _lastAppliedCamera, 2)}",
+            $"cameraDelta.postFixOnToCurrent={FormatVectorDelta(currentSceneCameraPosition, _lastPostFixOnSceneCameraPosition)}",
+            $"cameraDelta.postFixOnToCurrent.x={FormatVectorAxisDelta(currentSceneCameraPosition, _lastPostFixOnSceneCameraPosition, 0)}",
+            $"cameraDelta.postFixOnToCurrent.y={FormatVectorAxisDelta(currentSceneCameraPosition, _lastPostFixOnSceneCameraPosition, 1)}",
+            $"cameraDelta.postFixOnToCurrent.z={FormatVectorAxisDelta(currentSceneCameraPosition, _lastPostFixOnSceneCameraPosition, 2)}",
+            $"focusDelta.appliedToPostFixOn={FormatVectorDelta(_lastPostFixOnLookAtVector, _lastAppliedFocus)}",
+            $"focusDelta.appliedToPostFixOn.x={FormatVectorAxisDelta(_lastPostFixOnLookAtVector, _lastAppliedFocus, 0)}",
+            $"focusDelta.appliedToPostFixOn.y={FormatVectorAxisDelta(_lastPostFixOnLookAtVector, _lastAppliedFocus, 1)}",
+            $"focusDelta.appliedToPostFixOn.z={FormatVectorAxisDelta(_lastPostFixOnLookAtVector, _lastAppliedFocus, 2)}",
+            $"focusDelta.postFixOnToCurrent={FormatVectorDelta(currentLookAtVector, _lastPostFixOnLookAtVector)}",
+            $"focusDelta.postFixOnToCurrent.x={FormatVectorAxisDelta(currentLookAtVector, _lastPostFixOnLookAtVector, 0)}",
+            $"focusDelta.postFixOnToCurrent.y={FormatVectorAxisDelta(currentLookAtVector, _lastPostFixOnLookAtVector, 1)}",
+            $"focusDelta.postFixOnToCurrent.z={FormatVectorAxisDelta(currentLookAtVector, _lastPostFixOnLookAtVector, 2)}",
             $"currentVsPostFixOnCameraDelta={FormatVectorDelta(currentSceneCameraPosition, _lastPostFixOnSceneCameraPosition)}",
             $"currentVsPostFixOnLookAtDelta={FormatVectorDelta(currentLookAtVector, _lastPostFixOnLookAtVector)}",
             $"currentVsPostFixOnDistanceDelta={FormatFloatDelta(currentDistance, _lastPostFixOnDistance)}",
@@ -449,6 +477,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     public IReadOnlyList<string> StartProbe()
     {
+        if (_cameraProbeSession != null)
+        {
+            return ["[Probe] camera probe is armed; run /xmutbgcamprobe restore before starting hook probe."];
+        }
+
         if (_activeProbeSession != null)
         {
             return ["[Probe] already active; existing session was left unchanged."];
@@ -542,6 +575,185 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return summaryLines;
     }
 
+    public IReadOnlyList<string> ArmCameraYProbe()
+    {
+        if (_activeProbeSession != null)
+        {
+            return ["[CameraProbe] hook probe is active; run /xmutbgprobe off before arming camera probe."];
+        }
+
+        if (_cameraProbeSession != null)
+        {
+            return ["[CameraProbe] already armed; run /xmutbgcamprobe restore before arming again."];
+        }
+
+        var baselineCamera = new Vector3(
+            _configuration.TitleBackgroundCameraX,
+            _configuration.TitleBackgroundCameraY,
+            _configuration.TitleBackgroundCameraZ);
+        var baselineFocus = new Vector3(
+            _configuration.TitleBackgroundFocusX,
+            _configuration.TitleBackgroundFocusY,
+            _configuration.TitleBackgroundFocusZ);
+        var probeCamera = new Vector3(
+            baselineCamera.X,
+            TitleBackgroundPreset.SanitizeCoordinate(baselineCamera.Y + 50f),
+            baselineCamera.Z);
+        var probeFocus = new Vector3(
+            baselineFocus.X,
+            TitleBackgroundPreset.SanitizeCoordinate(baselineFocus.Y - 50f),
+            baselineFocus.Z);
+        var session = new TitleBackgroundCameraProbeSession(
+            TitleBackgroundCameraProbeSettingsSnapshot.Capture(_configuration),
+            baselineCamera,
+            baselineFocus,
+            probeCamera,
+            probeFocus);
+
+        _cameraProbeSession = session;
+        try
+        {
+            _configuration.TitleBackgroundSelectedPresetId = string.Empty;
+            _configuration.TitleBackgroundCameraOverrideEnabled = true;
+            _configuration.TitleBackgroundCameraX = probeCamera.X;
+            _configuration.TitleBackgroundCameraY = probeCamera.Y;
+            _configuration.TitleBackgroundCameraZ = probeCamera.Z;
+            _configuration.TitleBackgroundFocusX = probeFocus.X;
+            _configuration.TitleBackgroundFocusY = probeFocus.Y;
+            _configuration.TitleBackgroundFocusZ = probeFocus.Z;
+            _configuration.Save();
+            ApplyFromConfiguration();
+            ResetCameraOverrideObservation();
+            ResetCameraProbeDelayedObservation();
+
+            return
+            [
+                "[CameraProbe] armed-y.",
+                $"[CameraProbe] baselineCamera={FormatVector(baselineCamera)}",
+                $"[CameraProbe] baselineFocus={FormatVector(baselineFocus)}",
+                $"[CameraProbe] probeCamera={FormatVector(probeCamera)}",
+                $"[CameraProbe] probeFocus={FormatVector(probeFocus)}",
+                $"[CameraProbe] expectedCameraYDelta={FormatFloat(probeCamera.Y - baselineCamera.Y)}",
+                $"[CameraProbe] expectedFocusYDelta={FormatFloat(probeFocus.Y - baselineFocus.Y)}",
+                "[CameraProbe] next=logout -> character select -> login -> /xmutbgcamprobe report",
+            ];
+        }
+        catch (Exception ex)
+        {
+            _cameraProbeSession = null;
+            session.OriginalSettings.ApplyTo(_configuration);
+            _configuration.Save();
+            ApplyFromConfiguration();
+            _log.Warning(ex, "TitleBackground camera probe failed to arm.");
+            return
+            [
+                "[CameraProbe] failed to arm-y.",
+                $"[CameraProbe] error={ex.Message}",
+            ];
+        }
+    }
+
+    public IReadOnlyList<string> GetCameraProbeReportLines()
+    {
+        var currentCameraCaptured = TryCaptureActiveCameraSnapshot(out var currentCamera, out var currentCaptureError);
+        var reportTimeSceneCameraPosition = currentCameraCaptured ? currentCamera.SceneCameraPosition : (Vector3?)null;
+        var reportTimeLookAtVector = currentCameraCaptured ? currentCamera.LookAtVector : (Vector3?)null;
+        var stabilitySceneCameraPosition = _cameraProbeDelayedSceneCameraPosition ?? reportTimeSceneCameraPosition;
+        var stabilityLookAtVector = _cameraProbeDelayedLookAtVector ?? reportTimeLookAtVector;
+        var stabilitySampleSource = _cameraProbeDelayedSceneCameraPosition.HasValue || _cameraProbeDelayedLookAtVector.HasValue
+            ? "delayed-probe-snapshot"
+            : "report-time-current";
+        var session = _cameraProbeSession;
+        var input = new TitleBackgroundCameraProbeReportInput(
+            session != null,
+            session?.BaselineCamera ?? default,
+            session?.BaselineFocus ?? default,
+            session?.ProbeCamera ?? default,
+            session?.ProbeFocus ?? default,
+            _lastAppliedCamera,
+            _lastPostFixOnSceneCameraPosition,
+            stabilitySceneCameraPosition,
+            _lastAppliedFocus,
+            _lastPostFixOnLookAtVector,
+            stabilityLookAtVector);
+        var result = TitleBackgroundCameraProbeReport.Evaluate(input);
+
+        var lines = new List<string>
+        {
+            "[CameraProbe] Report",
+            $"[CameraProbe] armed={input.Armed}",
+        };
+        if (session != null)
+        {
+            lines.Add($"[CameraProbe] armedAt={session.ArmedAt:yyyy-MM-dd HH:mm:ss zzz}");
+            lines.Add($"[CameraProbe] baselineCamera={FormatVector(session.BaselineCamera)}");
+            lines.Add($"[CameraProbe] baselineFocus={FormatVector(session.BaselineFocus)}");
+            lines.Add($"[CameraProbe] probeCamera={FormatVector(session.ProbeCamera)}");
+            lines.Add($"[CameraProbe] probeFocus={FormatVector(session.ProbeFocus)}");
+            lines.Add($"[CameraProbe] expectedCameraYDelta={FormatFloat(session.ProbeCamera.Y - session.BaselineCamera.Y)}");
+            lines.Add($"[CameraProbe] expectedFocusYDelta={FormatFloat(session.ProbeFocus.Y - session.BaselineFocus.Y)}");
+        }
+        else
+        {
+            lines.Add("[CameraProbe] baselineCamera=none");
+            lines.Add("[CameraProbe] baselineFocus=none");
+            lines.Add("[CameraProbe] probeCamera=none");
+            lines.Add("[CameraProbe] probeFocus=none");
+        }
+
+        lines.AddRange(
+        [
+            $"[CameraProbe] lastAppliedCamera={FormatVector(_lastAppliedCamera)}",
+            $"[CameraProbe] postFixOnSceneCameraPosition={FormatVector(_lastPostFixOnSceneCameraPosition)}",
+            $"[CameraProbe] currentSceneCameraPosition={FormatVector(reportTimeSceneCameraPosition)}",
+            $"[CameraProbe] delayedSceneCameraPosition={FormatVector(_cameraProbeDelayedSceneCameraPosition)}",
+            $"[CameraProbe] lastAppliedFocus={FormatVector(_lastAppliedFocus)}",
+            $"[CameraProbe] postFixOnLookAtVector={FormatVector(_lastPostFixOnLookAtVector)}",
+            $"[CameraProbe] currentLookAtVector={FormatVector(reportTimeLookAtVector)}",
+            $"[CameraProbe] delayedLookAtVector={FormatVector(_cameraProbeDelayedLookAtVector)}",
+            $"[CameraProbe] stabilitySampleSource={stabilitySampleSource}",
+            $"[CameraProbe] delayedCaptureStatus={_cameraProbeDelayedCaptureStatus}",
+            $"[CameraProbe] delayedCaptureError={FormatNone(_cameraProbeDelayedCaptureError)}",
+            $"[CameraProbe] currentCameraCaptureStatus={(currentCameraCaptured ? "success" : "failed")}",
+            $"[CameraProbe] currentCameraCaptureError={FormatNone(currentCaptureError)}",
+            $"[CameraProbe] cameraY.appliedToPostFixOn.delta={FormatVectorAxisDelta(_lastPostFixOnSceneCameraPosition, _lastAppliedCamera, 1)}",
+            $"[CameraProbe] cameraY.postFixOnToStabilitySample.delta={FormatVectorAxisDelta(stabilitySceneCameraPosition, _lastPostFixOnSceneCameraPosition, 1)}",
+            $"[CameraProbe] focusY.appliedToPostFixOn.delta={FormatVectorAxisDelta(_lastPostFixOnLookAtVector, _lastAppliedFocus, 1)}",
+            $"[CameraProbe] focusY.postFixOnToStabilitySample.delta={FormatVectorAxisDelta(stabilityLookAtVector, _lastPostFixOnLookAtVector, 1)}",
+            $"[CameraProbe] verdict.cameraYFixOnReflection={TitleBackgroundCameraProbeReport.FormatVerdict(result.CameraYFixOnReflection)}",
+            $"[CameraProbe] verdict.cameraYPostFixOnStability={TitleBackgroundCameraProbeReport.FormatVerdict(result.CameraYPostFixOnStability)}",
+            $"[CameraProbe] verdict.focusYFixOnReflection={TitleBackgroundCameraProbeReport.FormatVerdict(result.FocusYFixOnReflection)}",
+            $"[CameraProbe] verdict.focusYPostFixOnStability={TitleBackgroundCameraProbeReport.FormatVerdict(result.FocusYPostFixOnStability)}",
+            $"[CameraProbe] {result.LikelyConclusion}",
+        ]);
+
+        return lines;
+    }
+
+    public IReadOnlyList<string> RestoreCameraProbe()
+    {
+        if (_cameraProbeSession == null)
+        {
+            return ["[CameraProbe] no armed session; nothing to restore."];
+        }
+
+        var session = _cameraProbeSession;
+        _cameraProbeSession = null;
+        session.OriginalSettings.ApplyTo(_configuration);
+        _configuration.Save();
+        ApplyFromConfiguration();
+        ResetCameraOverrideObservation();
+        ResetCameraProbeDelayedObservation();
+
+        return
+        [
+            "[CameraProbe] restored original camera settings.",
+            $"[CameraProbe] restoredCamera={FormatVector(session.BaselineCamera)}",
+            $"[CameraProbe] restoredFocus={FormatVector(session.BaselineFocus)}",
+            $"[CameraProbe] restoredCameraOverrideEnabled={session.OriginalSettings.CameraOverrideEnabled}",
+        ];
+    }
+
     public bool ValidateCurrentConfiguration(out string errorMessage)
     {
         var normalized = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(_configuration.TitleBackgroundTerritoryPath);
@@ -584,6 +796,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
 
         _disposed = true;
+        _framework.Update -= OnFrameworkUpdate;
+        RestoreCameraProbeSettingsOnDispose();
         _cameraApplyPending = false;
         ResetCameraOverrideObservation();
         _loadingLobbyType = GameLobbyType.None;
@@ -813,7 +1027,81 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
 
         CapturePostFixOnCameraState();
+        ScheduleCameraProbeDelayedCapture(cameraOverride != null && focusOverride != null);
         return result;
+    }
+
+    private void OnFrameworkUpdate(IFramework _)
+    {
+        if (_disposed || _cameraProbeDelayedCaptureFramesRemaining <= 0)
+        {
+            return;
+        }
+
+        _cameraProbeDelayedCaptureFramesRemaining--;
+        if (_cameraProbeDelayedCaptureFramesRemaining > 0)
+        {
+            return;
+        }
+
+        if (TryCaptureActiveCameraSnapshot(out var snapshot, out var errorMessage))
+        {
+            _cameraProbeDelayedSceneCameraPosition = snapshot.SceneCameraPosition;
+            _cameraProbeDelayedLookAtVector = snapshot.LookAtVector;
+            _cameraProbeDelayedCaptureStatus = "success";
+            _cameraProbeDelayedCaptureError = string.Empty;
+        }
+        else
+        {
+            _cameraProbeDelayedCaptureStatus = "failed";
+            _cameraProbeDelayedCaptureError = string.IsNullOrWhiteSpace(errorMessage) ? "unknown" : errorMessage;
+        }
+    }
+
+    private void ScheduleCameraProbeDelayedCapture(bool overrideAppliedInThisInvocation)
+    {
+        if (_cameraProbeSession == null || !overrideAppliedInThisInvocation)
+        {
+            return;
+        }
+
+        _cameraProbeDelayedCaptureFramesRemaining = 30;
+        _cameraProbeDelayedCaptureStatus = "pending";
+        _cameraProbeDelayedCaptureError = string.Empty;
+        _cameraProbeDelayedSceneCameraPosition = null;
+        _cameraProbeDelayedLookAtVector = null;
+    }
+
+    private void ResetCameraProbeDelayedObservation()
+    {
+        _cameraProbeDelayedCaptureFramesRemaining = 0;
+        _cameraProbeDelayedCaptureStatus = "not-run";
+        _cameraProbeDelayedCaptureError = string.Empty;
+        _cameraProbeDelayedSceneCameraPosition = null;
+        _cameraProbeDelayedLookAtVector = null;
+    }
+
+    private void RestoreCameraProbeSettingsOnDispose()
+    {
+        if (_cameraProbeSession == null)
+        {
+            return;
+        }
+
+        try
+        {
+            _cameraProbeSession.OriginalSettings.ApplyTo(_configuration);
+            _configuration.Save();
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "TitleBackground camera probe failed to restore settings on dispose.");
+        }
+        finally
+        {
+            _cameraProbeSession = null;
+            ResetCameraProbeDelayedObservation();
+        }
     }
 
     private void CapturePostFixOnCameraState()
@@ -1264,6 +1552,23 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return FormatVector(TitleBackgroundCameraMath.CalculateVectorDelta(current, baseline));
     }
 
+    private static string FormatVectorAxisDelta(Vector3? current, Vector3? baseline, int axis)
+    {
+        var delta = TitleBackgroundCameraMath.CalculateVectorDelta(current, baseline);
+        if (!delta.HasValue)
+        {
+            return "none";
+        }
+
+        return axis switch
+        {
+            0 => FormatFloat(delta.Value.X),
+            1 => FormatFloat(delta.Value.Y),
+            2 => FormatFloat(delta.Value.Z),
+            _ => "none",
+        };
+    }
+
     private static string FormatFloatDelta(float? current, float? baseline)
     {
         return FormatFloat(TitleBackgroundCameraMath.CalculateFloatDelta(current, baseline));
@@ -1587,6 +1892,66 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         public int LastLobbyUpdateTime { get; set; }
         public int LoadLobbySceneCallCount { get; set; }
         public GameLobbyType LastLoadLobbySceneMapId { get; set; } = GameLobbyType.None;
+    }
+
+    private sealed class TitleBackgroundCameraProbeSession
+    {
+        public TitleBackgroundCameraProbeSession(
+            TitleBackgroundCameraProbeSettingsSnapshot originalSettings,
+            Vector3 baselineCamera,
+            Vector3 baselineFocus,
+            Vector3 probeCamera,
+            Vector3 probeFocus)
+        {
+            OriginalSettings = originalSettings;
+            BaselineCamera = baselineCamera;
+            BaselineFocus = baselineFocus;
+            ProbeCamera = probeCamera;
+            ProbeFocus = probeFocus;
+        }
+
+        public DateTimeOffset ArmedAt { get; } = DateTimeOffset.Now;
+        public TitleBackgroundCameraProbeSettingsSnapshot OriginalSettings { get; }
+        public Vector3 BaselineCamera { get; }
+        public Vector3 BaselineFocus { get; }
+        public Vector3 ProbeCamera { get; }
+        public Vector3 ProbeFocus { get; }
+    }
+
+    private sealed record TitleBackgroundCameraProbeSettingsSnapshot(
+        string SelectedPresetId,
+        bool CameraOverrideEnabled,
+        float CameraX,
+        float CameraY,
+        float CameraZ,
+        float FocusX,
+        float FocusY,
+        float FocusZ)
+    {
+        public static TitleBackgroundCameraProbeSettingsSnapshot Capture(Configuration configuration)
+        {
+            return new TitleBackgroundCameraProbeSettingsSnapshot(
+                configuration.TitleBackgroundSelectedPresetId,
+                configuration.TitleBackgroundCameraOverrideEnabled,
+                configuration.TitleBackgroundCameraX,
+                configuration.TitleBackgroundCameraY,
+                configuration.TitleBackgroundCameraZ,
+                configuration.TitleBackgroundFocusX,
+                configuration.TitleBackgroundFocusY,
+                configuration.TitleBackgroundFocusZ);
+        }
+
+        public void ApplyTo(Configuration configuration)
+        {
+            configuration.TitleBackgroundSelectedPresetId = SelectedPresetId;
+            configuration.TitleBackgroundCameraOverrideEnabled = CameraOverrideEnabled;
+            configuration.TitleBackgroundCameraX = CameraX;
+            configuration.TitleBackgroundCameraY = CameraY;
+            configuration.TitleBackgroundCameraZ = CameraZ;
+            configuration.TitleBackgroundFocusX = FocusX;
+            configuration.TitleBackgroundFocusY = FocusY;
+            configuration.TitleBackgroundFocusZ = FocusZ;
+        }
     }
 
     private sealed record TitleBackgroundProbeSettingsSnapshot(

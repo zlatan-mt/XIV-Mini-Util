@@ -33,6 +33,7 @@ public sealed class Plugin : IDalamudPlugin
     private const string TitleBackgroundDiagnosticCommandName = "/xmutbgdiag";
     private const string TitleBackgroundDiagnosticCommandAlias = "/xmutbg";
     private const string TitleBackgroundProbeCommandName = "/xmutbgprobe";
+    private const string TitleBackgroundCameraProbeCommandName = "/xmutbgcamprobe";
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
     private readonly IChatGui _chatGui;
@@ -136,6 +137,7 @@ public sealed class Plugin : IDalamudPlugin
         _titleScreenBackgroundService = new TitleScreenBackgroundService(
             gameInteropProvider,
             sigScanner,
+            framework,
             clientState,
             objectTable,
             dataManager,
@@ -241,6 +243,10 @@ public sealed class Plugin : IDalamudPlugin
         {
             HelpMessage = "タイトル背景hook probeを開始/停止/表示します。サブコマンド: on / report / off",
         });
+        _commandManager.AddHandler(TitleBackgroundCameraProbeCommandName, new CommandInfo(OnTitleBackgroundCameraProbeCommand)
+        {
+            HelpMessage = "タイトル背景camera Y probeを準備/表示/復元します。サブコマンド: arm-y / report / restore",
+        });
         _shopSearchService.OnSearchCompleted += OnShopSearchCompleted;
         _ = InitializeShopDataAsync();
     }
@@ -261,6 +267,7 @@ public sealed class Plugin : IDalamudPlugin
         _commandManager.RemoveHandler(TitleBackgroundDiagnosticCommandName);
         _commandManager.RemoveHandler(TitleBackgroundDiagnosticCommandAlias);
         _commandManager.RemoveHandler(TitleBackgroundProbeCommandName);
+        _commandManager.RemoveHandler(TitleBackgroundCameraProbeCommandName);
         _pluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         _pluginInterface.UiBuilder.OpenMainUi -= OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi -= OpenSettingsWindow;
@@ -403,6 +410,27 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private void OnTitleBackgroundCameraProbeCommand(string command, string args)
+    {
+        var subCommand = GetSubCommand(args);
+        IReadOnlyList<string> lines = subCommand switch
+        {
+            "" or "report" => _titleScreenBackgroundService.GetCameraProbeReportLines(),
+            "arm-y" => _titleScreenBackgroundService.ArmCameraYProbe(),
+            "restore" => _titleScreenBackgroundService.RestoreCameraProbe(),
+            _ =>
+            [
+                "[CameraProbe] usage: /xmutbgcamprobe arm-y | report | restore",
+            ],
+        };
+
+        foreach (var line in lines)
+        {
+            _chatGui.Print($"[XIV Mini Util] {line}");
+            _pluginLog.Information("TitleBackground camera probe: {Line}", line);
+        }
+    }
+
     private static string GetSubCommand(string args)
     {
         var trimmed = args?.Trim();
@@ -457,6 +485,7 @@ public sealed class Plugin : IDalamudPlugin
         _chatGui.Print("/xmuc : キャラ選択画面のエモート/声診断情報を表示します。");
         _chatGui.Print("/xmutbg : タイトル背景差し替えの診断情報を表示します。");
         _chatGui.Print("/xmutbg copy : タイトル背景差し替えの診断情報をクリップボードへコピーします。");
+        _chatGui.Print("/xmutbgcamprobe arm-y : CameraY / FocusY one-shot probeを準備します。");
         _chatGui.Print("/xmu : /xivminiutil のエイリアス");
     }
 

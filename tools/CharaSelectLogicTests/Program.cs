@@ -518,6 +518,68 @@ Test("title background camera math calculates nullable deltas", () =>
         && TitleBackgroundCameraMath.CalculateFloatDelta(null, 2.5f) == null;
 });
 
+Test("title background camera probe detects reflected then overwritten camera y", () =>
+{
+    var result = TitleBackgroundCameraProbeReport.Evaluate(new TitleBackgroundCameraProbeReportInput(
+        Armed: true,
+        BaselineCamera: new Vector3(0f, 10f, 0f),
+        BaselineFocus: new Vector3(0f, 20f, 0f),
+        ProbeCamera: new Vector3(0f, 60f, 0f),
+        ProbeFocus: new Vector3(0f, -30f, 0f),
+        LastAppliedCamera: new Vector3(0f, 60f, 0f),
+        PostFixOnSceneCameraPosition: new Vector3(0f, 60.2f, 0f),
+        CurrentSceneCameraPosition: new Vector3(0f, 92f, 0f),
+        LastAppliedFocus: new Vector3(0f, -30f, 0f),
+        PostFixOnLookAtVector: new Vector3(0f, -30.2f, 0f),
+        CurrentLookAtVector: new Vector3(0f, -30.4f, 0f)));
+
+    return result.CameraYFixOnReflection == TitleBackgroundCameraProbeVerdict.Reflected
+        && result.CameraYPostFixOnStability == TitleBackgroundCameraProbeVerdict.PossiblyOverwritten
+        && result.FocusYFixOnReflection == TitleBackgroundCameraProbeVerdict.Reflected
+        && result.FocusYPostFixOnStability == TitleBackgroundCameraProbeVerdict.Stable
+        && result.LikelyConclusion.Contains("overwritten later", StringComparison.Ordinal);
+});
+
+Test("title background camera probe detects focus reflection with missing camera y reflection", () =>
+{
+    var result = TitleBackgroundCameraProbeReport.Evaluate(new TitleBackgroundCameraProbeReportInput(
+        Armed: true,
+        BaselineCamera: new Vector3(0f, 10f, 0f),
+        BaselineFocus: new Vector3(0f, 20f, 0f),
+        ProbeCamera: new Vector3(0f, 60f, 0f),
+        ProbeFocus: new Vector3(0f, -30f, 0f),
+        LastAppliedCamera: new Vector3(0f, 60f, 0f),
+        PostFixOnSceneCameraPosition: new Vector3(0f, 10f, 0f),
+        CurrentSceneCameraPosition: new Vector3(0f, 10f, 0f),
+        LastAppliedFocus: new Vector3(0f, -30f, 0f),
+        PostFixOnLookAtVector: new Vector3(0f, -30f, 0f),
+        CurrentLookAtVector: new Vector3(0f, -30f, 0f)));
+
+    return result.CameraYFixOnReflection == TitleBackgroundCameraProbeVerdict.NotReflected
+        && result.FocusYFixOnReflection == TitleBackgroundCameraProbeVerdict.Reflected
+        && result.LikelyConclusion.Contains("FocusY reflects correctly", StringComparison.Ordinal);
+});
+
+Test("title background camera probe does not evaluate when unarmed", () =>
+{
+    var result = TitleBackgroundCameraProbeReport.Evaluate(new TitleBackgroundCameraProbeReportInput(
+        Armed: false,
+        BaselineCamera: default,
+        BaselineFocus: default,
+        ProbeCamera: default,
+        ProbeFocus: default,
+        LastAppliedCamera: new Vector3(0f, 10f, 0f),
+        PostFixOnSceneCameraPosition: new Vector3(0f, 10f, 0f),
+        CurrentSceneCameraPosition: new Vector3(0f, 10f, 0f),
+        LastAppliedFocus: new Vector3(0f, 20f, 0f),
+        PostFixOnLookAtVector: new Vector3(0f, 20f, 0f),
+        CurrentLookAtVector: new Vector3(0f, 20f, 0f)));
+
+    return result.CameraYFixOnReflection == TitleBackgroundCameraProbeVerdict.Inconclusive
+        && result.FocusYFixOnReflection == TitleBackgroundCameraProbeVerdict.Inconclusive
+        && result.LikelyConclusion.Contains("arm the probe first", StringComparison.Ordinal);
+});
+
 Test("title background capture preset builder keeps existing fov when unavailable", () =>
 {
     var existing = new TitleBackgroundPreset

@@ -739,7 +739,7 @@ public sealed class SettingsTab : ITabComponent
 
         ImGui.TextDisabled(cameraOverrideEnabled
             ? "Camera override: ON。CharaSelectOnly の scene 差し替え後に FixOn hook で適用します。"
-            : "Camera override: OFF。現状どおり scene path 差し替えのみです。");
+            : "Camera override: OFF。camera 値は上書きしません。FixOn hook 有効時は passthrough 観測のみ行います。");
         ImGui.TextDisabled("hook状態と保存失敗理由は /xmutbgdiag でも確認できます。");
 
         DrawTitleBackgroundCaptureResult();
