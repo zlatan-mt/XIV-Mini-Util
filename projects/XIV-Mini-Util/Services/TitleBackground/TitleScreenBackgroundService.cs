@@ -67,6 +67,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private string _cameraProbeTimelineError = string.Empty;
     private readonly Dictionary<int, TitleBackgroundCameraProbeTimelineSnapshot> _cameraProbeTimelineSnapshots = [];
     private readonly Dictionary<int, TitleBackgroundCameraProbeTimelineEventCounts> _cameraProbeTimelineEventCounts = [];
+    private readonly Dictionary<int, TitleBackgroundCameraProbeLobbyUpdateSnapshot> _cameraProbeLobbyUpdateSnapshots = [];
     private static readonly int[] CameraProbeTimelineFrames = [0, 1, 2, 4, 8, 16, 30, 60];
 
     private GameLobbyType EffectiveLobbyType =>
@@ -740,6 +741,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             var snapshotFound = _cameraProbeTimelineSnapshots.TryGetValue(sample.Frame, out var snapshot);
             var events = GetCameraProbeTimelineEventCounts(sample.Frame);
+            var lobbyUpdate = GetCameraProbeLobbyUpdateSnapshot(sample.Frame);
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].sceneCamera={FormatVector(sample.SceneCameraPosition)}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].lookAt={FormatVector(sample.LookAtVector)}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].cameraY={FormatVectorAxis(sample.SceneCameraPosition, 1)}");
@@ -750,6 +752,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].lobbyUpdateCalls={events.LobbyUpdateCalls}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].loadLobbySceneCalls={events.LoadLobbySceneCalls}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].createSceneCalls={events.CreateSceneCalls}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].preLobbyUpdateSceneCamera={FormatVector(lobbyUpdate.PreSceneCameraPosition)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].preLobbyUpdateLookAt={FormatVector(lobbyUpdate.PreLookAtVector)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].preLobbyUpdateCameraY={FormatVectorAxis(lobbyUpdate.PreSceneCameraPosition, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].preLobbyUpdateFocusY={FormatVectorAxis(lobbyUpdate.PreLookAtVector, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].postLobbyUpdateSceneCamera={FormatVector(lobbyUpdate.PostSceneCameraPosition)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].postLobbyUpdateLookAt={FormatVector(lobbyUpdate.PostLookAtVector)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].postLobbyUpdateCameraY={FormatVectorAxis(lobbyUpdate.PostSceneCameraPosition, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].postLobbyUpdateFocusY={FormatVectorAxis(lobbyUpdate.PostLookAtVector, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].lobbyUpdateDelta.cameraY={FormatVectorAxisDelta(lobbyUpdate.PostSceneCameraPosition, lobbyUpdate.PreSceneCameraPosition, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].lobbyUpdateDelta.focusY={FormatVectorAxisDelta(lobbyUpdate.PostLookAtVector, lobbyUpdate.PreLookAtVector, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].lobbyUpdateCaptureStatus={FormatLobbyUpdateCaptureStatus(lobbyUpdate)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].lobbyUpdateCaptureError={FormatLobbyUpdateCaptureError(lobbyUpdate)}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].status={(snapshotFound ? snapshot.Status : "missing")}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].error={(snapshotFound ? FormatNone(snapshot.Error) : "none")}");
         }
@@ -991,16 +1005,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private byte LobbyUpdateDetour(GameLobbyType mapId, int time)
     {
+        var frame = RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.LobbyUpdate);
         try
         {
-            RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.LobbyUpdate);
             RecordProbeLobbyUpdate(mapId, time);
-            if (IsHookProbeMode())
-            {
-                return _lobbyUpdateHook?.Original(mapId, time) ?? 0;
-            }
-
-            if (ShouldResetCurrentMapForReload(mapId))
+            if (!IsHookProbeMode() && ShouldResetCurrentMapForReload(mapId))
             {
                 _currentMapWriteAttempted = true;
                 _lastCurrentMapWriteSucceeded = TryWriteCurrentLobbyMap(GameLobbyType.None);
@@ -1016,7 +1025,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _lastLobbyUpdateMapId = mapId;
         }
 
-        return _lobbyUpdateHook?.Original(mapId, time) ?? 0;
+        CaptureCameraProbeLobbyUpdateState(frame, beforeOriginal: true);
+        var result = _lobbyUpdateHook?.Original(mapId, time) ?? 0;
+        CaptureCameraProbeLobbyUpdateState(frame, beforeOriginal: false);
+        return result;
     }
 
     private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)
@@ -1161,19 +1173,20 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _cameraProbeTimelineError = string.Empty;
         _cameraProbeTimelineSnapshots.Clear();
         _cameraProbeTimelineEventCounts.Clear();
+        _cameraProbeLobbyUpdateSnapshots.Clear();
     }
 
-    private void RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind kind)
+    private int? RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind kind)
     {
         if (_cameraProbeSession == null)
         {
-            return;
+            return null;
         }
 
         var frame = GetCurrentCameraProbeTimelineEventFrame();
         if (!frame.HasValue)
         {
-            return;
+            return null;
         }
 
         var counts = GetCameraProbeTimelineEventCounts(frame);
@@ -1186,6 +1199,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _ => counts,
         };
         _cameraProbeTimelineEventCounts[frame.Value] = counts;
+        return frame;
     }
 
     private int? GetCurrentCameraProbeTimelineEventFrame()
@@ -1223,6 +1237,71 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
 
         return totals;
+    }
+
+    private void CaptureCameraProbeLobbyUpdateState(int? frame, bool beforeOriginal)
+    {
+        if (!frame.HasValue || _cameraProbeSession == null)
+        {
+            return;
+        }
+
+        var current = GetCameraProbeLobbyUpdateSnapshot(frame.Value);
+        if (TryCaptureActiveCameraSnapshot(out var snapshot, out var errorMessage))
+        {
+            current = beforeOriginal
+                ? current with
+                {
+                    PreSceneCameraPosition = current.PreSceneCameraPosition ?? snapshot.SceneCameraPosition,
+                    PreLookAtVector = current.PreLookAtVector ?? snapshot.LookAtVector,
+                    PreStatus = "success",
+                    PreError = string.Empty,
+                }
+                : current with
+                {
+                    PostSceneCameraPosition = snapshot.SceneCameraPosition,
+                    PostLookAtVector = snapshot.LookAtVector,
+                    PostStatus = "success",
+                    PostError = string.Empty,
+                };
+        }
+        else
+        {
+            current = beforeOriginal
+                ? current with
+                {
+                    PreStatus = "failed",
+                    PreError = string.IsNullOrWhiteSpace(errorMessage) ? "unknown" : errorMessage,
+                }
+                : current with
+                {
+                    PostStatus = "failed",
+                    PostError = string.IsNullOrWhiteSpace(errorMessage) ? "unknown" : errorMessage,
+                };
+        }
+
+        _cameraProbeLobbyUpdateSnapshots[frame.Value] = current;
+    }
+
+    private TitleBackgroundCameraProbeLobbyUpdateSnapshot GetCameraProbeLobbyUpdateSnapshot(int frame)
+    {
+        return _cameraProbeLobbyUpdateSnapshots.TryGetValue(frame, out var snapshot)
+            ? snapshot
+            : default;
+    }
+
+    private static string FormatLobbyUpdateCaptureStatus(TitleBackgroundCameraProbeLobbyUpdateSnapshot snapshot)
+    {
+        var preStatus = string.IsNullOrWhiteSpace(snapshot.PreStatus) ? "missing" : snapshot.PreStatus;
+        var postStatus = string.IsNullOrWhiteSpace(snapshot.PostStatus) ? "missing" : snapshot.PostStatus;
+        return $"pre={preStatus},post={postStatus}";
+    }
+
+    private static string FormatLobbyUpdateCaptureError(TitleBackgroundCameraProbeLobbyUpdateSnapshot snapshot)
+    {
+        var preError = string.IsNullOrWhiteSpace(snapshot.PreError) ? "none" : snapshot.PreError;
+        var postError = string.IsNullOrWhiteSpace(snapshot.PostError) ? "none" : snapshot.PostError;
+        return $"pre={preError},post={postError}";
     }
 
     private void RestoreCameraProbeSettingsOnDispose()
@@ -2109,6 +2188,16 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         Vector3? LookAtVector,
         string Status,
         string Error);
+
+    private readonly record struct TitleBackgroundCameraProbeLobbyUpdateSnapshot(
+        Vector3? PreSceneCameraPosition,
+        Vector3? PreLookAtVector,
+        string PreStatus,
+        string PreError,
+        Vector3? PostSceneCameraPosition,
+        Vector3? PostLookAtVector,
+        string PostStatus,
+        string PostError);
 
     private enum TitleBackgroundCameraProbeTimelineEventKind
     {

@@ -389,6 +389,14 @@ public sealed class Plugin : IDalamudPlugin
         _pluginLog.Information("TitleBackground diag copied to clipboard. lines={LineCount}", lines.Count);
     }
 
+    private void CopyTitleBackgroundCameraProbeLines(IReadOnlyList<string> lines)
+    {
+        var text = string.Join(Environment.NewLine, lines.Select(line => $"[XIV Mini Util] {line}"));
+        ImGui.SetClipboardText(text);
+        _chatGui.Print($"[XIV Mini Util] camera probe report copied to clipboard. lines={lines.Count}");
+        _pluginLog.Information("TitleBackground camera probe copied to clipboard. lines={LineCount}", lines.Count);
+    }
+
     private void OnTitleBackgroundProbeCommand(string command, string args)
     {
         var subCommand = GetSubCommand(args);
@@ -423,6 +431,11 @@ public sealed class Plugin : IDalamudPlugin
                 "[CameraProbe] usage: /xmutbgcamprobe arm-y | report | restore",
             ],
         };
+
+        if (subCommand is "" or "report")
+        {
+            CopyTitleBackgroundCameraProbeLines(lines);
+        }
 
         foreach (var line in lines)
         {
