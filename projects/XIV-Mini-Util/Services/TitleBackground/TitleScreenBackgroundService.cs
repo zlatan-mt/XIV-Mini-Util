@@ -50,15 +50,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private Vector3? _lastAppliedFocus;
     private float? _lastAppliedFovY;
     private string _lastFixOnInvocationMode = "not-run";
-    private bool _cameraOverrideMaintenanceActive;
-    private int _cameraOverrideMaintenanceApplyCount;
-    private string _lastCameraOverrideMaintenanceStatus = "inactive";
-    private string _lastCameraOverrideMaintenanceError = string.Empty;
-    private string _lastPostFixOnReapplyStatus = "not-run";
-    private string _lastPostFixOnReapplyError = string.Empty;
-    private Vector3? _lastFrameworkReapplyCamera;
-    private Vector3? _lastFrameworkReapplyFocus;
-    private float? _lastFrameworkReapplyFovY;
     private string _lastPostFixOnCameraCaptureStatus = "not-run";
     private string _lastPostFixOnCameraCaptureError = string.Empty;
     private Vector3? _lastPostFixOnSceneCameraPosition;
@@ -228,7 +219,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         if (_configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly)
         {
             DisposeHooks();
-            StopCameraOverrideMaintenance("inactive: resolver-only");
+            _cameraApplyPending = false;
             _state = TitleBackgroundServiceState.Disabled;
             _stateReason = "resolver-only";
             return;
@@ -238,7 +229,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             || !_configuration.TitleBackgroundOverrideEnabled)
         {
             DisposeHooks();
-            StopCameraOverrideMaintenance("inactive: disabled");
+            _cameraApplyPending = false;
             _state = TitleBackgroundServiceState.Disabled;
             _stateReason = "無効";
             return;
@@ -249,7 +240,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             DisposeHooks();
             _state = TitleBackgroundServiceState.InvalidConfiguration;
             _stateReason = errorMessage;
-            StopCameraOverrideMaintenance("inactive: invalid configuration");
+            _cameraApplyPending = false;
             return;
         }
 
@@ -280,7 +271,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     public void ReloadNativeIntegration()
     {
         _cameraApplyPending = false;
-        StopCameraOverrideMaintenance("inactive: reload");
         ResetCameraOverrideObservation();
         ResetSceneOverrideObservation();
         _loadingLobbyType = GameLobbyType.None;
@@ -294,7 +284,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundOverrideEnabled = false;
         _configuration.Save();
         _cameraApplyPending = false;
-        StopCameraOverrideMaintenance("inactive: disabled");
         ResetCameraOverrideObservation();
         ResetSceneOverrideObservation();
         DisposeHooks();
@@ -387,15 +376,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             "focusInputMeaning=FixOn focus argument; observed relation exists, but semantics remain under verification",
             $"lastAppliedFovY={(_lastAppliedFovY.HasValue ? _lastAppliedFovY.Value.ToString("0.###") : "none")}",
             $"lastFixOnInvocationMode={_lastFixOnInvocationMode}",
-            $"cameraMaintenanceActive={_cameraOverrideMaintenanceActive}",
-            $"cameraMaintenanceStatus={_lastCameraOverrideMaintenanceStatus}",
-            $"cameraMaintenanceApplyCount={_cameraOverrideMaintenanceApplyCount}",
-            $"cameraMaintenanceError={FormatNone(_lastCameraOverrideMaintenanceError)}",
-            $"postFixOnReapplyStatus={_lastPostFixOnReapplyStatus}",
-            $"postFixOnReapplyError={FormatNone(_lastPostFixOnReapplyError)}",
-            $"lastFrameworkReapplyCamera={FormatVector(_lastFrameworkReapplyCamera)}",
-            $"lastFrameworkReapplyFocus={FormatVector(_lastFrameworkReapplyFocus)}",
-            $"lastFrameworkReapplyFovY={FormatFloat(_lastFrameworkReapplyFovY)}",
             $"postFixOnCameraCaptureStatus={_lastPostFixOnCameraCaptureStatus}",
             $"postFixOnCameraCaptureError={FormatNone(_lastPostFixOnCameraCaptureError)}",
             $"postFixOnSceneCameraPosition={FormatVector(_lastPostFixOnSceneCameraPosition)}",
@@ -887,7 +867,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _framework.Update -= OnFrameworkUpdate;
         RestoreCameraProbeSettingsOnDispose();
         _cameraApplyPending = false;
-        StopCameraOverrideMaintenance("inactive: disposed");
         ResetCameraOverrideObservation();
         _loadingLobbyType = GameLobbyType.None;
         _lastLobbyUpdateMapId = GameLobbyType.None;
@@ -996,7 +975,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
                 overrideBytes = Encoding.UTF8.GetBytes(_validatedTerritoryPath + '\0');
                 _cameraApplyPending = true;
-                ArmCameraOverrideMaintenance();
                 _lastOverrideApplied = true;
                 _lastOverrideLobbyType = lobbyType;
                 _lastOverrideOriginalPath = originalPath;
@@ -1060,7 +1038,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         float[]? focusOverride = null;
         var overrideFovY = fovY;
         var invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(false);
-        TitleBackgroundCameraOverridePlan? appliedPlan = null;
         try
         {
             _lastObservedFixOnCamera = TryReadVector(cameraPos);
@@ -1069,7 +1046,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             if (ShouldOverrideCamera())
             {
                 _cameraApplyPending = false;
-                _cameraOverrideMaintenanceActive = true;
                 var plan = TitleBackgroundCameraOverridePlan.FromConfiguration(_configuration);
                 cameraOverride =
                 [
@@ -1084,7 +1060,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                     plan.Focus.Z,
                 ];
                 overrideFovY = plan.FovY;
-                appliedPlan = plan;
                 _lastCameraOverrideApplied = true;
                 invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(true);
                 _lastAppliedCamera = plan.Camera;
@@ -1121,34 +1096,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             result = _cameraFixOnHook?.Original(self, cameraPos, focusPos, fovY) ?? nint.Zero;
         }
 
-        if (appliedPlan.HasValue)
-        {
-            if (TryApplyActiveCameraOverridePlan(appliedPlan.Value, out var reapplied, out var errorMessage))
-            {
-                if (reapplied)
-                {
-                    _cameraOverrideMaintenanceApplyCount++;
-                }
-
-                _lastPostFixOnReapplyStatus = reapplied ? "success" : "already-matched";
-                _lastPostFixOnReapplyError = string.Empty;
-                _lastCameraOverrideMaintenanceStatus = reapplied ? "fixon-post-original-reapplied" : "fixon-post-original-already-matched";
-                _lastCameraOverrideMaintenanceError = string.Empty;
-            }
-            else
-            {
-                _lastPostFixOnReapplyStatus = "failed";
-                _lastPostFixOnReapplyError = errorMessage;
-                _lastCameraOverrideMaintenanceStatus = "failed";
-                _lastCameraOverrideMaintenanceError = errorMessage;
-            }
-        }
-        else
-        {
-            _lastPostFixOnReapplyStatus = "not-applicable";
-            _lastPostFixOnReapplyError = string.Empty;
-        }
-
         CapturePostFixOnCameraState();
         ScheduleCameraProbeTimelineCapture(cameraOverride != null && focusOverride != null);
         return result;
@@ -1156,8 +1103,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private void OnFrameworkUpdate(IFramework _)
     {
-        MaintainCameraOverrideOnFrameworkUpdate();
-
         if (_disposed || _cameraProbeTimelineFrameCounter < 0)
         {
             return;
@@ -1200,48 +1145,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         if (_cameraProbeTimelineFrameCounter >= CameraProbeTimelineFrames[^1])
         {
             _cameraProbeTimelineFrameCounter = -1;
-        }
-    }
-
-    private void MaintainCameraOverrideOnFrameworkUpdate()
-    {
-        if (_disposed || (!_cameraOverrideMaintenanceActive && !_cameraApplyPending))
-        {
-            return;
-        }
-
-        if (!ShouldMaintainCameraOverride())
-        {
-            if (_cameraOverrideMaintenanceActive && TryReadCurrentLobbyMap(out var currentMap) && currentMap != GameLobbyType.CharaSelect)
-            {
-                StopCameraOverrideMaintenance("stopped: lobby changed");
-            }
-
-            return;
-        }
-
-        var plan = TitleBackgroundCameraOverridePlan.FromConfiguration(_configuration);
-        if (TryApplyActiveCameraOverridePlan(plan, out var reapplied, out var errorMessage))
-        {
-            _cameraOverrideMaintenanceActive = true;
-            if (reapplied)
-            {
-                _cameraOverrideMaintenanceApplyCount++;
-            }
-
-            _lastCameraOverrideMaintenanceStatus = reapplied ? "framework-reapplied" : "framework-already-matched";
-            _lastCameraOverrideMaintenanceError = string.Empty;
-            _lastAppliedCamera = plan.Camera;
-            _lastAppliedFocus = plan.Focus;
-            _lastAppliedFovY = plan.FovY;
-            _lastFrameworkReapplyCamera = plan.Camera;
-            _lastFrameworkReapplyFocus = plan.Focus;
-            _lastFrameworkReapplyFovY = plan.FovY;
-        }
-        else
-        {
-            _lastCameraOverrideMaintenanceStatus = "failed";
-            _lastCameraOverrideMaintenanceError = errorMessage;
         }
     }
 
@@ -1577,98 +1480,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             currentMap);
     }
 
-    private bool ShouldMaintainCameraOverride()
-    {
-        var currentMapAvailable = TryReadCurrentLobbyMap(out var currentMap);
-        return TitleBackgroundCameraOverridePlan.ShouldMaintain(
-            _configuration.TitleBackgroundCameraOverrideEnabled,
-            IsHookProbeMode(),
-            _cameraApplyPending || _cameraOverrideMaintenanceActive || _lastCameraOverrideApplied,
-            _state == TitleBackgroundServiceState.Ready,
-            currentMapAvailable,
-            currentMap);
-    }
-
-    private void ArmCameraOverrideMaintenance()
-    {
-        if (!_configuration.TitleBackgroundCameraOverrideEnabled)
-        {
-            return;
-        }
-
-        _cameraOverrideMaintenanceActive = true;
-        _cameraOverrideMaintenanceApplyCount = 0;
-        _lastCameraOverrideMaintenanceStatus = "armed";
-        _lastCameraOverrideMaintenanceError = string.Empty;
-        _lastFrameworkReapplyCamera = null;
-        _lastFrameworkReapplyFocus = null;
-        _lastFrameworkReapplyFovY = null;
-    }
-
-    private void StopCameraOverrideMaintenance(string status)
-    {
-        _cameraOverrideMaintenanceActive = false;
-        _cameraApplyPending = false;
-        _lastCameraOverrideMaintenanceStatus = status;
-        _lastCameraOverrideMaintenanceError = string.Empty;
-    }
-
-    private bool TryApplyActiveCameraOverridePlan(TitleBackgroundCameraOverridePlan plan, out bool reapplied, out string errorMessage)
-    {
-        reapplied = false;
-        errorMessage = string.Empty;
-        try
-        {
-            var cameraManager = CameraManager.Instance();
-            if (cameraManager == null)
-            {
-                errorMessage = "CameraManager.Instance() unavailable";
-                return false;
-            }
-
-            var activeCamera = cameraManager->GetActiveCamera();
-            if (activeCamera == null)
-            {
-                errorMessage = "active camera unavailable";
-                return false;
-            }
-
-            var currentCamera = ToNumerics(activeCamera->CameraBase.SceneCamera.Position);
-            var currentFocus = ToNumerics(activeCamera->CameraBase.SceneCamera.LookAtVector);
-            var cameraChanged = !IsClose(currentCamera, plan.Camera);
-            var focusChanged = !IsClose(currentFocus, plan.Focus);
-            var fovChanged = !IsClose(activeCamera->FoV, plan.FovY);
-            if (!cameraChanged && !focusChanged && !fovChanged)
-            {
-                return true;
-            }
-
-            if (cameraChanged)
-            {
-                activeCamera->CameraBase.SceneCamera.Position = ToClientVector3(plan.Camera);
-            }
-
-            if (focusChanged)
-            {
-                activeCamera->CameraBase.SceneCamera.LookAtVector = ToClientVector3(plan.Focus);
-            }
-
-            if (fovChanged)
-            {
-                activeCamera->FoV = plan.FovY;
-            }
-
-            reapplied = true;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = ex.Message;
-            _log.Warning(ex, "TitleBackground camera maintenance reapply failed.");
-            return false;
-        }
-    }
-
     private bool TryReadCurrentLobbyMap(out GameLobbyType map)
     {
         map = GameLobbyType.None;
@@ -1814,7 +1625,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         _state = TitleBackgroundServiceState.RuntimeError;
         _stateReason = $"{hookName}: {ex.Message}";
-        StopCameraOverrideMaintenance("inactive: runtime error");
+        _cameraApplyPending = false;
         if (_activeProbeSession != null)
         {
             _activeProbeSession.RuntimeErrorOccurred = true;
@@ -1831,14 +1642,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _lastAppliedFocus = null;
         _lastAppliedFovY = null;
         _lastFixOnInvocationMode = "not-run";
-        _cameraOverrideMaintenanceApplyCount = 0;
-        _lastCameraOverrideMaintenanceStatus = _cameraOverrideMaintenanceActive ? "armed" : "inactive";
-        _lastCameraOverrideMaintenanceError = string.Empty;
-        _lastPostFixOnReapplyStatus = "not-run";
-        _lastPostFixOnReapplyError = string.Empty;
-        _lastFrameworkReapplyCamera = null;
-        _lastFrameworkReapplyFocus = null;
-        _lastFrameworkReapplyFovY = null;
         ClearPostFixOnCameraObservation();
         _lastPostFixOnCameraCaptureStatus = "not-run";
     }
@@ -2052,26 +1855,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private static Vector3 ToNumerics(ClientVector3 value)
     {
         return new Vector3(value.X, value.Y, value.Z);
-    }
-
-    private static bool IsClose(Vector3 left, Vector3 right)
-    {
-        const float epsilon = 0.001f;
-        return IsClose(left.X, right.X, epsilon)
-            && IsClose(left.Y, right.Y, epsilon)
-            && IsClose(left.Z, right.Z, epsilon);
-    }
-
-    private static bool IsClose(float left, float right, float epsilon = 0.0001f)
-    {
-        return float.IsFinite(left)
-            && float.IsFinite(right)
-            && MathF.Abs(left - right) <= epsilon;
-    }
-
-    private static ClientVector3 ToClientVector3(Vector3 value)
-    {
-        return new ClientVector3(value.X, value.Y, value.Z);
     }
 
     private static string NormalizeSignature(string? signature)

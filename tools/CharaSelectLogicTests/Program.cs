@@ -495,38 +495,6 @@ Test("title background camera apply requires pending chara select and skips hook
             currentMap: GameLobbyType.Title);
 });
 
-Test("title background camera maintenance requires active chara select and skips hook probe", () =>
-{
-    return TitleBackgroundCameraOverridePlan.ShouldMaintain(
-            cameraOverrideEnabled: true,
-            isHookProbeMode: false,
-            overrideIntentActive: true,
-            stateReady: true,
-            currentMapAvailable: true,
-            currentMap: GameLobbyType.CharaSelect)
-        && !TitleBackgroundCameraOverridePlan.ShouldMaintain(
-            cameraOverrideEnabled: true,
-            isHookProbeMode: true,
-            overrideIntentActive: true,
-            stateReady: true,
-            currentMapAvailable: true,
-            currentMap: GameLobbyType.CharaSelect)
-        && !TitleBackgroundCameraOverridePlan.ShouldMaintain(
-            cameraOverrideEnabled: true,
-            isHookProbeMode: false,
-            overrideIntentActive: false,
-            stateReady: true,
-            currentMapAvailable: true,
-            currentMap: GameLobbyType.CharaSelect)
-        && !TitleBackgroundCameraOverridePlan.ShouldMaintain(
-            cameraOverrideEnabled: true,
-            isHookProbeMode: false,
-            overrideIntentActive: true,
-            stateReady: true,
-            currentMapAvailable: true,
-            currentMap: GameLobbyType.Title);
-});
-
 Test("title background fix on invocation mode is explicit", () =>
 {
     return TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(overrideApplied: false) == "passthrough"
