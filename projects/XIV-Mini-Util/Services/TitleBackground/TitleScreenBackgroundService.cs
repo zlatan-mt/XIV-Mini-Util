@@ -66,6 +66,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private string _cameraProbeTimelineStatus = "not-run";
     private string _cameraProbeTimelineError = string.Empty;
     private readonly Dictionary<int, TitleBackgroundCameraProbeTimelineSnapshot> _cameraProbeTimelineSnapshots = [];
+    private readonly Dictionary<int, TitleBackgroundCameraProbeTimelineEventCounts> _cameraProbeTimelineEventCounts = [];
     private static readonly int[] CameraProbeTimelineFrames = [0, 1, 2, 4, 8, 16, 30, 60];
 
     private GameLobbyType EffectiveLobbyType =>
@@ -738,20 +739,39 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         foreach (var sample in timelineSamples)
         {
             var snapshotFound = _cameraProbeTimelineSnapshots.TryGetValue(sample.Frame, out var snapshot);
+            var events = GetCameraProbeTimelineEventCounts(sample.Frame);
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].sceneCamera={FormatVector(sample.SceneCameraPosition)}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].lookAt={FormatVector(sample.LookAtVector)}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].cameraY={FormatVectorAxis(sample.SceneCameraPosition, 1)}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].focusY={FormatVectorAxis(sample.LookAtVector, 1)}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].cameraYDeltaFromPostFixOn={FormatVectorAxisDelta(sample.SceneCameraPosition, _lastPostFixOnSceneCameraPosition, 1)}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].focusYDeltaFromPostFixOn={FormatVectorAxisDelta(sample.LookAtVector, _lastPostFixOnLookAtVector, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].fixOnCalls={events.FixOnCalls}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].lobbyUpdateCalls={events.LobbyUpdateCalls}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].loadLobbySceneCalls={events.LoadLobbySceneCalls}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].createSceneCalls={events.CreateSceneCalls}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].status={(snapshotFound ? snapshot.Status : "missing")}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].error={(snapshotFound ? FormatNone(snapshot.Error) : "none")}");
         }
+
+        var cameraCoincidentEvents = TitleBackgroundCameraProbeReport.DescribeCoincidentEvents(
+            timelineAnalysis.CameraOverwriteFirstObservedFrame,
+            GetCameraProbeTimelineEventCounts(timelineAnalysis.CameraOverwriteFirstObservedFrame));
+        var focusCoincidentEvents = TitleBackgroundCameraProbeReport.DescribeCoincidentEvents(
+            timelineAnalysis.FocusOverwriteFirstObservedFrame,
+            GetCameraProbeTimelineEventCounts(timelineAnalysis.FocusOverwriteFirstObservedFrame));
+        var focusDriftEvents = TitleBackgroundCameraProbeReport.DescribeFocusDriftEvents(
+            timelineSamples,
+            GetCameraProbeTimelineEventCountsInRange,
+            _lastPostFixOnLookAtVector);
 
         lines.AddRange(
         [
             $"[CameraProbe] cameraOverwriteFirstObservedFrame={FormatNullableInt(timelineAnalysis.CameraOverwriteFirstObservedFrame)}",
             $"[CameraProbe] focusOverwriteFirstObservedFrame={FormatNullableInt(timelineAnalysis.FocusOverwriteFirstObservedFrame)}",
+            $"[CameraProbe] cameraOverwriteCoincidentEvents={cameraCoincidentEvents}",
+            $"[CameraProbe] focusOverwriteCoincidentEvents={focusCoincidentEvents}",
+            $"[CameraProbe] focusDriftObservedEvents={focusDriftEvents}",
             $"[CameraProbe] cameraOverwritePattern={TitleBackgroundCameraProbeReport.FormatOverwritePattern(timelineAnalysis.CameraOverwritePattern)}",
             $"[CameraProbe] focusOverwritePattern={TitleBackgroundCameraProbeReport.FormatOverwritePattern(timelineAnalysis.FocusOverwritePattern)}",
             $"[CameraProbe] verdict.cameraYFixOnReflection={TitleBackgroundCameraProbeReport.FormatVerdict(result.CameraYFixOnReflection)}",
@@ -901,6 +921,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private void LoadLobbySceneDetour(GameLobbyType mapId)
     {
+        RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.LoadLobbyScene);
         _loadingLobbyType = mapId;
         RecordProbeLoadLobbyScene(mapId);
         _log.Debug("[XMU BG] LoadLobbyScene mapId={MapId}", mapId);
@@ -914,6 +935,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             var lobbyType = EffectiveLobbyType;
             var originalPath = territoryPath == null ? string.Empty : Marshal.PtrToStringUTF8((nint)territoryPath) ?? string.Empty;
+            RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.CreateScene);
             _lastObservedCreateScenePath = originalPath;
             RecordProbeCreateScene(lobbyType, originalPath, territoryId, layerFilterKey);
             _log.Debug("[XMU BG] CreateScene lobbyType={LobbyType}, path={Path}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", lobbyType, originalPath, territoryId, layerFilterKey);
@@ -971,6 +993,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         try
         {
+            RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.LobbyUpdate);
             RecordProbeLobbyUpdate(mapId, time);
             if (IsHookProbeMode())
             {
@@ -998,6 +1021,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)
     {
+        RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.FixOn);
         float[]? cameraOverride = null;
         float[]? focusOverride = null;
         var overrideFovY = fovY;
@@ -1136,6 +1160,69 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _cameraProbeTimelineStatus = "not-run";
         _cameraProbeTimelineError = string.Empty;
         _cameraProbeTimelineSnapshots.Clear();
+        _cameraProbeTimelineEventCounts.Clear();
+    }
+
+    private void RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind kind)
+    {
+        if (_cameraProbeSession == null)
+        {
+            return;
+        }
+
+        var frame = GetCurrentCameraProbeTimelineEventFrame();
+        if (!frame.HasValue)
+        {
+            return;
+        }
+
+        var counts = GetCameraProbeTimelineEventCounts(frame);
+        counts = kind switch
+        {
+            TitleBackgroundCameraProbeTimelineEventKind.FixOn => counts with { FixOnCalls = counts.FixOnCalls + 1 },
+            TitleBackgroundCameraProbeTimelineEventKind.LobbyUpdate => counts with { LobbyUpdateCalls = counts.LobbyUpdateCalls + 1 },
+            TitleBackgroundCameraProbeTimelineEventKind.LoadLobbyScene => counts with { LoadLobbySceneCalls = counts.LoadLobbySceneCalls + 1 },
+            TitleBackgroundCameraProbeTimelineEventKind.CreateScene => counts with { CreateSceneCalls = counts.CreateSceneCalls + 1 },
+            _ => counts,
+        };
+        _cameraProbeTimelineEventCounts[frame.Value] = counts;
+    }
+
+    private int? GetCurrentCameraProbeTimelineEventFrame()
+    {
+        if (_cameraProbeTimelineFrameCounter < 0)
+        {
+            return _cameraProbeTimelineStatus == "not-run" ? 0 : null;
+        }
+
+        return _cameraProbeTimelineFrameCounter;
+    }
+
+    private TitleBackgroundCameraProbeTimelineEventCounts GetCameraProbeTimelineEventCounts(int? frame)
+    {
+        return frame.HasValue && _cameraProbeTimelineEventCounts.TryGetValue(frame.Value, out var counts)
+            ? counts
+            : default;
+    }
+
+    private TitleBackgroundCameraProbeTimelineEventCounts GetCameraProbeTimelineEventCountsInRange(int startFrame, int endFrame)
+    {
+        var totals = new TitleBackgroundCameraProbeTimelineEventCounts();
+        foreach (var (frame, events) in _cameraProbeTimelineEventCounts)
+        {
+            if (frame < startFrame || frame > endFrame)
+            {
+                continue;
+            }
+
+            totals = new TitleBackgroundCameraProbeTimelineEventCounts(
+                totals.FixOnCalls + events.FixOnCalls,
+                totals.LobbyUpdateCalls + events.LobbyUpdateCalls,
+                totals.LoadLobbySceneCalls + events.LoadLobbySceneCalls,
+                totals.CreateSceneCalls + events.CreateSceneCalls);
+        }
+
+        return totals;
     }
 
     private void RestoreCameraProbeSettingsOnDispose()
@@ -2022,6 +2109,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         Vector3? LookAtVector,
         string Status,
         string Error);
+
+    private enum TitleBackgroundCameraProbeTimelineEventKind
+    {
+        FixOn,
+        LobbyUpdate,
+        LoadLobbyScene,
+        CreateScene,
+    }
 
     private sealed record TitleBackgroundCameraProbeSettingsSnapshot(
         string SelectedPresetId,

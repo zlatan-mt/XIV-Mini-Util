@@ -621,6 +621,47 @@ Test("title background camera probe timeline classifies late overwrite", () =>
         && result.FocusOverwritePattern == TitleBackgroundCameraOverwritePattern.Inconclusive;
 });
 
+Test("title background camera probe timeline summarizes coincident events", () =>
+{
+    var samples = new[]
+    {
+        new TitleBackgroundCameraProbeTimelineSample(0, new Vector3(0f, 60f, 0f), new Vector3(0f, -30f, 0f)),
+        new TitleBackgroundCameraProbeTimelineSample(1, new Vector3(0f, 60f, 0f), new Vector3(0f, -30f, 0f)),
+        new TitleBackgroundCameraProbeTimelineSample(2, new Vector3(0f, 40f, 0f), new Vector3(0f, -26f, 0f)),
+        new TitleBackgroundCameraProbeTimelineSample(4, new Vector3(0f, 39f, 0f), new Vector3(0f, -18f, 0f)),
+    };
+    var events = new Dictionary<int, TitleBackgroundCameraProbeTimelineEventCounts>
+    {
+        [0] = new(1, 0, 1, 1),
+        [2] = new(0, 1, 0, 0),
+        [4] = new(0, 2, 0, 0),
+    };
+
+    var result = TitleBackgroundCameraProbeReport.AnalyzeTimeline(
+        samples,
+        new Vector3(0f, 60f, 0f),
+        new Vector3(0f, -30f, 0f));
+    var cameraEvents = TitleBackgroundCameraProbeReport.DescribeCoincidentEvents(
+        result.CameraOverwriteFirstObservedFrame,
+        events.GetValueOrDefault(result.CameraOverwriteFirstObservedFrame ?? -1));
+    var focusDriftEvents = TitleBackgroundCameraProbeReport.DescribeFocusDriftEvents(
+        samples,
+        (startFrame, endFrame) => events
+            .Where(entry => entry.Key >= startFrame && entry.Key <= endFrame)
+            .Aggregate(
+                new TitleBackgroundCameraProbeTimelineEventCounts(),
+                (total, entry) => new TitleBackgroundCameraProbeTimelineEventCounts(
+                    total.FixOnCalls + entry.Value.FixOnCalls,
+                    total.LobbyUpdateCalls + entry.Value.LobbyUpdateCalls,
+                    total.LoadLobbySceneCalls + entry.Value.LoadLobbySceneCalls,
+                    total.CreateSceneCalls + entry.Value.CreateSceneCalls)),
+        new Vector3(0f, -30f, 0f));
+
+    return result.CameraOverwriteFirstObservedFrame == 2
+        && cameraEvents == "fixOn=0,lobbyUpdate=1,loadLobbyScene=0,createScene=0"
+        && focusDriftEvents == "fixOn=0,lobbyUpdate=2,loadLobbyScene=0,createScene=0";
+});
+
 Test("title background capture preset builder keeps existing fov when unavailable", () =>
 {
     var existing = new TitleBackgroundPreset

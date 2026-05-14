@@ -27,6 +27,12 @@ internal readonly record struct TitleBackgroundCameraProbeTimelineSample(
     Vector3? SceneCameraPosition,
     Vector3? LookAtVector);
 
+internal readonly record struct TitleBackgroundCameraProbeTimelineEventCounts(
+    int FixOnCalls,
+    int LobbyUpdateCalls,
+    int LoadLobbySceneCalls,
+    int CreateSceneCalls);
+
 internal readonly record struct TitleBackgroundCameraProbeTimelineAnalysis(
     int? CameraOverwriteFirstObservedFrame,
     int? FocusOverwriteFirstObservedFrame,
@@ -127,6 +133,47 @@ internal static class TitleBackgroundCameraProbeReport
         };
     }
 
+    public static string DescribeCoincidentEvents(
+        int? observedFrame,
+        TitleBackgroundCameraProbeTimelineEventCounts events)
+    {
+        if (!observedFrame.HasValue)
+        {
+            return "none";
+        }
+
+        return FormatEventCounts(events);
+    }
+
+    public static string DescribeFocusDriftEvents(
+        IReadOnlyList<TitleBackgroundCameraProbeTimelineSample> samples,
+        Func<int, int, TitleBackgroundCameraProbeTimelineEventCounts> getEventsInRange,
+        Vector3? postFixOnLookAtVector)
+    {
+        if (!postFixOnLookAtVector.HasValue)
+        {
+            return "none";
+        }
+
+        int? firstDriftFrame = null;
+        int? lastDriftFrame = null;
+        foreach (var sample in samples.OrderBy(sample => sample.Frame))
+        {
+            var delta = CalculateYDelta(sample.LookAtVector, postFixOnLookAtVector);
+            if (!delta.HasValue || Math.Abs(delta.Value) < OverwriteThreshold)
+            {
+                continue;
+            }
+
+            firstDriftFrame ??= sample.Frame;
+            lastDriftFrame = sample.Frame;
+        }
+
+        return firstDriftFrame.HasValue && lastDriftFrame.HasValue
+            ? FormatEventCounts(getEventsInRange(firstDriftFrame.Value, lastDriftFrame.Value))
+            : "none";
+    }
+
     private static TitleBackgroundCameraProbeVerdict EvaluateReflection(Vector3? applied, Vector3? postFixOn)
     {
         var delta = CalculateYDelta(postFixOn, applied);
@@ -199,6 +246,11 @@ internal static class TitleBackgroundCameraProbeReport
         return firstObservedFrame.Value >= 16
             ? TitleBackgroundCameraOverwritePattern.Late
             : TitleBackgroundCameraOverwritePattern.Gradual;
+    }
+
+    private static string FormatEventCounts(TitleBackgroundCameraProbeTimelineEventCounts events)
+    {
+        return $"fixOn={events.FixOnCalls},lobbyUpdate={events.LobbyUpdateCalls},loadLobbyScene={events.LoadLobbySceneCalls},createScene={events.CreateSceneCalls}";
     }
 
     private static string BuildLikelyConclusion(
