@@ -48,6 +48,22 @@ internal readonly record struct TitleBackgroundCameraOverridePlan(
             && currentMap == GameLobbyType.CharaSelect;
     }
 
+    public static bool ShouldMaintain(
+        bool cameraOverrideEnabled,
+        bool isHookProbeMode,
+        bool overrideIntentActive,
+        bool stateReady,
+        bool currentMapAvailable,
+        GameLobbyType currentMap)
+    {
+        return cameraOverrideEnabled
+            && !isHookProbeMode
+            && overrideIntentActive
+            && stateReady
+            && currentMapAvailable
+            && currentMap == GameLobbyType.CharaSelect;
+    }
+
     public static string GetFixOnInvocationMode(bool overrideApplied)
     {
         return overrideApplied ? "override-applied" : "passthrough";
