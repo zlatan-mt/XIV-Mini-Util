@@ -62,11 +62,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private TitleBackgroundProbeCounters _automaticProbeCounters = new();
     private bool _automaticProbeCountersEnabled;
     private TitleBackgroundCameraProbeSession? _cameraProbeSession;
-    private int _cameraProbeDelayedCaptureFramesRemaining;
-    private string _cameraProbeDelayedCaptureStatus = "not-run";
-    private string _cameraProbeDelayedCaptureError = string.Empty;
-    private Vector3? _cameraProbeDelayedSceneCameraPosition;
-    private Vector3? _cameraProbeDelayedLookAtVector;
+    private int _cameraProbeTimelineFrameCounter = -1;
+    private string _cameraProbeTimelineStatus = "not-run";
+    private string _cameraProbeTimelineError = string.Empty;
+    private readonly Dictionary<int, TitleBackgroundCameraProbeTimelineSnapshot> _cameraProbeTimelineSnapshots = [];
+    private static readonly int[] CameraProbeTimelineFrames = [0, 1, 2, 4, 8, 16, 30, 60];
 
     private GameLobbyType EffectiveLobbyType =>
         _loadingLobbyType != GameLobbyType.None
@@ -624,7 +624,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _configuration.Save();
             ApplyFromConfiguration();
             ResetCameraOverrideObservation();
-            ResetCameraProbeDelayedObservation();
+            ResetCameraProbeTimelineObservation();
 
             return
             [
@@ -656,12 +656,22 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     public IReadOnlyList<string> GetCameraProbeReportLines()
     {
         var currentCameraCaptured = TryCaptureActiveCameraSnapshot(out var currentCamera, out var currentCaptureError);
-        var reportTimeSceneCameraPosition = currentCameraCaptured ? currentCamera.SceneCameraPosition : (Vector3?)null;
-        var reportTimeLookAtVector = currentCameraCaptured ? currentCamera.LookAtVector : (Vector3?)null;
-        var stabilitySceneCameraPosition = _cameraProbeDelayedSceneCameraPosition ?? reportTimeSceneCameraPosition;
-        var stabilityLookAtVector = _cameraProbeDelayedLookAtVector ?? reportTimeLookAtVector;
-        var stabilitySampleSource = _cameraProbeDelayedSceneCameraPosition.HasValue || _cameraProbeDelayedLookAtVector.HasValue
-            ? "delayed-probe-snapshot"
+        Vector3? reportTimeSceneCameraPosition = currentCameraCaptured ? currentCamera.SceneCameraPosition : null;
+        Vector3? reportTimeLookAtVector = currentCameraCaptured ? currentCamera.LookAtVector : null;
+        var timelineSamples = BuildCameraProbeTimelineSamples();
+        var latestTimelineSample = timelineSamples
+            .Where(sample => sample.SceneCameraPosition.HasValue || sample.LookAtVector.HasValue)
+            .OrderByDescending(sample => sample.Frame)
+            .FirstOrDefault();
+        var hasTimelineStabilitySample = latestTimelineSample.SceneCameraPosition.HasValue || latestTimelineSample.LookAtVector.HasValue;
+        var stabilitySceneCameraPosition = hasTimelineStabilitySample
+            ? latestTimelineSample.SceneCameraPosition
+            : reportTimeSceneCameraPosition;
+        var stabilityLookAtVector = hasTimelineStabilitySample
+            ? latestTimelineSample.LookAtVector
+            : reportTimeLookAtVector;
+        var stabilitySampleSource = hasTimelineStabilitySample
+            ? $"timeline[{latestTimelineSample.Frame}]"
             : "report-time-current";
         var session = _cameraProbeSession;
         var input = new TitleBackgroundCameraProbeReportInput(
@@ -677,6 +687,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _lastPostFixOnLookAtVector,
             stabilityLookAtVector);
         var result = TitleBackgroundCameraProbeReport.Evaluate(input);
+        var timelineAnalysis = TitleBackgroundCameraProbeReport.AnalyzeTimeline(
+            timelineSamples,
+            _lastPostFixOnSceneCameraPosition,
+            _lastPostFixOnLookAtVector);
 
         var lines = new List<string>
         {
@@ -706,20 +720,40 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"[CameraProbe] lastAppliedCamera={FormatVector(_lastAppliedCamera)}",
             $"[CameraProbe] postFixOnSceneCameraPosition={FormatVector(_lastPostFixOnSceneCameraPosition)}",
             $"[CameraProbe] currentSceneCameraPosition={FormatVector(reportTimeSceneCameraPosition)}",
-            $"[CameraProbe] delayedSceneCameraPosition={FormatVector(_cameraProbeDelayedSceneCameraPosition)}",
             $"[CameraProbe] lastAppliedFocus={FormatVector(_lastAppliedFocus)}",
             $"[CameraProbe] postFixOnLookAtVector={FormatVector(_lastPostFixOnLookAtVector)}",
             $"[CameraProbe] currentLookAtVector={FormatVector(reportTimeLookAtVector)}",
-            $"[CameraProbe] delayedLookAtVector={FormatVector(_cameraProbeDelayedLookAtVector)}",
             $"[CameraProbe] stabilitySampleSource={stabilitySampleSource}",
-            $"[CameraProbe] delayedCaptureStatus={_cameraProbeDelayedCaptureStatus}",
-            $"[CameraProbe] delayedCaptureError={FormatNone(_cameraProbeDelayedCaptureError)}",
+            $"[CameraProbe] timelineStatus={_cameraProbeTimelineStatus}",
+            $"[CameraProbe] timelineError={FormatNone(_cameraProbeTimelineError)}",
             $"[CameraProbe] currentCameraCaptureStatus={(currentCameraCaptured ? "success" : "failed")}",
             $"[CameraProbe] currentCameraCaptureError={FormatNone(currentCaptureError)}",
             $"[CameraProbe] cameraY.appliedToPostFixOn.delta={FormatVectorAxisDelta(_lastPostFixOnSceneCameraPosition, _lastAppliedCamera, 1)}",
             $"[CameraProbe] cameraY.postFixOnToStabilitySample.delta={FormatVectorAxisDelta(stabilitySceneCameraPosition, _lastPostFixOnSceneCameraPosition, 1)}",
             $"[CameraProbe] focusY.appliedToPostFixOn.delta={FormatVectorAxisDelta(_lastPostFixOnLookAtVector, _lastAppliedFocus, 1)}",
             $"[CameraProbe] focusY.postFixOnToStabilitySample.delta={FormatVectorAxisDelta(stabilityLookAtVector, _lastPostFixOnLookAtVector, 1)}",
+            "[CameraProbe] Timeline",
+        ]);
+
+        foreach (var sample in timelineSamples)
+        {
+            var snapshotFound = _cameraProbeTimelineSnapshots.TryGetValue(sample.Frame, out var snapshot);
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].sceneCamera={FormatVector(sample.SceneCameraPosition)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].lookAt={FormatVector(sample.LookAtVector)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].cameraY={FormatVectorAxis(sample.SceneCameraPosition, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].focusY={FormatVectorAxis(sample.LookAtVector, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].cameraYDeltaFromPostFixOn={FormatVectorAxisDelta(sample.SceneCameraPosition, _lastPostFixOnSceneCameraPosition, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].focusYDeltaFromPostFixOn={FormatVectorAxisDelta(sample.LookAtVector, _lastPostFixOnLookAtVector, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].status={(snapshotFound ? snapshot.Status : "missing")}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].error={(snapshotFound ? FormatNone(snapshot.Error) : "none")}");
+        }
+
+        lines.AddRange(
+        [
+            $"[CameraProbe] cameraOverwriteFirstObservedFrame={FormatNullableInt(timelineAnalysis.CameraOverwriteFirstObservedFrame)}",
+            $"[CameraProbe] focusOverwriteFirstObservedFrame={FormatNullableInt(timelineAnalysis.FocusOverwriteFirstObservedFrame)}",
+            $"[CameraProbe] cameraOverwritePattern={TitleBackgroundCameraProbeReport.FormatOverwritePattern(timelineAnalysis.CameraOverwritePattern)}",
+            $"[CameraProbe] focusOverwritePattern={TitleBackgroundCameraProbeReport.FormatOverwritePattern(timelineAnalysis.FocusOverwritePattern)}",
             $"[CameraProbe] verdict.cameraYFixOnReflection={TitleBackgroundCameraProbeReport.FormatVerdict(result.CameraYFixOnReflection)}",
             $"[CameraProbe] verdict.cameraYPostFixOnStability={TitleBackgroundCameraProbeReport.FormatVerdict(result.CameraYPostFixOnStability)}",
             $"[CameraProbe] verdict.focusYFixOnReflection={TitleBackgroundCameraProbeReport.FormatVerdict(result.FocusYFixOnReflection)}",
@@ -743,7 +777,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.Save();
         ApplyFromConfiguration();
         ResetCameraOverrideObservation();
-        ResetCameraProbeDelayedObservation();
+        ResetCameraProbeTimelineObservation();
 
         return
         [
@@ -1027,58 +1061,81 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
 
         CapturePostFixOnCameraState();
-        ScheduleCameraProbeDelayedCapture(cameraOverride != null && focusOverride != null);
+        ScheduleCameraProbeTimelineCapture(cameraOverride != null && focusOverride != null);
         return result;
     }
 
     private void OnFrameworkUpdate(IFramework _)
     {
-        if (_disposed || _cameraProbeDelayedCaptureFramesRemaining <= 0)
+        if (_disposed || _cameraProbeTimelineFrameCounter < 0)
         {
             return;
         }
 
-        _cameraProbeDelayedCaptureFramesRemaining--;
-        if (_cameraProbeDelayedCaptureFramesRemaining > 0)
+        _cameraProbeTimelineFrameCounter++;
+        if (Array.IndexOf(CameraProbeTimelineFrames, _cameraProbeTimelineFrameCounter) < 0)
+        {
+            return;
+        }
+
+        if (_cameraProbeTimelineSnapshots.ContainsKey(_cameraProbeTimelineFrameCounter))
         {
             return;
         }
 
         if (TryCaptureActiveCameraSnapshot(out var snapshot, out var errorMessage))
         {
-            _cameraProbeDelayedSceneCameraPosition = snapshot.SceneCameraPosition;
-            _cameraProbeDelayedLookAtVector = snapshot.LookAtVector;
-            _cameraProbeDelayedCaptureStatus = "success";
-            _cameraProbeDelayedCaptureError = string.Empty;
+            _cameraProbeTimelineSnapshots[_cameraProbeTimelineFrameCounter] = new TitleBackgroundCameraProbeTimelineSnapshot(
+                snapshot.SceneCameraPosition,
+                snapshot.LookAtVector,
+                "success",
+                string.Empty);
+            _cameraProbeTimelineStatus = _cameraProbeTimelineFrameCounter >= CameraProbeTimelineFrames[^1]
+                ? "complete"
+                : "collecting";
+            _cameraProbeTimelineError = string.Empty;
         }
         else
         {
-            _cameraProbeDelayedCaptureStatus = "failed";
-            _cameraProbeDelayedCaptureError = string.IsNullOrWhiteSpace(errorMessage) ? "unknown" : errorMessage;
+            _cameraProbeTimelineSnapshots[_cameraProbeTimelineFrameCounter] = new TitleBackgroundCameraProbeTimelineSnapshot(
+                null,
+                null,
+                "failed",
+                string.IsNullOrWhiteSpace(errorMessage) ? "unknown" : errorMessage);
+            _cameraProbeTimelineStatus = "partial";
+            _cameraProbeTimelineError = $"frame {_cameraProbeTimelineFrameCounter}: {_cameraProbeTimelineSnapshots[_cameraProbeTimelineFrameCounter].Error}";
+        }
+
+        if (_cameraProbeTimelineFrameCounter >= CameraProbeTimelineFrames[^1])
+        {
+            _cameraProbeTimelineFrameCounter = -1;
         }
     }
 
-    private void ScheduleCameraProbeDelayedCapture(bool overrideAppliedInThisInvocation)
+    private void ScheduleCameraProbeTimelineCapture(bool overrideAppliedInThisInvocation)
     {
         if (_cameraProbeSession == null || !overrideAppliedInThisInvocation)
         {
             return;
         }
 
-        _cameraProbeDelayedCaptureFramesRemaining = 30;
-        _cameraProbeDelayedCaptureStatus = "pending";
-        _cameraProbeDelayedCaptureError = string.Empty;
-        _cameraProbeDelayedSceneCameraPosition = null;
-        _cameraProbeDelayedLookAtVector = null;
+        _cameraProbeTimelineFrameCounter = 0;
+        _cameraProbeTimelineStatus = "collecting";
+        _cameraProbeTimelineError = string.Empty;
+        _cameraProbeTimelineSnapshots.Clear();
+        _cameraProbeTimelineSnapshots[0] = new TitleBackgroundCameraProbeTimelineSnapshot(
+            _lastPostFixOnSceneCameraPosition,
+            _lastPostFixOnLookAtVector,
+            _lastPostFixOnCameraCaptureStatus,
+            _lastPostFixOnCameraCaptureError);
     }
 
-    private void ResetCameraProbeDelayedObservation()
+    private void ResetCameraProbeTimelineObservation()
     {
-        _cameraProbeDelayedCaptureFramesRemaining = 0;
-        _cameraProbeDelayedCaptureStatus = "not-run";
-        _cameraProbeDelayedCaptureError = string.Empty;
-        _cameraProbeDelayedSceneCameraPosition = null;
-        _cameraProbeDelayedLookAtVector = null;
+        _cameraProbeTimelineFrameCounter = -1;
+        _cameraProbeTimelineStatus = "not-run";
+        _cameraProbeTimelineError = string.Empty;
+        _cameraProbeTimelineSnapshots.Clear();
     }
 
     private void RestoreCameraProbeSettingsOnDispose()
@@ -1100,8 +1157,29 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         finally
         {
             _cameraProbeSession = null;
-            ResetCameraProbeDelayedObservation();
+            ResetCameraProbeTimelineObservation();
         }
+    }
+
+    private IReadOnlyList<TitleBackgroundCameraProbeTimelineSample> BuildCameraProbeTimelineSamples()
+    {
+        var samples = new List<TitleBackgroundCameraProbeTimelineSample>(CameraProbeTimelineFrames.Length);
+        foreach (var frame in CameraProbeTimelineFrames)
+        {
+            if (_cameraProbeTimelineSnapshots.TryGetValue(frame, out var snapshot))
+            {
+                samples.Add(new TitleBackgroundCameraProbeTimelineSample(
+                    frame,
+                    snapshot.SceneCameraPosition,
+                    snapshot.LookAtVector));
+            }
+            else
+            {
+                samples.Add(new TitleBackgroundCameraProbeTimelineSample(frame, null, null));
+            }
+        }
+
+        return samples;
     }
 
     private void CapturePostFixOnCameraState()
@@ -1547,6 +1625,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return value.HasValue ? value.Value.ToString("0.###") : "none";
     }
 
+    private static string FormatNullableInt(int? value)
+    {
+        return value.HasValue ? value.Value.ToString() : "none";
+    }
+
     private static string FormatVectorDelta(Vector3? current, Vector3? baseline)
     {
         return FormatVector(TitleBackgroundCameraMath.CalculateVectorDelta(current, baseline));
@@ -1565,6 +1648,22 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             0 => FormatFloat(delta.Value.X),
             1 => FormatFloat(delta.Value.Y),
             2 => FormatFloat(delta.Value.Z),
+            _ => "none",
+        };
+    }
+
+    private static string FormatVectorAxis(Vector3? value, int axis)
+    {
+        if (!value.HasValue)
+        {
+            return "none";
+        }
+
+        return axis switch
+        {
+            0 => FormatFloat(value.Value.X),
+            1 => FormatFloat(value.Value.Y),
+            2 => FormatFloat(value.Value.Z),
             _ => "none",
         };
     }
@@ -1917,6 +2016,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         public Vector3 ProbeCamera { get; }
         public Vector3 ProbeFocus { get; }
     }
+
+    private readonly record struct TitleBackgroundCameraProbeTimelineSnapshot(
+        Vector3? SceneCameraPosition,
+        Vector3? LookAtVector,
+        string Status,
+        string Error);
 
     private sealed record TitleBackgroundCameraProbeSettingsSnapshot(
         string SelectedPresetId,

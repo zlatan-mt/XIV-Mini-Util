@@ -14,6 +14,25 @@ internal enum TitleBackgroundCameraProbeVerdict
     PossiblyOverwritten,
 }
 
+internal enum TitleBackgroundCameraOverwritePattern
+{
+    Inconclusive,
+    Immediate,
+    Gradual,
+    Late,
+}
+
+internal readonly record struct TitleBackgroundCameraProbeTimelineSample(
+    int Frame,
+    Vector3? SceneCameraPosition,
+    Vector3? LookAtVector);
+
+internal readonly record struct TitleBackgroundCameraProbeTimelineAnalysis(
+    int? CameraOverwriteFirstObservedFrame,
+    int? FocusOverwriteFirstObservedFrame,
+    TitleBackgroundCameraOverwritePattern CameraOverwritePattern,
+    TitleBackgroundCameraOverwritePattern FocusOverwritePattern);
+
 internal readonly record struct TitleBackgroundCameraProbeReportInput(
     bool Armed,
     Vector3 BaselineCamera,
@@ -76,6 +95,38 @@ internal static class TitleBackgroundCameraProbeReport
         };
     }
 
+    public static TitleBackgroundCameraProbeTimelineAnalysis AnalyzeTimeline(
+        IReadOnlyList<TitleBackgroundCameraProbeTimelineSample> samples,
+        Vector3? postFixOnSceneCameraPosition,
+        Vector3? postFixOnLookAtVector)
+    {
+        var cameraFrame = FindOverwriteFirstObservedFrame(
+            samples,
+            postFixOnSceneCameraPosition,
+            sample => sample.SceneCameraPosition);
+        var focusFrame = FindOverwriteFirstObservedFrame(
+            samples,
+            postFixOnLookAtVector,
+            sample => sample.LookAtVector);
+
+        return new TitleBackgroundCameraProbeTimelineAnalysis(
+            cameraFrame,
+            focusFrame,
+            GetOverwritePattern(cameraFrame),
+            GetOverwritePattern(focusFrame));
+    }
+
+    public static string FormatOverwritePattern(TitleBackgroundCameraOverwritePattern pattern)
+    {
+        return pattern switch
+        {
+            TitleBackgroundCameraOverwritePattern.Immediate => "immediate",
+            TitleBackgroundCameraOverwritePattern.Gradual => "gradual",
+            TitleBackgroundCameraOverwritePattern.Late => "late",
+            _ => "inconclusive",
+        };
+    }
+
     private static TitleBackgroundCameraProbeVerdict EvaluateReflection(Vector3? applied, Vector3? postFixOn)
     {
         var delta = CalculateYDelta(postFixOn, applied);
@@ -109,6 +160,45 @@ internal static class TitleBackgroundCameraProbeReport
     private static float? CalculateYDelta(Vector3? current, Vector3? baseline)
     {
         return TitleBackgroundCameraMath.CalculateVectorDelta(current, baseline)?.Y;
+    }
+
+    private static int? FindOverwriteFirstObservedFrame(
+        IReadOnlyList<TitleBackgroundCameraProbeTimelineSample> samples,
+        Vector3? baseline,
+        Func<TitleBackgroundCameraProbeTimelineSample, Vector3?> getValue)
+    {
+        if (!baseline.HasValue)
+        {
+            return null;
+        }
+
+        foreach (var sample in samples.OrderBy(sample => sample.Frame))
+        {
+            var delta = CalculateYDelta(getValue(sample), baseline);
+            if (delta.HasValue && Math.Abs(delta.Value) >= OverwriteThreshold)
+            {
+                return sample.Frame;
+            }
+        }
+
+        return null;
+    }
+
+    private static TitleBackgroundCameraOverwritePattern GetOverwritePattern(int? firstObservedFrame)
+    {
+        if (!firstObservedFrame.HasValue)
+        {
+            return TitleBackgroundCameraOverwritePattern.Inconclusive;
+        }
+
+        if (firstObservedFrame.Value <= 2)
+        {
+            return TitleBackgroundCameraOverwritePattern.Immediate;
+        }
+
+        return firstObservedFrame.Value >= 16
+            ? TitleBackgroundCameraOverwritePattern.Late
+            : TitleBackgroundCameraOverwritePattern.Gradual;
     }
 
     private static string BuildLikelyConclusion(

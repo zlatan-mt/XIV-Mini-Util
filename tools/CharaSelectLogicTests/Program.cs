@@ -580,6 +580,47 @@ Test("title background camera probe does not evaluate when unarmed", () =>
         && result.LikelyConclusion.Contains("arm the probe first", StringComparison.Ordinal);
 });
 
+Test("title background camera probe timeline detects first overwrite frames", () =>
+{
+    var samples = new[]
+    {
+        new TitleBackgroundCameraProbeTimelineSample(0, new Vector3(0f, 60f, 0f), new Vector3(0f, -30f, 0f)),
+        new TitleBackgroundCameraProbeTimelineSample(1, new Vector3(0f, 60.5f, 0f), new Vector3(0f, -29.5f, 0f)),
+        new TitleBackgroundCameraProbeTimelineSample(2, new Vector3(0f, 40f, 0f), new Vector3(0f, -29f, 0f)),
+        new TitleBackgroundCameraProbeTimelineSample(4, new Vector3(0f, 20f, 0f), new Vector3(0f, -18f, 0f)),
+    };
+
+    var result = TitleBackgroundCameraProbeReport.AnalyzeTimeline(
+        samples,
+        new Vector3(0f, 60f, 0f),
+        new Vector3(0f, -30f, 0f));
+
+    return result.CameraOverwriteFirstObservedFrame == 2
+        && result.FocusOverwriteFirstObservedFrame == 4
+        && result.CameraOverwritePattern == TitleBackgroundCameraOverwritePattern.Immediate
+        && result.FocusOverwritePattern == TitleBackgroundCameraOverwritePattern.Gradual;
+});
+
+Test("title background camera probe timeline classifies late overwrite", () =>
+{
+    var samples = new[]
+    {
+        new TitleBackgroundCameraProbeTimelineSample(0, new Vector3(0f, 60f, 0f), new Vector3(0f, -30f, 0f)),
+        new TitleBackgroundCameraProbeTimelineSample(8, new Vector3(0f, 59f, 0f), new Vector3(0f, -30f, 0f)),
+        new TitleBackgroundCameraProbeTimelineSample(16, new Vector3(0f, 40f, 0f), new Vector3(0f, -30f, 0f)),
+    };
+
+    var result = TitleBackgroundCameraProbeReport.AnalyzeTimeline(
+        samples,
+        new Vector3(0f, 60f, 0f),
+        new Vector3(0f, -30f, 0f));
+
+    return result.CameraOverwriteFirstObservedFrame == 16
+        && result.FocusOverwriteFirstObservedFrame == null
+        && result.CameraOverwritePattern == TitleBackgroundCameraOverwritePattern.Late
+        && result.FocusOverwritePattern == TitleBackgroundCameraOverwritePattern.Inconclusive;
+});
+
 Test("title background capture preset builder keeps existing fov when unavailable", () =>
 {
     var existing = new TitleBackgroundPreset
