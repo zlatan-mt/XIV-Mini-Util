@@ -605,6 +605,35 @@ Test("title background chara select camera runtime restores yaw relative to curr
         && Math.Abs(restoredAtNewRotation!.Value - 2.0f) < 0.0001f;
 });
 
+Test("title background chara select camera marks LookAtY as one-shot after runtime restore", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+    adapter.MarkRuntimeCameraStateRestored();
+    var firstConsume = adapter.ConsumeShouldSetLookAtY();
+    var secondConsume = adapter.ConsumeShouldSetLookAtY();
+
+    return firstConsume
+        && !secondConsume
+        && !adapter.RuntimeState.ShouldSetLookAtY;
+});
+
+Test("title background chara select camera does not mark LookAtY one-shot without observed LookAtY", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: float.NaN);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+    adapter.MarkRuntimeCameraStateRestored();
+
+    return !adapter.RuntimeState.ShouldSetLookAtY
+        && !adapter.ConsumeShouldSetLookAtY();
+});
+
 Test("title background chara select camera adapter ignores runtime notifications while inactive", () =>
 {
     var adapter = new TitleBackgroundCharaSelectCameraAdapter();

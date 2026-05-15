@@ -42,6 +42,7 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
             RuntimeState.LookAt,
             RuntimeState.CurveAtRecord,
             RuntimeState.CharacterRotationAtRecord,
+            RuntimeState.ShouldSetLookAtY,
             RuntimeState.SceneGeneration + 1);
         ApplyTransition(TitleBackgroundCharaSelectCameraAdapterEvent.SceneLoadStarted);
     }
@@ -106,6 +107,22 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
     public float? GetRestoredYaw()
     {
         return RuntimeState.GetRestoredYaw(Input.CharacterRotation);
+    }
+
+    public void MarkRuntimeCameraStateRestored()
+    {
+        RuntimeState = RuntimeState.WithShouldSetLookAtY(RuntimeState.LookAtY.HasValue);
+    }
+
+    public bool ConsumeShouldSetLookAtY()
+    {
+        if (!RuntimeState.ShouldSetLookAtY)
+        {
+            return false;
+        }
+
+        RuntimeState = RuntimeState.WithShouldSetLookAtY(false);
+        return true;
     }
 
     public void ResetRuntimeCameraState()

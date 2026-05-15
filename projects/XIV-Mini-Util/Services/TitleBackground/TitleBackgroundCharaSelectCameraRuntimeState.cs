@@ -14,6 +14,7 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
     Vector3? LookAt,
     TitleBackgroundCharaSelectCameraCurve? CurveAtRecord,
     float? CharacterRotationAtRecord,
+    bool ShouldSetLookAtY,
     int SceneGeneration)
 {
     public bool HasCameraPose =>
@@ -25,7 +26,7 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
         LookAt.HasValue
         && TitleBackgroundCameraMath.IsFiniteVector(LookAt.Value);
 
-    public static TitleBackgroundCharaSelectCameraRuntimeState Empty { get; } = new(null, null, null, null, null, null, null, null, 0);
+    public static TitleBackgroundCharaSelectCameraRuntimeState Empty { get; } = new(null, null, null, null, null, null, null, null, false, 0);
 
     public static TitleBackgroundCharaSelectCameraRuntimeState Create(
         float? yaw,
@@ -36,6 +37,7 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
         Vector3? lookAt,
         TitleBackgroundCharaSelectCameraCurve? curveAtRecord,
         float? characterRotationAtRecord,
+        bool shouldSetLookAtY,
         int sceneGeneration)
     {
         return new TitleBackgroundCharaSelectCameraRuntimeState(
@@ -47,6 +49,7 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
             SanitizeOptionalLookAt(lookAt),
             SanitizeOptionalCurve(curveAtRecord),
             TitleBackgroundCharaSelectCameraLogic.NormalizeOptionalRadians(characterRotationAtRecord),
+            shouldSetLookAtY && TitleBackgroundCharaSelectCameraLogic.SanitizeOptionalCoordinate(lookAtY).HasValue,
             Math.Max(0, sceneGeneration));
     }
 
@@ -70,6 +73,7 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
             lookAt,
             curveAtRecord,
             normalizedRotation,
+            false,
             sceneGeneration);
     }
 
@@ -82,7 +86,22 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
 
     public TitleBackgroundCharaSelectCameraRuntimeState WithoutCameraPose()
     {
-        return new TitleBackgroundCharaSelectCameraRuntimeState(null, null, null, null, null, null, null, null, SceneGeneration);
+        return new TitleBackgroundCharaSelectCameraRuntimeState(null, null, null, null, null, null, null, null, false, SceneGeneration);
+    }
+
+    public TitleBackgroundCharaSelectCameraRuntimeState WithShouldSetLookAtY(bool shouldSetLookAtY)
+    {
+        return Create(
+            Yaw,
+            YawOffset,
+            Pitch,
+            Distance,
+            LookAtY,
+            LookAt,
+            CurveAtRecord,
+            CharacterRotationAtRecord,
+            shouldSetLookAtY,
+            SceneGeneration);
     }
 
     private static Vector3? SanitizeOptionalLookAt(Vector3? value)
