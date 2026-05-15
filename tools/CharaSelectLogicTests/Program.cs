@@ -463,9 +463,9 @@ Test("title background camera override plan clamps fov", () =>
     return plan.FovY == TitleBackgroundPreset.MaxFovY;
 });
 
-Test("title background camera apply requires pending chara select and skips hook probe", () =>
+Test("title background legacy direct camera apply is disabled", () =>
 {
-    return TitleBackgroundCameraOverridePlan.ShouldApply(
+    return !TitleBackgroundCameraOverridePlan.ShouldApply(
             cameraOverrideEnabled: true,
             isHookProbeMode: false,
             cameraApplyPending: true,
@@ -493,6 +493,95 @@ Test("title background camera apply requires pending chara select and skips hook
             stateReady: true,
             currentMapAvailable: true,
             currentMap: GameLobbyType.Title);
+});
+
+Test("title background chara select camera input uses character fields only", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundCharacterPositionX = 1f,
+        TitleBackgroundCharacterPositionY = 2f,
+        TitleBackgroundCharacterPositionZ = 3f,
+        TitleBackgroundCharacterRotation = MathF.PI * 3f,
+        TitleBackgroundCameraX = 100f,
+        TitleBackgroundFocusY = 200f,
+        TitleBackgroundFovY = 9f,
+    };
+
+    var input = TitleBackgroundCharaSelectCameraInput.FromConfiguration(configuration);
+    return input.CharacterPosition == new Vector3(1f, 2f, 3f)
+        && Math.Abs(input.CharacterRotation - MathF.PI) < 0.0001f;
+});
+
+Test("title background chara select camera state machine follows phase one path", () =>
+{
+    var state = TitleBackgroundCharaSelectCameraAdapterState.Inactive;
+    state = TitleBackgroundCharaSelectCameraLogic.Transition(state, TitleBackgroundCharaSelectCameraAdapterEvent.ConfigureEnabled);
+    state = TitleBackgroundCharaSelectCameraLogic.Transition(state, TitleBackgroundCharaSelectCameraAdapterEvent.SceneLoadStarted);
+    state = TitleBackgroundCharaSelectCameraLogic.Transition(state, TitleBackgroundCharaSelectCameraAdapterEvent.SceneLoaded);
+    state = TitleBackgroundCharaSelectCameraLogic.Transition(state, TitleBackgroundCharaSelectCameraAdapterEvent.LobbyBecameActive);
+    var stopping = TitleBackgroundCharaSelectCameraLogic.Transition(state, TitleBackgroundCharaSelectCameraAdapterEvent.StopRequested);
+    var reset = TitleBackgroundCharaSelectCameraLogic.Transition(stopping, TitleBackgroundCharaSelectCameraAdapterEvent.Reset);
+
+    return state == TitleBackgroundCharaSelectCameraAdapterState.Active
+        && stopping == TitleBackgroundCharaSelectCameraAdapterState.Stopping
+        && reset == TitleBackgroundCharaSelectCameraAdapterState.Armed;
+});
+
+Test("title background chara select camera adapter records runtime state without persistence", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(new Vector3(1f, 2f, 3f), 0.25f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: MathF.PI * 3f, pitch: MathF.PI, distance: -1f, lookAtY: float.PositiveInfinity);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+
+    return adapter.State == TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded
+        && adapter.RuntimeState.SceneGeneration == 1
+        && Math.Abs(adapter.RuntimeState.Yaw!.Value - MathF.PI) < 0.0001f
+        && Math.Abs(adapter.RuntimeState.Pitch!.Value - (MathF.PI / 2f)) < 0.0001f
+        && Math.Abs(adapter.RuntimeState.Distance!.Value - TitleBackgroundCharaSelectCameraLogic.MinDistance) < 0.0001f
+        && adapter.RuntimeState.LookAtY == null
+        && adapter.ShouldRestoreRuntimeCameraState();
+});
+
+Test("title background chara select camera adapter ignores runtime notifications while inactive", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.NotifySceneOverrideApplied(GameLobbyType.CharaSelect);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+    adapter.NotifyLobbyUpdate(GameLobbyType.CharaSelect);
+
+    return adapter.State == TitleBackgroundCharaSelectCameraAdapterState.Inactive
+        && adapter.RuntimeState.SceneGeneration == 0
+        && adapter.LastEvent == "not-run";
+});
+
+Test("title background chara select camera adapter stays armed until chara select scene starts", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifyLobbyUpdate(GameLobbyType.Title);
+    adapter.NotifyLobbyUpdate(GameLobbyType.None);
+
+    return adapter.State == TitleBackgroundCharaSelectCameraAdapterState.Armed;
+});
+
+Test("title background chara select camera adapter arms only for chara select camera adaptation", () =>
+{
+    return TitleBackgroundCharaSelectCameraLogic.ShouldArmAdapter(
+            overrideEnabled: true,
+            cameraAdaptationEnabled: true,
+            runtimeMode: TitleBackgroundRuntimeMode.CharaSelectOnly)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldArmAdapter(
+            overrideEnabled: true,
+            cameraAdaptationEnabled: true,
+            runtimeMode: TitleBackgroundRuntimeMode.HookProbe)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldArmAdapter(
+            overrideEnabled: true,
+            cameraAdaptationEnabled: false,
+            runtimeMode: TitleBackgroundRuntimeMode.CharaSelectOnly);
 });
 
 Test("title background fix on invocation mode is explicit", () =>
@@ -898,6 +987,7 @@ Test("title background chara select scene readiness does not require fix on", ()
         && TitleBackgroundRuntimeModeHelper.ShouldAllowDirectTextHookTargets(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: true)
         && !TitleBackgroundRuntimeModeHelper.ShouldAllowDirectTextHookTargets(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: false)
         && TitleBackgroundRuntimeModeHelper.AreSceneHooksReady(createSceneReady: true, lobbyUpdateReady: true, loadLobbySceneReady: true)
+        && !TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: true, cameraOverrideEnabled: true)
         && !TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(TitleBackgroundRuntimeMode.CharaSelectOnly, overrideEnabled: true, cameraOverrideEnabled: false);
 });
 
@@ -915,10 +1005,10 @@ Test("title background implemented modes match selectable modes", () =>
         && !TitleBackgroundRuntimeModeHelper.IsRuntimeModeSelectable(TitleBackgroundRuntimeMode.TitleAndCharaSelect);
 });
 
-Test("title background focus fields are reserved while camera override disabled", () =>
+Test("title background focus fields are reserved while direct camera override is discarded", () =>
 {
     return !TitleBackgroundRuntimeModeHelper.IsFocusUsed(cameraOverrideEnabled: false)
-        && TitleBackgroundRuntimeModeHelper.IsFocusUsed(cameraOverrideEnabled: true);
+        && !TitleBackgroundRuntimeModeHelper.IsFocusUsed(cameraOverrideEnabled: true);
 });
 
 Test("game lobby type none remains minus one", () =>

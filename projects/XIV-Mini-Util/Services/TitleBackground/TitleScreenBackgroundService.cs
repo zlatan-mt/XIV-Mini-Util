@@ -22,6 +22,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private readonly Configuration _configuration;
     private readonly TitleBackgroundAddressResolver _addressResolver = new();
     private readonly TitleBackgroundCameraCaptureService _cameraCaptureService;
+    private readonly TitleBackgroundCharaSelectCameraAdapter _charaSelectCameraAdapter = new();
 
     private Hook<CreateSceneDelegate>? _createSceneHook;
     private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
@@ -215,6 +216,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     public void ApplyFromConfiguration()
     {
         NormalizeConfiguration();
+        ConfigureCharaSelectCameraAdapter();
         UpdateAutomaticProbeCounterState();
         if (_configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly)
         {
@@ -271,6 +273,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     public void ReloadNativeIntegration()
     {
         _cameraApplyPending = false;
+        _charaSelectCameraAdapter.ResetRuntimeCameraState();
         ResetCameraOverrideObservation();
         ResetSceneOverrideObservation();
         _loadingLobbyType = GameLobbyType.None;
@@ -284,6 +287,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundOverrideEnabled = false;
         _configuration.Save();
         _cameraApplyPending = false;
+        _charaSelectCameraAdapter.Configure(false, TitleBackgroundCharaSelectCameraInput.FromConfiguration(_configuration));
         ResetCameraOverrideObservation();
         ResetSceneOverrideObservation();
         DisposeHooks();
@@ -356,6 +360,17 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"cameraHookRequired={cameraHookRequired}",
             $"cameraHookEnabled={IsHookEnabled(_cameraFixOnHook)}",
             $"cameraOverrideEnabled={_configuration.TitleBackgroundCameraOverrideEnabled}",
+            $"charaSelectCameraAdapter.state={_charaSelectCameraAdapter.State}",
+            $"charaSelectCameraAdapter.lastEvent={_charaSelectCameraAdapter.LastEvent}",
+            $"charaSelectCameraAdapter.characterPosition={FormatVector(_charaSelectCameraAdapter.Input.CharacterPosition)}",
+            $"charaSelectCameraAdapter.characterRotation={_charaSelectCameraAdapter.Input.CharacterRotation:0.###}",
+            $"charaSelectCameraAdapter.runtimeYaw={FormatFloat(_charaSelectCameraAdapter.RuntimeState.Yaw)}",
+            $"charaSelectCameraAdapter.runtimePitch={FormatFloat(_charaSelectCameraAdapter.RuntimeState.Pitch)}",
+            $"charaSelectCameraAdapter.runtimeDistance={FormatFloat(_charaSelectCameraAdapter.RuntimeState.Distance)}",
+            $"charaSelectCameraAdapter.runtimeLookAtY={FormatFloat(_charaSelectCameraAdapter.RuntimeState.LookAtY)}",
+            $"charaSelectCameraAdapter.sceneGeneration={_charaSelectCameraAdapter.RuntimeState.SceneGeneration}",
+            $"charaSelectCameraAdapter.shouldRestoreRuntimeCameraState={_charaSelectCameraAdapter.ShouldRestoreRuntimeCameraState()}",
+            "charaSelectCameraAdapter.phase=Phase1-no-native-camera-writes",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
             $"cameraCapture.lastStatus={_lastCameraCaptureResult.Status}",
@@ -937,9 +952,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.LoadLobbyScene);
         _loadingLobbyType = mapId;
+        _charaSelectCameraAdapter.NotifySceneLoadStarted(mapId);
         RecordProbeLoadLobbyScene(mapId);
         _log.Debug("[XMU BG] LoadLobbyScene mapId={MapId}", mapId);
         _loadLobbySceneHook?.Original(mapId);
+        _charaSelectCameraAdapter.NotifySceneLoaded(mapId);
     }
 
     private int CreateSceneDetour(byte* territoryPath, uint territoryId, nint p3, uint layerFilterKey, nint festivals, int p6, uint contentFinderConditionId)
@@ -974,7 +991,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 }
 
                 overrideBytes = Encoding.UTF8.GetBytes(_validatedTerritoryPath + '\0');
-                _cameraApplyPending = true;
+                _cameraApplyPending = false;
+                _charaSelectCameraAdapter.NotifySceneOverrideApplied(lobbyType);
                 _lastOverrideApplied = true;
                 _lastOverrideLobbyType = lobbyType;
                 _lastOverrideOriginalPath = originalPath;
@@ -1009,6 +1027,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         try
         {
             RecordProbeLobbyUpdate(mapId, time);
+            _charaSelectCameraAdapter.NotifyLobbyUpdate(mapId);
             if (!IsHookProbeMode() && ShouldResetCurrentMapForReload(mapId))
             {
                 _currentMapWriteAttempted = true;
@@ -1568,10 +1587,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private bool ShouldCreateCameraHook()
     {
-        return IsCameraHookRequired()
-            || (ShouldCreateSceneHooks()
-                && !IsHookProbeMode()
-                && _addressResolver.FixOn != nint.Zero);
+        return false;
     }
 
     private bool AreNativeSceneAddressesReady()
@@ -1611,14 +1627,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private bool IsHookSetAlignedWithConfiguration()
     {
-        var shouldCreateCameraHook = TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(
-            _configuration.TitleBackgroundRuntimeMode,
+        return _cameraFixOnHook == null;
+    }
+
+    private void ConfigureCharaSelectCameraAdapter()
+    {
+        var enabled = TitleBackgroundCharaSelectCameraLogic.ShouldArmAdapter(
             _configuration.TitleBackgroundOverrideEnabled,
-            _configuration.TitleBackgroundCameraOverrideEnabled);
-        var shouldCreateOptionalCameraHook = ShouldCreateSceneHooks()
-            && !IsHookProbeMode()
-            && _addressResolver.FixOn != nint.Zero;
-        return (shouldCreateCameraHook || shouldCreateOptionalCameraHook) == (_cameraFixOnHook != null);
+            _configuration.TitleBackgroundCameraOverrideEnabled,
+            _configuration.TitleBackgroundRuntimeMode);
+        _charaSelectCameraAdapter.Configure(
+            enabled,
+            TitleBackgroundCharaSelectCameraInput.FromConfiguration(_configuration));
     }
 
     private void MarkRuntimeError(Exception ex, string hookName)

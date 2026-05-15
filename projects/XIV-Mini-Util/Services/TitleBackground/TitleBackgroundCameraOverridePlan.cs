@@ -40,12 +40,7 @@ internal readonly record struct TitleBackgroundCameraOverridePlan(
         bool currentMapAvailable,
         GameLobbyType currentMap)
     {
-        return cameraOverrideEnabled
-            && !isHookProbeMode
-            && cameraApplyPending
-            && stateReady
-            && currentMapAvailable
-            && currentMap == GameLobbyType.CharaSelect;
+        return false;
     }
 
     public static string GetFixOnInvocationMode(bool overrideApplied)

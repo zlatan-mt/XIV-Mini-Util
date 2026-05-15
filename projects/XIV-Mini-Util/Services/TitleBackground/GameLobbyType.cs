@@ -51,9 +51,7 @@ internal static class TitleBackgroundRuntimeModeHelper
 
     public static bool ShouldCreateCameraHook(TitleBackgroundRuntimeMode mode, bool overrideEnabled, bool cameraOverrideEnabled)
     {
-        return mode == TitleBackgroundRuntimeMode.CharaSelectOnly
-            && ShouldCreateSceneHooks(mode, overrideEnabled)
-            && cameraOverrideEnabled;
+        return false;
     }
 
     public static bool ShouldValidateSceneOverrideConfiguration(TitleBackgroundRuntimeMode mode)
@@ -83,7 +81,7 @@ internal static class TitleBackgroundRuntimeModeHelper
 
     public static bool IsFocusUsed(bool cameraOverrideEnabled)
     {
-        return cameraOverrideEnabled;
+        return false;
     }
 
     public static bool ShouldCollectAutomaticProbeCounters(
