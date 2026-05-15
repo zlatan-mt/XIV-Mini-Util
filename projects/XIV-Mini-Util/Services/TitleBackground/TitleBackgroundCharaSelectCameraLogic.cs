@@ -87,6 +87,16 @@ internal static class TitleBackgroundCharaSelectCameraLogic
             && runtimeState.HasCameraPose;
     }
 
+    public static bool ShouldStopOnLobbyUpdate(
+        TitleBackgroundCharaSelectCameraAdapterState state,
+        GameLobbyType map)
+    {
+        return !IsCharaSelectMap(map)
+            && state is not TitleBackgroundCharaSelectCameraAdapterState.Armed
+                and not TitleBackgroundCharaSelectCameraAdapterState.SceneLoading
+                and not TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded;
+    }
+
     public static bool ShouldHandleSceneReadySignal(
         bool serviceReady,
         bool hookProbeMode,

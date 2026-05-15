@@ -674,6 +674,37 @@ Test("title background chara select camera scene-ready signal handles only armed
             GameLobbyType.Title);
 });
 
+Test("title background chara select camera does not stop while waiting for scene-ready signal", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.NotifyLobbyUpdate(GameLobbyType.Title);
+    adapter.NotifyLobbyUpdate(GameLobbyType.None);
+
+    return adapter.State == TitleBackgroundCharaSelectCameraAdapterState.SceneLoading
+        && adapter.LastEvent == TitleBackgroundCharaSelectCameraAdapterEvent.SceneLoadStarted.ToString()
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldStopOnLobbyUpdate(
+            TitleBackgroundCharaSelectCameraAdapterState.SceneLoading,
+            GameLobbyType.Title);
+});
+
+Test("title background chara select camera stops after active scene leaves chara select", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+    adapter.NotifyLobbyUpdate(GameLobbyType.CharaSelect);
+    adapter.NotifyLobbyUpdate(GameLobbyType.Title);
+
+    return adapter.State == TitleBackgroundCharaSelectCameraAdapterState.Stopping
+        && adapter.LastEvent == TitleBackgroundCharaSelectCameraAdapterEvent.StopRequested.ToString()
+        && TitleBackgroundCharaSelectCameraLogic.ShouldStopOnLobbyUpdate(
+            TitleBackgroundCharaSelectCameraAdapterState.Active,
+            GameLobbyType.Title);
+});
+
 Test("title background chara select camera adapter ignores runtime notifications while inactive", () =>
 {
     var adapter = new TitleBackgroundCharaSelectCameraAdapter();

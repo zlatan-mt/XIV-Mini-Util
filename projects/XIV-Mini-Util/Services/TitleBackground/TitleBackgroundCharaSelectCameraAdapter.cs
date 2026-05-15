@@ -80,7 +80,7 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
             return;
         }
 
-        if (State != TitleBackgroundCharaSelectCameraAdapterState.Armed)
+        if (TitleBackgroundCharaSelectCameraLogic.ShouldStopOnLobbyUpdate(State, map))
         {
             ApplyTransition(TitleBackgroundCharaSelectCameraAdapterEvent.StopRequested);
         }

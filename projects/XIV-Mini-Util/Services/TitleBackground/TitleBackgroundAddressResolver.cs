@@ -254,20 +254,7 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             return false;
         }
 
-        if (!TryResolveE8Call(
-            sigScanner,
-            signature,
-            "UpdateLobbyUIStage",
-            TitleBackgroundResolverMode.AutoDiagnosticOnly,
-            allowDirectTextProbeTarget: false,
-            out _,
-            out address,
-            required: false))
-        {
-            return false;
-        }
-
-        return true;
+        return TryResolveText(sigScanner, signature, "UpdateLobbyUIStage", out address, required: false);
     }
 
     private void RecordSuccess(string name, string method, nint address, nint hookTarget, bool hookTargetVerified, bool targetWithinText, string addressSource, string safetyNote)
