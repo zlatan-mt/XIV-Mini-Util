@@ -528,6 +528,29 @@ Test("title background chara select camera state machine follows phase one path"
         && reset == TitleBackgroundCharaSelectCameraAdapterState.Armed;
 });
 
+Test("title background chara select camera curve offsets magic values by character y", () =>
+{
+    var curve = TitleBackgroundCharaSelectCameraLogic.BuildCurve(2f);
+    var negativeCurve = TitleBackgroundCharaSelectCameraLogic.BuildCurve(-10f);
+
+    return Math.Abs(curve.Low - (TitleBackgroundCharaSelectCameraLogic.MagicLow + 2f)) < 0.0001f
+        && Math.Abs(curve.Mid - (TitleBackgroundCharaSelectCameraLogic.MagicMid + 2f)) < 0.0001f
+        && Math.Abs(curve.High - (TitleBackgroundCharaSelectCameraLogic.MagicHigh + 2f)) < 0.0001f
+        && Math.Abs(negativeCurve.Low - (TitleBackgroundCharaSelectCameraLogic.MagicLow - 10f)) < 0.0001f
+        && Math.Abs(negativeCurve.Mid - (TitleBackgroundCharaSelectCameraLogic.MagicMid - 10f)) < 0.0001f
+        && Math.Abs(negativeCurve.High - (TitleBackgroundCharaSelectCameraLogic.MagicHigh - 10f)) < 0.0001f;
+});
+
+Test("title background chara select camera adapter derives curve from input", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(new Vector3(1f, 4f, 3f), 0.25f));
+
+    return Math.Abs(adapter.Curve.Low - (TitleBackgroundCharaSelectCameraLogic.MagicLow + 4f)) < 0.0001f
+        && Math.Abs(adapter.Curve.Mid - (TitleBackgroundCharaSelectCameraLogic.MagicMid + 4f)) < 0.0001f
+        && Math.Abs(adapter.Curve.High - (TitleBackgroundCharaSelectCameraLogic.MagicHigh + 4f)) < 0.0001f;
+});
+
 Test("title background chara select camera adapter records runtime state without persistence", () =>
 {
     var adapter = new TitleBackgroundCharaSelectCameraAdapter();
@@ -539,10 +562,27 @@ Test("title background chara select camera adapter records runtime state without
     return adapter.State == TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded
         && adapter.RuntimeState.SceneGeneration == 1
         && Math.Abs(adapter.RuntimeState.Yaw!.Value - MathF.PI) < 0.0001f
+        && Math.Abs(adapter.RuntimeState.YawOffset!.Value - (MathF.PI - 0.25f)) < 0.0001f
         && Math.Abs(adapter.RuntimeState.Pitch!.Value - (MathF.PI / 2f)) < 0.0001f
         && Math.Abs(adapter.RuntimeState.Distance!.Value - TitleBackgroundCharaSelectCameraLogic.MinDistance) < 0.0001f
         && adapter.RuntimeState.LookAtY == null
+        && Math.Abs(adapter.RuntimeState.CharacterRotationAtRecord!.Value - 0.25f) < 0.0001f
         && adapter.ShouldRestoreRuntimeCameraState();
+});
+
+Test("title background chara select camera runtime restores yaw relative to current character rotation", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0.5f));
+    adapter.SaveRuntimeCameraState(yaw: 1.5f, pitch: 0.25f, distance: 4f, lookAtY: 1f);
+    var restoredAtInitialRotation = adapter.GetRestoredYaw();
+
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 1.0f));
+    var restoredAtNewRotation = adapter.GetRestoredYaw();
+
+    return Math.Abs(adapter.RuntimeState.YawOffset!.Value - 1.0f) < 0.0001f
+        && Math.Abs(restoredAtInitialRotation!.Value - 1.5f) < 0.0001f
+        && Math.Abs(restoredAtNewRotation!.Value - 2.0f) < 0.0001f;
 });
 
 Test("title background chara select camera adapter ignores runtime notifications while inactive", () =>
@@ -588,6 +628,15 @@ Test("title background fix on invocation mode is explicit", () =>
 {
     return TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(overrideApplied: false) == "passthrough"
         && TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(overrideApplied: true) == "override-applied";
+});
+
+Test("title background fix on hook creation is disabled for phase one", () =>
+{
+    return Enum.GetValues<TitleBackgroundRuntimeMode>()
+        .All(mode =>
+            !TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(mode, overrideEnabled: false, cameraOverrideEnabled: false)
+            && !TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(mode, overrideEnabled: true, cameraOverrideEnabled: false)
+            && !TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(mode, overrideEnabled: true, cameraOverrideEnabled: true));
 });
 
 Test("title background camera math accepts finite vectors only", () =>

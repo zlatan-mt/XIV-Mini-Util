@@ -8,6 +8,7 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
     public TitleBackgroundCharaSelectCameraAdapterState State { get; private set; } = TitleBackgroundCharaSelectCameraAdapterState.Inactive;
     public TitleBackgroundCharaSelectCameraInput Input { get; private set; }
     public TitleBackgroundCharaSelectCameraRuntimeState RuntimeState { get; private set; } = TitleBackgroundCharaSelectCameraRuntimeState.Empty;
+    public TitleBackgroundCharaSelectCameraCurve Curve { get; private set; } = TitleBackgroundCharaSelectCameraCurve.Default;
     public string LastEvent { get; private set; } = "not-run";
 
     public bool IsArmed => State != TitleBackgroundCharaSelectCameraAdapterState.Inactive;
@@ -15,6 +16,7 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
     public void Configure(bool enabled, TitleBackgroundCharaSelectCameraInput input)
     {
         Input = input;
+        Curve = TitleBackgroundCharaSelectCameraLogic.BuildCurve(input.CharacterPosition.Y);
         ApplyTransition(enabled
             ? TitleBackgroundCharaSelectCameraAdapterEvent.ConfigureEnabled
             : TitleBackgroundCharaSelectCameraAdapterEvent.ConfigureDisabled);
@@ -33,9 +35,11 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
 
         RuntimeState = TitleBackgroundCharaSelectCameraRuntimeState.Create(
             RuntimeState.Yaw,
+            RuntimeState.YawOffset,
             RuntimeState.Pitch,
             RuntimeState.Distance,
             RuntimeState.LookAtY,
+            RuntimeState.CharacterRotationAtRecord,
             RuntimeState.SceneGeneration + 1);
         ApplyTransition(TitleBackgroundCharaSelectCameraAdapterEvent.SceneLoadStarted);
     }
@@ -81,12 +85,18 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
 
     public void SaveRuntimeCameraState(float yaw, float pitch, float distance, float lookAtY)
     {
-        RuntimeState = TitleBackgroundCharaSelectCameraRuntimeState.Create(
+        RuntimeState = TitleBackgroundCharaSelectCameraRuntimeState.FromObservedPose(
             yaw,
             pitch,
             distance,
             lookAtY,
+            Input.CharacterRotation,
             RuntimeState.SceneGeneration);
+    }
+
+    public float? GetRestoredYaw()
+    {
+        return RuntimeState.GetRestoredYaw(Input.CharacterRotation);
     }
 
     public void ResetRuntimeCameraState()

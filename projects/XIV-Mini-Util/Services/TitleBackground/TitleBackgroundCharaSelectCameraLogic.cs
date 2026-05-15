@@ -19,6 +19,9 @@ internal enum TitleBackgroundCharaSelectCameraAdapterEvent
 
 internal static class TitleBackgroundCharaSelectCameraLogic
 {
+    public const float MagicLow = 1.4350828f;
+    public const float MagicMid = 0.85870504f;
+    public const float MagicHigh = 0.6742642f;
     public const float MinDistance = 0.01f;
     public const float MaxDistance = 100000f;
 
@@ -82,6 +85,25 @@ internal static class TitleBackgroundCharaSelectCameraLogic
     {
         return state == TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded
             && runtimeState.HasCameraPose;
+    }
+
+    public static TitleBackgroundCharaSelectCameraCurve BuildCurve(float characterPositionY)
+    {
+        var y = TitleBackgroundPreset.SanitizeCoordinate(characterPositionY);
+        return new TitleBackgroundCharaSelectCameraCurve(
+            TitleBackgroundPreset.SanitizeCoordinate(MagicLow + y),
+            TitleBackgroundPreset.SanitizeCoordinate(MagicMid + y),
+            TitleBackgroundPreset.SanitizeCoordinate(MagicHigh + y));
+    }
+
+    public static float CalculateYawOffset(float yaw, float characterRotation)
+    {
+        return NormalizeRadians(yaw - characterRotation);
+    }
+
+    public static float CalculateRestoredYaw(float yawOffset, float characterRotation)
+    {
+        return NormalizeRadians(yawOffset + characterRotation);
     }
 
     public static Vector3 SanitizeVector(Vector3 value)

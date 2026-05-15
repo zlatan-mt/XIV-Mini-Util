@@ -40,6 +40,7 @@ internal readonly record struct TitleBackgroundCameraOverridePlan(
         bool currentMapAvailable,
         GameLobbyType currentMap)
     {
+        // Legacy FixOn camera override is intentionally disabled; chara select now uses the adapter path.
         return false;
     }
 

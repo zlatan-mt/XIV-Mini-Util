@@ -359,15 +359,22 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"cameraHookReady={cameraHookReady}",
             $"cameraHookRequired={cameraHookRequired}",
             $"cameraHookEnabled={IsHookEnabled(_cameraFixOnHook)}",
+            "fixOnHookPolicy=disabled-in-phase1",
             $"cameraOverrideEnabled={_configuration.TitleBackgroundCameraOverrideEnabled}",
             $"charaSelectCameraAdapter.state={_charaSelectCameraAdapter.State}",
             $"charaSelectCameraAdapter.lastEvent={_charaSelectCameraAdapter.LastEvent}",
             $"charaSelectCameraAdapter.characterPosition={FormatVector(_charaSelectCameraAdapter.Input.CharacterPosition)}",
             $"charaSelectCameraAdapter.characterRotation={_charaSelectCameraAdapter.Input.CharacterRotation:0.###}",
+            $"charaSelectCameraAdapter.curveLow={FormatFloat(_charaSelectCameraAdapter.Curve.Low)}",
+            $"charaSelectCameraAdapter.curveMid={FormatFloat(_charaSelectCameraAdapter.Curve.Mid)}",
+            $"charaSelectCameraAdapter.curveHigh={FormatFloat(_charaSelectCameraAdapter.Curve.High)}",
             $"charaSelectCameraAdapter.runtimeYaw={FormatFloat(_charaSelectCameraAdapter.RuntimeState.Yaw)}",
+            $"charaSelectCameraAdapter.runtimeYawOffset={FormatFloat(_charaSelectCameraAdapter.RuntimeState.YawOffset)}",
+            $"charaSelectCameraAdapter.restoredYaw={FormatFloat(_charaSelectCameraAdapter.GetRestoredYaw())}",
             $"charaSelectCameraAdapter.runtimePitch={FormatFloat(_charaSelectCameraAdapter.RuntimeState.Pitch)}",
             $"charaSelectCameraAdapter.runtimeDistance={FormatFloat(_charaSelectCameraAdapter.RuntimeState.Distance)}",
             $"charaSelectCameraAdapter.runtimeLookAtY={FormatFloat(_charaSelectCameraAdapter.RuntimeState.LookAtY)}",
+            $"charaSelectCameraAdapter.runtimeCharacterRotationAtRecord={FormatFloat(_charaSelectCameraAdapter.RuntimeState.CharacterRotationAtRecord)}",
             $"charaSelectCameraAdapter.sceneGeneration={_charaSelectCameraAdapter.RuntimeState.SceneGeneration}",
             $"charaSelectCameraAdapter.shouldRestoreRuntimeCameraState={_charaSelectCameraAdapter.ShouldRestoreRuntimeCameraState()}",
             "charaSelectCameraAdapter.phase=Phase1-no-native-camera-writes",
@@ -919,22 +926,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _createSceneHook = _gameInteropProvider.HookFromAddress<CreateSceneDelegate>(_addressResolver.CreateScene, CreateSceneDetour);
             _lobbyUpdateHook = _gameInteropProvider.HookFromAddress<LobbyUpdateDelegate>(_addressResolver.LobbyUpdate, LobbyUpdateDetour);
             _loadLobbySceneHook = _gameInteropProvider.HookFromAddress<LoadLobbySceneDelegate>(_addressResolver.LoadLobbyScene, LoadLobbySceneDetour);
-            if (ShouldCreateCameraHook())
-            {
-                _cameraFixOnHook = _gameInteropProvider.HookFromAddress<LobbyCameraFixOnDelegate>(_addressResolver.FixOn, LobbyCameraFixOnDetour);
-            }
 
             _createSceneHook.Enable();
             _lobbyUpdateHook.Enable();
             _loadLobbySceneHook.Enable();
-            _cameraFixOnHook?.Enable();
-            if (_cameraFixOnHook != null)
-            {
-                _log.Information(
-                    "[XMU BG] LobbyCameraFixOn hook resolved/enabled. address={Address}, enabled={Enabled}",
-                    FormatAddress(_addressResolver.FixOn),
-                    _cameraFixOnHook.IsEnabled);
-            }
 
             _state = TitleBackgroundServiceState.Disabled;
             _stateReason = "無効";
@@ -1583,11 +1578,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _configuration.TitleBackgroundRuntimeMode,
             _configuration.TitleBackgroundOverrideEnabled,
             _configuration.TitleBackgroundCameraOverrideEnabled);
-    }
-
-    private bool ShouldCreateCameraHook()
-    {
-        return false;
     }
 
     private bool AreNativeSceneAddressesReady()

@@ -51,6 +51,7 @@ internal static class TitleBackgroundRuntimeModeHelper
 
     public static bool ShouldCreateCameraHook(TitleBackgroundRuntimeMode mode, bool overrideEnabled, bool cameraOverrideEnabled)
     {
+        // Phase 1 keeps native camera hooks closed while the lobby camera adapter boundary is built.
         return false;
     }
 
