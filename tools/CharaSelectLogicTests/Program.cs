@@ -556,7 +556,12 @@ Test("title background chara select camera adapter records runtime state without
     var adapter = new TitleBackgroundCharaSelectCameraAdapter();
     adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(new Vector3(1f, 2f, 3f), 0.25f));
     adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
-    adapter.SaveRuntimeCameraState(yaw: MathF.PI * 3f, pitch: MathF.PI, distance: -1f, lookAtY: float.PositiveInfinity);
+    adapter.SaveRuntimeCameraState(
+        yaw: MathF.PI * 3f,
+        pitch: MathF.PI,
+        distance: -1f,
+        lookAtY: float.PositiveInfinity,
+        lookAt: new Vector3(1f, 2f, 3f));
     adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
 
     return adapter.State == TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded
@@ -566,8 +571,23 @@ Test("title background chara select camera adapter records runtime state without
         && Math.Abs(adapter.RuntimeState.Pitch!.Value - (MathF.PI / 2f)) < 0.0001f
         && Math.Abs(adapter.RuntimeState.Distance!.Value - TitleBackgroundCharaSelectCameraLogic.MinDistance) < 0.0001f
         && adapter.RuntimeState.LookAtY == null
+        && adapter.RuntimeState.LookAt == new Vector3(1f, 2f, 3f)
+        && adapter.RuntimeState.HasLookAt
+        && adapter.RuntimeState.CurveAtRecord == adapter.Curve
         && Math.Abs(adapter.RuntimeState.CharacterRotationAtRecord!.Value - 0.25f) < 0.0001f
         && adapter.ShouldRestoreRuntimeCameraState();
+});
+
+Test("title background chara select camera load start does not mark scene loaded", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 1f);
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+
+    return adapter.State == TitleBackgroundCharaSelectCameraAdapterState.SceneLoading
+        && adapter.LastEvent == TitleBackgroundCharaSelectCameraAdapterEvent.SceneLoadStarted.ToString()
+        && !adapter.ShouldRestoreRuntimeCameraState();
 });
 
 Test("title background chara select camera runtime restores yaw relative to current character rotation", () =>

@@ -374,9 +374,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"charaSelectCameraAdapter.runtimePitch={FormatFloat(_charaSelectCameraAdapter.RuntimeState.Pitch)}",
             $"charaSelectCameraAdapter.runtimeDistance={FormatFloat(_charaSelectCameraAdapter.RuntimeState.Distance)}",
             $"charaSelectCameraAdapter.runtimeLookAtY={FormatFloat(_charaSelectCameraAdapter.RuntimeState.LookAtY)}",
+            $"charaSelectCameraAdapter.runtimeLookAt={FormatVector(_charaSelectCameraAdapter.RuntimeState.LookAt)}",
+            $"charaSelectCameraAdapter.runtimeCurveLow={FormatFloat(_charaSelectCameraAdapter.RuntimeState.CurveAtRecord?.Low)}",
+            $"charaSelectCameraAdapter.runtimeCurveMid={FormatFloat(_charaSelectCameraAdapter.RuntimeState.CurveAtRecord?.Mid)}",
+            $"charaSelectCameraAdapter.runtimeCurveHigh={FormatFloat(_charaSelectCameraAdapter.RuntimeState.CurveAtRecord?.High)}",
             $"charaSelectCameraAdapter.runtimeCharacterRotationAtRecord={FormatFloat(_charaSelectCameraAdapter.RuntimeState.CharacterRotationAtRecord)}",
             $"charaSelectCameraAdapter.sceneGeneration={_charaSelectCameraAdapter.RuntimeState.SceneGeneration}",
             $"charaSelectCameraAdapter.shouldRestoreRuntimeCameraState={_charaSelectCameraAdapter.ShouldRestoreRuntimeCameraState()}",
+            "charaSelectCameraAdapter.sceneLoadedNotification=reserved-for-phase2-native-lobby-scene-loaded",
             "charaSelectCameraAdapter.phase=Phase1-no-native-camera-writes",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
@@ -951,7 +956,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         RecordProbeLoadLobbyScene(mapId);
         _log.Debug("[XMU BG] LoadLobbyScene mapId={MapId}", mapId);
         _loadLobbySceneHook?.Original(mapId);
-        _charaSelectCameraAdapter.NotifySceneLoaded(mapId);
     }
 
     private int CreateSceneDetour(byte* territoryPath, uint territoryId, nint p3, uint layerFilterKey, nint festivals, int p6, uint contentFinderConditionId)

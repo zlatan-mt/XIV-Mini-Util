@@ -1,6 +1,8 @@
 // Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundCharaSelectCameraRuntimeState.cs
 // Description: Character select lobby camera adapter の非永続 runtime state を表す
 // Reason: scene load 後に復元する yaw / pitch / distance を preset schema から切り離すため
+using System.Numerics;
+
 namespace XivMiniUtil.Services.TitleBackground;
 
 internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
@@ -9,6 +11,8 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
     float? Pitch,
     float? Distance,
     float? LookAtY,
+    Vector3? LookAt,
+    TitleBackgroundCharaSelectCameraCurve? CurveAtRecord,
     float? CharacterRotationAtRecord,
     int SceneGeneration)
 {
@@ -17,7 +21,11 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
         && Pitch.HasValue
         && Distance.HasValue;
 
-    public static TitleBackgroundCharaSelectCameraRuntimeState Empty { get; } = new(null, null, null, null, null, null, 0);
+    public bool HasLookAt =>
+        LookAt.HasValue
+        && TitleBackgroundCameraMath.IsFiniteVector(LookAt.Value);
+
+    public static TitleBackgroundCharaSelectCameraRuntimeState Empty { get; } = new(null, null, null, null, null, null, null, null, 0);
 
     public static TitleBackgroundCharaSelectCameraRuntimeState Create(
         float? yaw,
@@ -25,6 +33,8 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
         float? pitch,
         float? distance,
         float? lookAtY,
+        Vector3? lookAt,
+        TitleBackgroundCharaSelectCameraCurve? curveAtRecord,
         float? characterRotationAtRecord,
         int sceneGeneration)
     {
@@ -34,6 +44,8 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
             TitleBackgroundCharaSelectCameraLogic.SanitizeOptionalAngle(pitch),
             TitleBackgroundCharaSelectCameraLogic.SanitizeOptionalDistance(distance),
             TitleBackgroundCharaSelectCameraLogic.SanitizeOptionalCoordinate(lookAtY),
+            SanitizeOptionalLookAt(lookAt),
+            SanitizeOptionalCurve(curveAtRecord),
             TitleBackgroundCharaSelectCameraLogic.NormalizeOptionalRadians(characterRotationAtRecord),
             Math.Max(0, sceneGeneration));
     }
@@ -43,6 +55,8 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
         float pitch,
         float distance,
         float lookAtY,
+        Vector3? lookAt,
+        TitleBackgroundCharaSelectCameraCurve curveAtRecord,
         float characterRotation,
         int sceneGeneration)
     {
@@ -53,6 +67,8 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
             pitch,
             distance,
             lookAtY,
+            lookAt,
+            curveAtRecord,
             normalizedRotation,
             sceneGeneration);
     }
@@ -66,6 +82,23 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
 
     public TitleBackgroundCharaSelectCameraRuntimeState WithoutCameraPose()
     {
-        return new TitleBackgroundCharaSelectCameraRuntimeState(null, null, null, null, null, null, SceneGeneration);
+        return new TitleBackgroundCharaSelectCameraRuntimeState(null, null, null, null, null, null, null, null, SceneGeneration);
+    }
+
+    private static Vector3? SanitizeOptionalLookAt(Vector3? value)
+    {
+        return value.HasValue && TitleBackgroundCameraMath.IsFiniteVector(value.Value)
+            ? TitleBackgroundCharaSelectCameraLogic.SanitizeVector(value.Value)
+            : null;
+    }
+
+    private static TitleBackgroundCharaSelectCameraCurve? SanitizeOptionalCurve(TitleBackgroundCharaSelectCameraCurve? value)
+    {
+        return value.HasValue
+            ? new TitleBackgroundCharaSelectCameraCurve(
+                TitleBackgroundPreset.SanitizeCoordinate(value.Value.Low),
+                TitleBackgroundPreset.SanitizeCoordinate(value.Value.Mid),
+                TitleBackgroundPreset.SanitizeCoordinate(value.Value.High))
+            : null;
     }
 }

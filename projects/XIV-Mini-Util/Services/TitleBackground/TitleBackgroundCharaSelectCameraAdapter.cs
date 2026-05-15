@@ -39,6 +39,8 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
             RuntimeState.Pitch,
             RuntimeState.Distance,
             RuntimeState.LookAtY,
+            RuntimeState.LookAt,
+            RuntimeState.CurveAtRecord,
             RuntimeState.CharacterRotationAtRecord,
             RuntimeState.SceneGeneration + 1);
         ApplyTransition(TitleBackgroundCharaSelectCameraAdapterEvent.SceneLoadStarted);
@@ -85,11 +87,18 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
 
     public void SaveRuntimeCameraState(float yaw, float pitch, float distance, float lookAtY)
     {
+        SaveRuntimeCameraState(yaw, pitch, distance, lookAtY, null);
+    }
+
+    public void SaveRuntimeCameraState(float yaw, float pitch, float distance, float lookAtY, System.Numerics.Vector3? lookAt)
+    {
         RuntimeState = TitleBackgroundCharaSelectCameraRuntimeState.FromObservedPose(
             yaw,
             pitch,
             distance,
             lookAtY,
+            lookAt,
+            Curve,
             Input.CharacterRotation,
             RuntimeState.SceneGeneration);
     }
