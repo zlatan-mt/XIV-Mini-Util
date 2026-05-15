@@ -634,6 +634,46 @@ Test("title background chara select camera does not mark LookAtY one-shot withou
         && !adapter.ConsumeShouldSetLookAtY();
 });
 
+Test("title background chara select camera scene-ready signal handles only armed or loading chara select", () =>
+{
+    return TitleBackgroundCharaSelectCameraLogic.ShouldHandleSceneReadySignal(
+            serviceReady: true,
+            hookProbeMode: false,
+            adapterArmed: true,
+            TitleBackgroundCharaSelectCameraAdapterState.Armed,
+            GameLobbyType.CharaSelect)
+        && TitleBackgroundCharaSelectCameraLogic.ShouldHandleSceneReadySignal(
+            serviceReady: true,
+            hookProbeMode: false,
+            adapterArmed: true,
+            TitleBackgroundCharaSelectCameraAdapterState.SceneLoading,
+            GameLobbyType.CharaSelect)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldHandleSceneReadySignal(
+            serviceReady: true,
+            hookProbeMode: false,
+            adapterArmed: true,
+            TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded,
+            GameLobbyType.CharaSelect)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldHandleSceneReadySignal(
+            serviceReady: true,
+            hookProbeMode: false,
+            adapterArmed: true,
+            TitleBackgroundCharaSelectCameraAdapterState.Active,
+            GameLobbyType.CharaSelect)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldHandleSceneReadySignal(
+            serviceReady: true,
+            hookProbeMode: true,
+            adapterArmed: true,
+            TitleBackgroundCharaSelectCameraAdapterState.SceneLoading,
+            GameLobbyType.CharaSelect)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldHandleSceneReadySignal(
+            serviceReady: true,
+            hookProbeMode: false,
+            adapterArmed: true,
+            TitleBackgroundCharaSelectCameraAdapterState.SceneLoading,
+            GameLobbyType.Title);
+});
+
 Test("title background chara select camera adapter ignores runtime notifications while inactive", () =>
 {
     var adapter = new TitleBackgroundCharaSelectCameraAdapter();

@@ -61,8 +61,17 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private TitleBackgroundCameraCaptureResult _lastCameraCaptureResult = TitleBackgroundCameraCaptureResult.NotRun;
     private string _lastCharaSelectCameraRuntimeRecordStatus = "not-run";
     private string _lastCharaSelectCameraRuntimeRestoreStatus = "not-run";
-    private string _lastCharaSelectCameraRuntimeError = string.Empty;
+    private string _lastCharaSelectCameraRuntimeRecordError = string.Empty;
+    private string _lastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
     private int _lastCharaSelectCameraRuntimeRestoreSceneGeneration;
+    private int _sceneReadySignalCallCount;
+    private string _sceneReadySignalLastAdapterStateBeforeHandle = "not-run";
+    private GameLobbyType _sceneReadySignalLastResolvedLobbyMap = GameLobbyType.None;
+    private int _runtimeRestoreAttemptCount;
+    private int _runtimeRestoreSuccessCount;
+    private float? _runtimeRestoreLastRestoredYaw;
+    private float? _runtimeRestoreLastRestoredPitch;
+    private float? _runtimeRestoreLastRestoredDistance;
     private TitleBackgroundProbeSession? _activeProbeSession;
     private TitleBackgroundProbeSession? _lastProbeSession;
     private TitleBackgroundProbeCounters _automaticProbeCounters = new();
@@ -390,9 +399,23 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"charaSelectCameraAdapter.shouldRestoreRuntimeCameraState={_charaSelectCameraAdapter.ShouldRestoreRuntimeCameraState()}",
             $"charaSelectCameraAdapter.sceneLoadedNotification={_lastCharaSelectCameraRuntimeRestoreStatus}",
             $"charaSelectCameraAdapter.runtimeRecordStatus={_lastCharaSelectCameraRuntimeRecordStatus}",
-            $"charaSelectCameraAdapter.runtimeRestoreError={FormatNone(_lastCharaSelectCameraRuntimeError)}",
+            $"charaSelectCameraAdapter.runtimeRecordFailureReason={FormatNone(_lastCharaSelectCameraRuntimeRecordError)}",
+            $"charaSelectCameraAdapter.runtimeRestoreFailureReason={FormatNone(_lastCharaSelectCameraRuntimeRestoreFailureReason)}",
             $"charaSelectCameraAdapter.runtimeRestoreSceneGeneration={_lastCharaSelectCameraRuntimeRestoreSceneGeneration}",
             "charaSelectCameraAdapter.phase=Phase2A-runtime-yaw-pitch-distance-restore-entry",
+            "sceneReadySignalSource=UpdateLobbyUIStage",
+            "sceneReadySignalPolicy=phase2a-provisional",
+            $"sceneReadySignal.callCount={_sceneReadySignalCallCount}",
+            $"sceneReadySignal.lastAdapterStateBeforeHandle={_sceneReadySignalLastAdapterStateBeforeHandle}",
+            $"sceneReadySignal.lastResolvedLobbyMap={_sceneReadySignalLastResolvedLobbyMap}",
+            $"runtimeRestore.attemptCount={_runtimeRestoreAttemptCount}",
+            $"runtimeRestore.successCount={_runtimeRestoreSuccessCount}",
+            $"runtimeRestore.lastStatus={_lastCharaSelectCameraRuntimeRestoreStatus}",
+            $"runtimeRestore.lastFailureReason={FormatNone(_lastCharaSelectCameraRuntimeRestoreFailureReason)}",
+            "runtimeRestore.target=ActiveCamera.DirH/DirV/Distance/InterpDistance",
+            $"runtimeRestore.restoredYaw={FormatFloat(_runtimeRestoreLastRestoredYaw)}",
+            $"runtimeRestore.restoredPitch={FormatFloat(_runtimeRestoreLastRestoredPitch)}",
+            $"runtimeRestore.restoredDistance={FormatFloat(_runtimeRestoreLastRestoredDistance)}",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
             $"cameraCapture.lastStatus={_lastCameraCaptureResult.Status}",
@@ -482,6 +505,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"LoadLobbyScene.targetWithinText={GetTargetWithinText("LoadLobbyScene")}",
             "",
             "LobbySceneLoaded.source=UpdateLobbyUIStage",
+            "LobbySceneLoaded.policy=phase2a-provisional-scene-ready-signal",
             $"LobbySceneLoaded.address={FormatAddress(_addressResolver.UpdateLobbyUIStage)}",
             $"LobbySceneLoaded.hookTargetVerified={GetHookTargetVerified("UpdateLobbyUIStage")}",
             $"LobbySceneLoaded.targetWithinText={GetTargetWithinText("UpdateLobbyUIStage")}",
@@ -985,7 +1009,15 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
         try
         {
-            if (ShouldHandleCharaSelectSceneLoaded(out var map))
+            var stateBeforeHandle = _charaSelectCameraAdapter.State;
+            var map = ResolveSceneReadySignalLobbyMap();
+            _sceneReadySignalCallCount++;
+            _sceneReadySignalLastAdapterStateBeforeHandle = stateBeforeHandle.ToString();
+            _sceneReadySignalLastResolvedLobbyMap = map;
+
+            // Phase 2-A uses AgentLobby.UpdateLobbyUIStage as a provisional scene-ready signal.
+            // This is not a confirmed native LobbySceneLoaded-equivalent hook.
+            if (ShouldHandleCharaSelectSceneReadySignal(stateBeforeHandle, map))
             {
                 _charaSelectCameraAdapter.NotifySceneLoaded(map);
                 RestoreCharaSelectRuntimeCameraStateAfterSceneLoad();
@@ -995,7 +1027,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             MarkRuntimeError(ex, nameof(LobbySceneLoadedDetour));
             _lastCharaSelectCameraRuntimeRestoreStatus = "runtime-error";
-            _lastCharaSelectCameraRuntimeError = ex.Message;
+            _lastCharaSelectCameraRuntimeRestoreFailureReason = ex.Message;
         }
     }
 
@@ -1510,7 +1542,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         if (!TryCaptureActiveCameraRuntimePose(out var pose, out var errorMessage))
         {
             _lastCharaSelectCameraRuntimeRecordStatus = "failed";
-            _lastCharaSelectCameraRuntimeError = errorMessage;
+            _lastCharaSelectCameraRuntimeRecordError = errorMessage;
             _log.Debug("[XMU BG] CharaSelect camera runtime state capture skipped. reason={Reason}", errorMessage);
             return;
         }
@@ -1522,7 +1554,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             pose.LookAtY,
             pose.LookAt);
         _lastCharaSelectCameraRuntimeRecordStatus = "success";
-        _lastCharaSelectCameraRuntimeError = string.Empty;
+        _lastCharaSelectCameraRuntimeRecordError = string.Empty;
         _log.Debug(
             "[XMU BG] CharaSelect camera runtime state recorded. yaw={Yaw}, pitch={Pitch}, distance={Distance}, lookAtY={LookAtY}, generation={Generation}",
             pose.Yaw,
@@ -1540,37 +1572,39 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             && _charaSelectCameraAdapter.IsArmed;
     }
 
-    private bool ShouldHandleCharaSelectSceneLoaded(out GameLobbyType map)
+    private GameLobbyType ResolveSceneReadySignalLobbyMap()
     {
-        map = GameLobbyType.None;
-        if (_state != TitleBackgroundServiceState.Ready
-            || IsHookProbeMode()
-            || !_charaSelectCameraAdapter.IsArmed
-            || _charaSelectCameraAdapter.State is not (TitleBackgroundCharaSelectCameraAdapterState.Armed or TitleBackgroundCharaSelectCameraAdapterState.SceneLoading))
-        {
-            return false;
-        }
+        return TryReadCurrentLobbyMap(out var map)
+            ? map
+            : EffectiveLobbyType;
+    }
 
-        if (!TryReadCurrentLobbyMap(out map))
-        {
-            map = EffectiveLobbyType;
-        }
-
-        return TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(map);
+    private bool ShouldHandleCharaSelectSceneReadySignal(
+        TitleBackgroundCharaSelectCameraAdapterState stateBeforeHandle,
+        GameLobbyType map)
+    {
+        return TitleBackgroundCharaSelectCameraLogic.ShouldHandleSceneReadySignal(
+            _state == TitleBackgroundServiceState.Ready,
+            IsHookProbeMode(),
+            _charaSelectCameraAdapter.IsArmed,
+            stateBeforeHandle,
+            map);
     }
 
     private void RestoreCharaSelectRuntimeCameraStateAfterSceneLoad()
     {
+        _runtimeRestoreAttemptCount++;
         if (!_charaSelectCameraAdapter.ShouldRestoreRuntimeCameraState())
         {
             _lastCharaSelectCameraRuntimeRestoreStatus = "skipped";
+            _lastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
             return;
         }
 
         if (!TryApplyRuntimeCameraPose(_charaSelectCameraAdapter.RuntimeState, _charaSelectCameraAdapter.GetRestoredYaw(), out var errorMessage))
         {
             _lastCharaSelectCameraRuntimeRestoreStatus = "failed";
-            _lastCharaSelectCameraRuntimeError = errorMessage;
+            _lastCharaSelectCameraRuntimeRestoreFailureReason = errorMessage;
             _log.Debug("[XMU BG] CharaSelect camera runtime state restore skipped. reason={Reason}", errorMessage);
             return;
         }
@@ -1580,8 +1614,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var restoredDistance = _charaSelectCameraAdapter.RuntimeState.Distance!.Value;
         _charaSelectCameraAdapter.MarkRuntimeCameraStateRestored();
         _lastCharaSelectCameraRuntimeRestoreStatus = "success";
-        _lastCharaSelectCameraRuntimeError = string.Empty;
+        _lastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
         _lastCharaSelectCameraRuntimeRestoreSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+        _runtimeRestoreSuccessCount++;
+        _runtimeRestoreLastRestoredYaw = restoredYaw;
+        _runtimeRestoreLastRestoredPitch = restoredPitch;
+        _runtimeRestoreLastRestoredDistance = restoredDistance;
         _log.Information(
             "[XMU BG] CharaSelect camera runtime state restored. yaw={Yaw}, pitch={Pitch}, distance={Distance}, generation={Generation}",
             restoredYaw,
@@ -1883,8 +1921,17 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _lastFixOnInvocationMode = "not-run";
         _lastCharaSelectCameraRuntimeRecordStatus = "not-run";
         _lastCharaSelectCameraRuntimeRestoreStatus = "not-run";
-        _lastCharaSelectCameraRuntimeError = string.Empty;
+        _lastCharaSelectCameraRuntimeRecordError = string.Empty;
+        _lastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
         _lastCharaSelectCameraRuntimeRestoreSceneGeneration = 0;
+        _sceneReadySignalCallCount = 0;
+        _sceneReadySignalLastAdapterStateBeforeHandle = "not-run";
+        _sceneReadySignalLastResolvedLobbyMap = GameLobbyType.None;
+        _runtimeRestoreAttemptCount = 0;
+        _runtimeRestoreSuccessCount = 0;
+        _runtimeRestoreLastRestoredYaw = null;
+        _runtimeRestoreLastRestoredPitch = null;
+        _runtimeRestoreLastRestoredDistance = null;
         ClearPostFixOnCameraObservation();
         _lastPostFixOnCameraCaptureStatus = "not-run";
     }

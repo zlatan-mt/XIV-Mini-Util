@@ -87,6 +87,21 @@ internal static class TitleBackgroundCharaSelectCameraLogic
             && runtimeState.HasCameraPose;
     }
 
+    public static bool ShouldHandleSceneReadySignal(
+        bool serviceReady,
+        bool hookProbeMode,
+        bool adapterArmed,
+        TitleBackgroundCharaSelectCameraAdapterState adapterState,
+        GameLobbyType map)
+    {
+        return serviceReady
+            && !hookProbeMode
+            && adapterArmed
+            && adapterState is TitleBackgroundCharaSelectCameraAdapterState.Armed
+                or TitleBackgroundCharaSelectCameraAdapterState.SceneLoading
+            && IsCharaSelectMap(map);
+    }
+
     public static TitleBackgroundCharaSelectCameraCurve BuildCurve(float characterPositionY)
     {
         var y = TitleBackgroundPreset.SanitizeCoordinate(characterPositionY);
