@@ -634,6 +634,83 @@ Test("title background chara select camera does not mark LookAtY one-shot withou
         && !adapter.ConsumeShouldSetLookAtY();
 });
 
+Test("title background chara select camera permits curve apply after scene loaded", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+
+    return adapter.ShouldApplyCurve();
+});
+
+Test("title background chara select camera curve apply is generation one-shot", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+    var first = adapter.ShouldApplyCurve();
+    adapter.MarkCurveApplied();
+    var second = adapter.ShouldApplyCurve();
+
+    return first
+        && !second
+        && adapter.LastCurveAppliedSceneGeneration == adapter.RuntimeState.SceneGeneration;
+});
+
+Test("title background chara select camera LookAtY is consumed once per scene generation", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+    adapter.MarkRuntimeCameraStateRestored();
+
+    var firstShouldApply = adapter.ShouldApplyLookAtY();
+    adapter.MarkLookAtYApplied();
+    var secondShouldApply = adapter.ShouldApplyLookAtY();
+
+    return firstShouldApply
+        && !secondShouldApply
+        && !adapter.RuntimeState.ShouldSetLookAtY
+        && adapter.LastLookAtYAppliedSceneGeneration == adapter.RuntimeState.SceneGeneration;
+});
+
+Test("title background chara select camera LookAtY remains pending until apply success is marked", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+    adapter.MarkRuntimeCameraStateRestored();
+
+    return adapter.ShouldApplyLookAtY()
+        && adapter.ShouldApplyLookAtY()
+        && adapter.RuntimeState.ShouldSetLookAtY
+        && adapter.LastLookAtYAppliedSceneGeneration == 0;
+});
+
+Test("title background chara select camera does not apply curve or LookAtY after stop requested", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+    adapter.MarkRuntimeCameraStateRestored();
+    adapter.NotifyLobbyUpdate(GameLobbyType.CharaSelect);
+    adapter.NotifyLobbyUpdate(GameLobbyType.Title);
+
+    return adapter.State == TitleBackgroundCharaSelectCameraAdapterState.Stopping
+        && !adapter.ShouldApplyCurve()
+        && !adapter.ShouldApplyLookAtY();
+});
+
 Test("title background chara select camera scene-ready signal handles only armed or loading chara select", () =>
 {
     return TitleBackgroundCharaSelectCameraLogic.ShouldHandleSceneReadySignal(

@@ -10,6 +10,8 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
     public TitleBackgroundCharaSelectCameraRuntimeState RuntimeState { get; private set; } = TitleBackgroundCharaSelectCameraRuntimeState.Empty;
     public TitleBackgroundCharaSelectCameraCurve Curve { get; private set; } = TitleBackgroundCharaSelectCameraCurve.Default;
     public string LastEvent { get; private set; } = "not-run";
+    public int LastCurveAppliedSceneGeneration { get; private set; }
+    public int LastLookAtYAppliedSceneGeneration { get; private set; }
 
     public bool IsArmed => State != TitleBackgroundCharaSelectCameraAdapterState.Inactive;
 
@@ -23,6 +25,8 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
         if (!enabled)
         {
             RuntimeState = TitleBackgroundCharaSelectCameraRuntimeState.Empty;
+            LastCurveAppliedSceneGeneration = 0;
+            LastLookAtYAppliedSceneGeneration = 0;
         }
     }
 
@@ -116,23 +120,54 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
 
     public bool ConsumeShouldSetLookAtY()
     {
-        if (!RuntimeState.ShouldSetLookAtY)
+        if (!ShouldApplyLookAtY())
         {
             return false;
         }
 
-        RuntimeState = RuntimeState.WithShouldSetLookAtY(false);
+        MarkLookAtYApplied();
         return true;
+    }
+
+    public bool ShouldApplyLookAtY()
+    {
+        return TitleBackgroundCharaSelectCameraLogic.ShouldApplyLookAtY(
+            State,
+            RuntimeState,
+            LastLookAtYAppliedSceneGeneration);
+    }
+
+    public void MarkLookAtYApplied()
+    {
+        LastLookAtYAppliedSceneGeneration = RuntimeState.SceneGeneration;
+        RuntimeState = RuntimeState.WithShouldSetLookAtY(false);
+    }
+
+    public bool ShouldApplyCurve()
+    {
+        return TitleBackgroundCharaSelectCameraLogic.ShouldApplyCurve(
+            State,
+            RuntimeState,
+            LastCurveAppliedSceneGeneration);
+    }
+
+    public void MarkCurveApplied()
+    {
+        LastCurveAppliedSceneGeneration = RuntimeState.SceneGeneration;
     }
 
     public void ResetRuntimeCameraState()
     {
         RuntimeState = RuntimeState.WithoutCameraPose();
+        LastCurveAppliedSceneGeneration = 0;
+        LastLookAtYAppliedSceneGeneration = 0;
     }
 
     public void Reset()
     {
         RuntimeState = TitleBackgroundCharaSelectCameraRuntimeState.Empty;
+        LastCurveAppliedSceneGeneration = 0;
+        LastLookAtYAppliedSceneGeneration = 0;
         ApplyTransition(TitleBackgroundCharaSelectCameraAdapterEvent.Reset);
     }
 

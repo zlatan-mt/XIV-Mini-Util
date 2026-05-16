@@ -65,6 +65,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private string _lastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
     private int _lastCharaSelectCameraRuntimeRestoreSceneGeneration;
     private int _sceneReadySignalCallCount;
+    private int _sceneReadySignalAcceptedCount;
     private string _sceneReadySignalLastAdapterStateBeforeHandle = "not-run";
     private GameLobbyType _sceneReadySignalLastResolvedLobbyMap = GameLobbyType.None;
     private int _runtimeRestoreAttemptCount;
@@ -72,6 +73,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private float? _runtimeRestoreLastRestoredYaw;
     private float? _runtimeRestoreLastRestoredPitch;
     private float? _runtimeRestoreLastRestoredDistance;
+    private int _curveApplyAttemptCount;
+    private int _curveApplySuccessCount;
+    private string _curveApplyLastStatus = "not-run";
+    private string _curveApplyLastFailureReason = string.Empty;
+    private float? _curveApplyLastAppliedLow;
+    private float? _curveApplyLastAppliedMid;
+    private float? _curveApplyLastAppliedHigh;
+    private int _lookAtYApplyAttemptCount;
+    private int _lookAtYApplySuccessCount;
+    private string _lookAtYApplyLastStatus = "not-run";
+    private string _lookAtYApplyLastFailureReason = string.Empty;
+    private float? _lookAtYApplyLastAppliedValue;
     private TitleBackgroundProbeSession? _activeProbeSession;
     private TitleBackgroundProbeSession? _lastProbeSession;
     private TitleBackgroundProbeCounters _automaticProbeCounters = new();
@@ -402,10 +415,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"charaSelectCameraAdapter.runtimeRecordFailureReason={FormatNone(_lastCharaSelectCameraRuntimeRecordError)}",
             $"charaSelectCameraAdapter.runtimeRestoreFailureReason={FormatNone(_lastCharaSelectCameraRuntimeRestoreFailureReason)}",
             $"charaSelectCameraAdapter.runtimeRestoreSceneGeneration={_lastCharaSelectCameraRuntimeRestoreSceneGeneration}",
-            "charaSelectCameraAdapter.phase=Phase2A-runtime-yaw-pitch-distance-restore-entry",
+            $"charaSelectCameraAdapter.curveAppliedSceneGeneration={_charaSelectCameraAdapter.LastCurveAppliedSceneGeneration}",
+            $"charaSelectCameraAdapter.lookAtYAppliedSceneGeneration={_charaSelectCameraAdapter.LastLookAtYAppliedSceneGeneration}",
+            "charaSelectCameraAdapter.phase=Phase2B-runtime-restore-curve-lookAtY",
             "sceneReadySignalSource=UpdateLobbyUIStage",
-            "sceneReadySignalPolicy=phase2a-provisional",
+            "sceneReadySignalPolicy=phase2b-generation-gated",
             $"sceneReadySignal.callCount={_sceneReadySignalCallCount}",
+            $"sceneReadySignal.rawCallCount={_sceneReadySignalCallCount}",
+            $"sceneReadySignal.acceptedCount={_sceneReadySignalAcceptedCount}",
             $"sceneReadySignal.lastAdapterStateBeforeHandle={_sceneReadySignalLastAdapterStateBeforeHandle}",
             $"sceneReadySignal.lastResolvedLobbyMap={_sceneReadySignalLastResolvedLobbyMap}",
             $"runtimeRestore.attemptCount={_runtimeRestoreAttemptCount}",
@@ -416,6 +433,20 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"runtimeRestore.restoredYaw={FormatFloat(_runtimeRestoreLastRestoredYaw)}",
             $"runtimeRestore.restoredPitch={FormatFloat(_runtimeRestoreLastRestoredPitch)}",
             $"runtimeRestore.restoredDistance={FormatFloat(_runtimeRestoreLastRestoredDistance)}",
+            $"curveApply.attemptCount={_curveApplyAttemptCount}",
+            $"curveApply.successCount={_curveApplySuccessCount}",
+            $"curveApply.lastStatus={_curveApplyLastStatus}",
+            $"curveApply.lastFailureReason={FormatNone(_curveApplyLastFailureReason)}",
+            $"curveApply.appliedLow={FormatFloat(_curveApplyLastAppliedLow)}",
+            $"curveApply.appliedMid={FormatFloat(_curveApplyLastAppliedMid)}",
+            $"curveApply.appliedHigh={FormatFloat(_curveApplyLastAppliedHigh)}",
+            "curveApply.target=LobbyCamera.SetTiltOffset(mid); low/mid/high are recorded because FFXIVClientStructs does not expose separate lobby camera curve fields",
+            $"lookAtYApply.attemptCount={_lookAtYApplyAttemptCount}",
+            $"lookAtYApply.successCount={_lookAtYApplySuccessCount}",
+            $"lookAtYApply.lastStatus={_lookAtYApplyLastStatus}",
+            $"lookAtYApply.lastFailureReason={FormatNone(_lookAtYApplyLastFailureReason)}",
+            $"lookAtYApply.appliedValue={FormatFloat(_lookAtYApplyLastAppliedValue)}",
+            "lookAtYApply.target=LobbyCamera.LastLookAtVector.Y",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
             $"cameraCapture.lastStatus={_lastCameraCaptureResult.Status}",
@@ -1019,8 +1050,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             // This is not a confirmed native LobbySceneLoaded-equivalent hook.
             if (ShouldHandleCharaSelectSceneReadySignal(stateBeforeHandle, map))
             {
+                _sceneReadySignalAcceptedCount++;
                 _charaSelectCameraAdapter.NotifySceneLoaded(map);
                 RestoreCharaSelectRuntimeCameraStateAfterSceneLoad();
+                ApplyCharaSelectCameraCurveAfterSceneLoad();
+                ApplyCharaSelectLookAtYAfterSceneLoad();
             }
         }
         catch (Exception ex)
@@ -1028,6 +1062,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             MarkRuntimeError(ex, nameof(LobbySceneLoadedDetour));
             _lastCharaSelectCameraRuntimeRestoreStatus = "runtime-error";
             _lastCharaSelectCameraRuntimeRestoreFailureReason = ex.Message;
+            _curveApplyLastStatus = "runtime-error";
+            _curveApplyLastFailureReason = ex.Message;
+            _lookAtYApplyLastStatus = "runtime-error";
+            _lookAtYApplyLastFailureReason = ex.Message;
         }
     }
 
@@ -1628,6 +1666,139 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _lastCharaSelectCameraRuntimeRestoreSceneGeneration);
     }
 
+    private void ApplyCharaSelectCameraCurveAfterSceneLoad()
+    {
+        _curveApplyAttemptCount++;
+        if (!_charaSelectCameraAdapter.ShouldApplyCurve())
+        {
+            _curveApplyLastStatus = "skipped";
+            _curveApplyLastFailureReason = string.Empty;
+            return;
+        }
+
+        var curve = _charaSelectCameraAdapter.RuntimeState.CurveAtRecord ?? _charaSelectCameraAdapter.Curve;
+        if (!TryApplyCharaSelectCameraCurve(curve, out var errorMessage))
+        {
+            _curveApplyLastStatus = "failed";
+            _curveApplyLastFailureReason = errorMessage;
+            _log.Debug("[XMU BG] CharaSelect camera curve apply skipped. reason={Reason}", errorMessage);
+            return;
+        }
+
+        _charaSelectCameraAdapter.MarkCurveApplied();
+        _curveApplyLastStatus = "success";
+        _curveApplyLastFailureReason = string.Empty;
+        _curveApplyLastAppliedLow = curve.Low;
+        _curveApplyLastAppliedMid = curve.Mid;
+        _curveApplyLastAppliedHigh = curve.High;
+        _curveApplySuccessCount++;
+        _log.Information(
+            "[XMU BG] CharaSelect camera curve applied. low={Low}, mid={Mid}, high={High}, generation={Generation}",
+            curve.Low,
+            curve.Mid,
+            curve.High,
+            _charaSelectCameraAdapter.RuntimeState.SceneGeneration);
+    }
+
+    private void ApplyCharaSelectLookAtYAfterSceneLoad()
+    {
+        _lookAtYApplyAttemptCount++;
+        var value = _charaSelectCameraAdapter.RuntimeState.LookAtY;
+        if (!_charaSelectCameraAdapter.ShouldApplyLookAtY())
+        {
+            _lookAtYApplyLastStatus = "skipped";
+            _lookAtYApplyLastFailureReason = string.Empty;
+            return;
+        }
+
+        if (!value.HasValue)
+        {
+            _lookAtYApplyLastStatus = "failed";
+            _lookAtYApplyLastFailureReason = "runtime LookAtY is unavailable";
+            return;
+        }
+
+        if (!TryApplyCharaSelectLookAtY(value.Value, out var errorMessage))
+        {
+            _lookAtYApplyLastStatus = "failed";
+            _lookAtYApplyLastFailureReason = errorMessage;
+            _log.Debug("[XMU BG] CharaSelect LookAtY apply skipped. reason={Reason}", errorMessage);
+            return;
+        }
+
+        _charaSelectCameraAdapter.MarkLookAtYApplied();
+        _lookAtYApplyLastStatus = "success";
+        _lookAtYApplyLastFailureReason = string.Empty;
+        _lookAtYApplyLastAppliedValue = value.Value;
+        _lookAtYApplySuccessCount++;
+        _log.Information(
+            "[XMU BG] CharaSelect LookAtY applied. value={LookAtY}, generation={Generation}",
+            value.Value,
+            _charaSelectCameraAdapter.RuntimeState.SceneGeneration);
+    }
+
+    private bool TryApplyCharaSelectCameraCurve(
+        TitleBackgroundCharaSelectCameraCurve curve,
+        out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        try
+        {
+            var cameraManager = CameraManager.Instance();
+            if (cameraManager == null)
+            {
+                errorMessage = "CameraManager.Instance() unavailable";
+                return false;
+            }
+
+            var lobbyCamera = cameraManager->LobbyCamera;
+            if (lobbyCamera == null)
+            {
+                errorMessage = "LobbyCamera unavailable";
+                return false;
+            }
+
+            lobbyCamera->SetTiltOffset(curve.Mid);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            _log.Warning(ex, "TitleBackground camera curve apply failed.");
+            return false;
+        }
+    }
+
+    private bool TryApplyCharaSelectLookAtY(float lookAtY, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        try
+        {
+            var cameraManager = CameraManager.Instance();
+            if (cameraManager == null)
+            {
+                errorMessage = "CameraManager.Instance() unavailable";
+                return false;
+            }
+
+            var lobbyCamera = cameraManager->LobbyCamera;
+            if (lobbyCamera == null)
+            {
+                errorMessage = "LobbyCamera unavailable";
+                return false;
+            }
+
+            lobbyCamera->LastLookAtVector.Y = lookAtY;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            _log.Warning(ex, "TitleBackground LookAtY apply failed.");
+            return false;
+        }
+    }
+
     private bool TryApplyRuntimeCameraPose(
         TitleBackgroundCharaSelectCameraRuntimeState runtimeState,
         float? restoredYaw,
@@ -1925,6 +2096,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _lastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
         _lastCharaSelectCameraRuntimeRestoreSceneGeneration = 0;
         _sceneReadySignalCallCount = 0;
+        _sceneReadySignalAcceptedCount = 0;
         _sceneReadySignalLastAdapterStateBeforeHandle = "not-run";
         _sceneReadySignalLastResolvedLobbyMap = GameLobbyType.None;
         _runtimeRestoreAttemptCount = 0;
@@ -1932,6 +2104,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _runtimeRestoreLastRestoredYaw = null;
         _runtimeRestoreLastRestoredPitch = null;
         _runtimeRestoreLastRestoredDistance = null;
+        _curveApplyAttemptCount = 0;
+        _curveApplySuccessCount = 0;
+        _curveApplyLastStatus = "not-run";
+        _curveApplyLastFailureReason = string.Empty;
+        _curveApplyLastAppliedLow = null;
+        _curveApplyLastAppliedMid = null;
+        _curveApplyLastAppliedHigh = null;
+        _lookAtYApplyAttemptCount = 0;
+        _lookAtYApplySuccessCount = 0;
+        _lookAtYApplyLastStatus = "not-run";
+        _lookAtYApplyLastFailureReason = string.Empty;
+        _lookAtYApplyLastAppliedValue = null;
         ClearPostFixOnCameraObservation();
         _lastPostFixOnCameraCaptureStatus = "not-run";
     }

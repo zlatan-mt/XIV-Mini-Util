@@ -87,6 +87,28 @@ internal static class TitleBackgroundCharaSelectCameraLogic
             && runtimeState.HasCameraPose;
     }
 
+    public static bool ShouldApplyCurve(
+        TitleBackgroundCharaSelectCameraAdapterState state,
+        TitleBackgroundCharaSelectCameraRuntimeState runtimeState,
+        int lastAppliedSceneGeneration)
+    {
+        return state == TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded
+            && runtimeState.SceneGeneration > 0
+            && runtimeState.SceneGeneration != lastAppliedSceneGeneration;
+    }
+
+    public static bool ShouldApplyLookAtY(
+        TitleBackgroundCharaSelectCameraAdapterState state,
+        TitleBackgroundCharaSelectCameraRuntimeState runtimeState,
+        int lastAppliedSceneGeneration)
+    {
+        return state == TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded
+            && runtimeState.SceneGeneration > 0
+            && runtimeState.SceneGeneration != lastAppliedSceneGeneration
+            && runtimeState.ShouldSetLookAtY
+            && runtimeState.LookAtY.HasValue;
+    }
+
     public static bool ShouldStopOnLobbyUpdate(
         TitleBackgroundCharaSelectCameraAdapterState state,
         GameLobbyType map)
