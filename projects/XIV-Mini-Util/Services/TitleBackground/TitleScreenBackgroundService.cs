@@ -119,6 +119,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private string _phase2ECalculateLookAtYLastError = string.Empty;
     private static readonly int[] CameraProbeTimelineFrames = [0, 1, 2, 4, 8, 16, 30, 60, 90, 120, 180, 240, 300, 450, 600];
     private const int Phase2EMaxRecordedCalls = 64;
+    private const int LobbyCameraExpandedCameraCurveEnabledOffset = 0x2C2;
+    private const int LobbyCameraExpandedMidPointOffset = 0x2D0;
+    private const int LobbyCameraExpandedLowPointOffset = 0x2E0;
+    private const int LobbyCameraExpandedHighPointOffset = 0x2F0;
 
     private GameLobbyType EffectiveLobbyType =>
         _loadingLobbyType != GameLobbyType.None
@@ -400,6 +404,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var phase2EVerdicts = TitleBackgroundCameraProbeReport.AnalyzePhase2E(
             phase2ECallSamples,
             phase2EFinalStableLookAtY);
+        var phase2FCurveSamples = BuildPhase2FCurveTimelineSamples(phase2CTimelineSamples);
+        var phase2FVerdicts = TitleBackgroundCameraProbeReport.AnalyzePhase2F(phase2FCurveSamples);
         var effectiveOverrideTerritoryId = GetEffectiveOverrideTerritoryId();
         var lines = new List<string>
         {
@@ -532,6 +538,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"phase2E.calculateLobbyCameraLookAtY.recordedCallCount={_phase2ECalculateLookAtYCalls.Count}",
             $"phase2E.calculateLobbyCameraLookAtY.lastError={FormatNone(_phase2ECalculateLookAtYLastError)}",
             $"phase2E.calculateLobbyCameraLookAtY.finalStableLookAtY={FormatFloat(phase2EFinalStableLookAtY)}",
+            $"phase2F.curveTimeline.firstCapturedFrame={FormatFrame(phase2FVerdicts.FirstCapturedFrame)}",
+            $"phase2F.curveTimeline.lastChangedFrame={FormatFrame(phase2FVerdicts.LastChangedFrame)}",
+            $"phase2F.curveTimeline.curveGeneratedEarly={phase2FVerdicts.CurveGeneratedEarly}",
+            $"phase2F.curveTimeline.curveStableByFinalWindow={phase2FVerdicts.CurveStableByFinalWindow}",
+            $"phase2F.curveTimeline.curveRegeneratedAfterEarlyFrame={phase2FVerdicts.CurveRegeneratedAfterEarlyFrame}",
+            $"phase2F.curveTimeline.oneShotWriteViability={phase2FVerdicts.OneShotWriteViability}",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
             $"cameraCapture.lastStatus={_lastCameraCaptureResult.Status}",
@@ -603,6 +615,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             "Phase2C.timeline=scene-ready-accepted-relative-frames; early reflection/stability probe for runtime restore, curve apply, and LobbyCamera.LastLookAtVector.Y",
             "Phase2D.timeline=extended-scene-ready-accepted-relative-frames; character-select ActiveCamera/LobbyCamera samples through frame 600",
             "Phase2D.verdictScope=timeline-only; finalCameraStabilizationObserved and distanceEventuallyOverwritten are based on character-select samples, not report-time current camera",
+            "Phase2F.timeline=extended-scene-ready-accepted-relative-frames; read-only LobbyCameraExpanded curve point samples through frame 600",
         };
 
         foreach (var sample in phase2CTimelineSamples)
@@ -631,6 +644,20 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             lines.Add($"phase2D.timeline[{sample.Frame}].lobbyCamera.error={FormatNone(sample.LobbyCameraError)}");
             lines.Add($"phase2D.timeline[{sample.Frame}].lobbyCamera.LastLookAtVector={FormatVector(sample.LobbyLastLookAtVector)}");
             lines.Add($"phase2D.timeline[{sample.Frame}].lobbyCamera.tiltOffsetReadback=readback unavailable");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.captureStatus={(sample.ExpandedLobbyCameraCaptured ? "success" : "failed")}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.error={FormatNone(sample.ExpandedLobbyCameraError)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.CameraCurveEnabled={FormatBool(sample.CameraCurveEnabled)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.LowPoint.Position={FormatFloat(sample.LowPoint?.X)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.LowPoint.Value={FormatFloat(sample.LowPoint?.Y)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.MidPoint.Position={FormatFloat(sample.MidPoint?.X)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.MidPoint.Value={FormatFloat(sample.MidPoint?.Y)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.HighPoint.Position={FormatFloat(sample.HighPoint?.X)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.HighPoint.Value={FormatFloat(sample.HighPoint?.Y)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.lowPoint={FormatCurvePoint(sample.LowPoint)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.midPoint={FormatCurvePoint(sample.MidPoint)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].expandedLobbyCamera.highPoint={FormatCurvePoint(sample.HighPoint)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].activeCamera.Distance={FormatFloat(sample.Distance)}");
+            lines.Add($"phase2F.timeline[{sample.Frame}].activeCamera.SceneCamera.LookAtVector.Y={FormatFloat(sample.SceneCameraLookAtVector?.Y)}");
         }
 
         foreach (var call in _phase2ECalculateLookAtYCalls)
@@ -1592,6 +1619,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
         var activeCaptured = TryCaptureActiveCameraSnapshot(out var activeCamera, out var activeError);
         var lobbyCaptured = TryCaptureLobbyCameraSnapshot(out var lobbyCamera, out var lobbyError);
+        var expandedCaptured = TryCaptureExpandedLobbyCameraSnapshot(out var expandedLobbyCamera, out var expandedError);
         _phase2CTimelineSnapshots[frame] = new TitleBackgroundPhase2CTimelineSnapshot(
             frame,
             activeCaptured,
@@ -1604,14 +1632,20 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             activeCaptured ? activeCamera.LookAtVector : null,
             lobbyCaptured,
             lobbyCaptured ? string.Empty : lobbyError,
-            lobbyCaptured ? lobbyCamera.LastLookAtVector : null);
+            lobbyCaptured ? lobbyCamera.LastLookAtVector : null,
+            expandedCaptured,
+            expandedCaptured ? string.Empty : expandedError,
+            expandedCaptured ? expandedLobbyCamera.CameraCurveEnabled : null,
+            expandedCaptured ? expandedLobbyCamera.LowPoint : null,
+            expandedCaptured ? expandedLobbyCamera.MidPoint : null,
+            expandedCaptured ? expandedLobbyCamera.HighPoint : null);
 
         _phase2CTimelineStatus = frame >= CameraProbeTimelineFrames[^1]
             ? "complete"
             : "collecting";
-        _phase2CTimelineError = activeCaptured || lobbyCaptured
+        _phase2CTimelineError = activeCaptured || lobbyCaptured || expandedCaptured
             ? string.Empty
-            : $"frame {frame}: active={activeError}; lobby={lobbyError}";
+            : $"frame {frame}: active={activeError}; lobby={lobbyError}; expandedLobby={expandedError}";
     }
 
     private IReadOnlyList<TitleBackgroundPhase2CTimelineSnapshot> BuildPhase2CTimelineSamples()
@@ -1635,6 +1669,23 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 call.Frame,
                 call.ReturnValue,
                 call.ActiveLookAtYAfterOriginal))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> BuildPhase2FCurveTimelineSamples(
+        IReadOnlyList<TitleBackgroundPhase2CTimelineSnapshot> samples)
+    {
+        return samples
+            .Select(sample => new TitleBackgroundPhase2FCurveTimelineSample(
+                sample.Frame,
+                sample.ExpandedLobbyCameraCaptured,
+                sample.CameraCurveEnabled,
+                sample.LowPoint?.X,
+                sample.LowPoint?.Y,
+                sample.MidPoint?.X,
+                sample.MidPoint?.Y,
+                sample.HighPoint?.X,
+                sample.HighPoint?.Y))
             .ToArray();
     }
 
@@ -1701,6 +1752,52 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             errorMessage = ex.Message;
             _log.Warning(ex, "TitleBackground lobby camera capture failed.");
+            return false;
+        }
+    }
+
+    private bool TryCaptureExpandedLobbyCameraSnapshot(out TitleBackgroundExpandedLobbyCameraSnapshot snapshot, out string errorMessage)
+    {
+        snapshot = default;
+        errorMessage = string.Empty;
+        try
+        {
+            var cameraManager = CameraManager.Instance();
+            if (cameraManager == null)
+            {
+                errorMessage = "CameraManager.Instance() unavailable";
+                return false;
+            }
+
+            var lobbyCamera = cameraManager->LobbyCamera;
+            if (lobbyCamera == null)
+            {
+                errorMessage = "LobbyCamera unavailable";
+                return false;
+            }
+
+            var baseAddress = (byte*)lobbyCamera;
+            var cameraCurveEnabled = *(byte*)(baseAddress + LobbyCameraExpandedCameraCurveEnabledOffset) != 0;
+            var lowPoint = ReadCurvePoint((CurvePoint*)(baseAddress + LobbyCameraExpandedLowPointOffset));
+            var midPoint = ReadCurvePoint((CurvePoint*)(baseAddress + LobbyCameraExpandedMidPointOffset));
+            var highPoint = ReadCurvePoint((CurvePoint*)(baseAddress + LobbyCameraExpandedHighPointOffset));
+            if (!lowPoint.HasValue || !midPoint.HasValue || !highPoint.HasValue)
+            {
+                errorMessage = "LobbyCameraExpanded curve point contains non-finite values";
+                return false;
+            }
+
+            snapshot = new TitleBackgroundExpandedLobbyCameraSnapshot(
+                cameraCurveEnabled,
+                lowPoint.Value,
+                midPoint.Value,
+                highPoint.Value);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            _log.Warning(ex, "TitleBackground expanded lobby camera capture failed.");
             return false;
         }
     }
@@ -2833,6 +2930,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return value.HasValue ? value.Value.ToString() : "none";
     }
 
+    private static string FormatBool(bool? value)
+    {
+        return value.HasValue ? value.Value.ToString() : "none";
+    }
+
     private static string FormatUnavailable(float? value, string status)
     {
         return value.HasValue ? FormatFloat(value) : FormatNone(status);
@@ -3206,6 +3308,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private readonly record struct TitleBackgroundLobbyCameraSnapshot(
         Vector3 LastLookAtVector);
 
+    private readonly record struct TitleBackgroundExpandedLobbyCameraSnapshot(
+        bool CameraCurveEnabled,
+        TitleBackgroundCurvePointSnapshot LowPoint,
+        TitleBackgroundCurvePointSnapshot MidPoint,
+        TitleBackgroundCurvePointSnapshot HighPoint);
+
     private readonly record struct TitleBackgroundCurvePointSnapshot(
         float X,
         float Y);
@@ -3241,7 +3349,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         Vector3? SceneCameraLookAtVector,
         bool LobbyCameraCaptured,
         string LobbyCameraError,
-        Vector3? LobbyLastLookAtVector)
+        Vector3? LobbyLastLookAtVector,
+        bool ExpandedLobbyCameraCaptured,
+        string ExpandedLobbyCameraError,
+        bool? CameraCurveEnabled,
+        TitleBackgroundCurvePointSnapshot? LowPoint,
+        TitleBackgroundCurvePointSnapshot? MidPoint,
+        TitleBackgroundCurvePointSnapshot? HighPoint)
     {
         public static TitleBackgroundPhase2CTimelineSnapshot Missing(int frame)
         {
@@ -3257,6 +3371,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 null,
                 false,
                 "missing",
+                null,
+                false,
+                "missing",
+                null,
+                null,
+                null,
                 null);
         }
     }

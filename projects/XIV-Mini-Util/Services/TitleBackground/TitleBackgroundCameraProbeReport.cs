@@ -63,6 +63,25 @@ internal readonly record struct TitleBackgroundPhase2EAnalysis(
     string NativeReturnMatchesFinalStableLookAtY,
     int ComparedCallCount);
 
+internal readonly record struct TitleBackgroundPhase2FCurveTimelineSample(
+    int Frame,
+    bool Captured,
+    bool? CameraCurveEnabled,
+    float? LowPosition,
+    float? LowValue,
+    float? MidPosition,
+    float? MidValue,
+    float? HighPosition,
+    float? HighValue);
+
+internal readonly record struct TitleBackgroundPhase2FAnalysis(
+    string CurveGeneratedEarly,
+    string CurveStableByFinalWindow,
+    string CurveRegeneratedAfterEarlyFrame,
+    string OneShotWriteViability,
+    int? FirstCapturedFrame,
+    int? LastChangedFrame);
+
 internal readonly record struct TitleBackgroundCameraProbeReportInput(
     bool Armed,
     Vector3 BaselineCamera,
@@ -91,7 +110,9 @@ internal static class TitleBackgroundCameraProbeReport
     public const float StabilizationDistanceTolerance = 0.02f;
     public const float StabilizationAngleTolerance = 0.01f;
     public const float StabilizationVectorTolerance = 0.05f;
+    public const float CurvePointTolerance = 0.001f;
     public const int FinalStabilizationMinimumFrame = 300;
+    public const int EarlyCurveGenerationMaximumFrame = 16;
 
     public static TitleBackgroundCameraProbeReportResult Evaluate(TitleBackgroundCameraProbeReportInput input)
     {
@@ -209,6 +230,48 @@ internal static class TitleBackgroundCameraProbeReport
             nativeReturnMatchesActiveLookAtY,
             nativeReturnMatchesFinalStableLookAtY,
             comparedCalls.Length);
+    }
+
+    public static TitleBackgroundPhase2FAnalysis AnalyzePhase2F(
+        IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> samples)
+    {
+        var captured = samples
+            .Where(HasFullCurvePointValue)
+            .OrderBy(sample => sample.Frame)
+            .ToArray();
+        if (captured.Length == 0)
+        {
+            return new TitleBackgroundPhase2FAnalysis(
+                "inconclusive",
+                "inconclusive",
+                "inconclusive",
+                "inconclusive",
+                null,
+                null);
+        }
+
+        var firstCapturedFrame = captured[0].Frame;
+        var lastChangedFrame = FindLastChangedFrame(captured);
+        var stableByFinalWindow = EvaluateFinalCurveStability(captured);
+        var generatedEarly = firstCapturedFrame <= EarlyCurveGenerationMaximumFrame
+            ? "observed"
+            : "not-observed";
+        var regeneratedAfterEarlyFrame = lastChangedFrame.HasValue && lastChangedFrame.Value > EarlyCurveGenerationMaximumFrame
+            ? "observed"
+            : "not-observed";
+        var oneShotWriteViability = stableByFinalWindow == "observed" && regeneratedAfterEarlyFrame == "not-observed"
+            ? "plausible"
+            : stableByFinalWindow == "observed"
+                ? "risky"
+                : "inconclusive";
+
+        return new TitleBackgroundPhase2FAnalysis(
+            generatedEarly,
+            stableByFinalWindow,
+            regeneratedAfterEarlyFrame,
+            oneShotWriteViability,
+            firstCapturedFrame,
+            lastChangedFrame);
     }
 
     public static string DescribeCoincidentEvents(
@@ -390,6 +453,44 @@ internal static class TitleBackgroundCameraProbeReport
         return "observed";
     }
 
+    private static string EvaluateFinalCurveStability(IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> samples)
+    {
+        var stableWindow = samples
+            .Where(sample => sample.Frame >= FinalStabilizationMinimumFrame && HasFullCurvePointValue(sample))
+            .OrderByDescending(sample => sample.Frame)
+            .Take(3)
+            .OrderBy(sample => sample.Frame)
+            .ToArray();
+        if (stableWindow.Length < 3)
+        {
+            return "inconclusive";
+        }
+
+        for (var i = 1; i < stableWindow.Length; i++)
+        {
+            if (!IsCurveStablePair(stableWindow[i - 1], stableWindow[i]))
+            {
+                return "not-observed";
+            }
+        }
+
+        return "observed";
+    }
+
+    private static int? FindLastChangedFrame(IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> samples)
+    {
+        int? lastChangedFrame = null;
+        for (var i = 1; i < samples.Count; i++)
+        {
+            if (!IsCurveStablePair(samples[i - 1], samples[i]))
+            {
+                lastChangedFrame = samples[i].Frame;
+            }
+        }
+
+        return lastChangedFrame;
+    }
+
     private static bool HasAnyPhase2DCameraValue(TitleBackgroundPhase2DTimelineSample sample)
     {
         return sample.SceneCameraPosition.HasValue
@@ -406,6 +507,18 @@ internal static class TitleBackgroundCameraProbeReport
             && sample.Distance.HasValue
             && sample.DirH.HasValue
             && sample.DirV.HasValue;
+    }
+
+    private static bool HasFullCurvePointValue(TitleBackgroundPhase2FCurveTimelineSample sample)
+    {
+        return sample.Captured
+            && sample.CameraCurveEnabled.HasValue
+            && sample.LowPosition.HasValue
+            && sample.LowValue.HasValue
+            && sample.MidPosition.HasValue
+            && sample.MidValue.HasValue
+            && sample.HighPosition.HasValue
+            && sample.HighValue.HasValue;
     }
 
     private static bool IsStablePair(TitleBackgroundPhase2DTimelineSample previous, TitleBackgroundPhase2DTimelineSample current)
@@ -426,6 +539,24 @@ internal static class TitleBackgroundCameraProbeReport
             && Math.Abs(distanceDelta.Value) <= StabilizationDistanceTolerance
             && Math.Abs(dirHDelta.Value) <= StabilizationAngleTolerance
             && Math.Abs(dirVDelta.Value) <= StabilizationAngleTolerance;
+    }
+
+    private static bool IsCurveStablePair(TitleBackgroundPhase2FCurveTimelineSample previous, TitleBackgroundPhase2FCurveTimelineSample current)
+    {
+        return previous.CameraCurveEnabled == current.CameraCurveEnabled
+            && IsStableFloat(previous.LowPosition, current.LowPosition, CurvePointTolerance)
+            && IsStableFloat(previous.LowValue, current.LowValue, CurvePointTolerance)
+            && IsStableFloat(previous.MidPosition, current.MidPosition, CurvePointTolerance)
+            && IsStableFloat(previous.MidValue, current.MidValue, CurvePointTolerance)
+            && IsStableFloat(previous.HighPosition, current.HighPosition, CurvePointTolerance)
+            && IsStableFloat(previous.HighValue, current.HighValue, CurvePointTolerance);
+    }
+
+    private static bool IsStableFloat(float? previous, float? current, float tolerance)
+    {
+        return previous.HasValue
+            && current.HasValue
+            && Math.Abs(current.Value - previous.Value) <= tolerance;
     }
 
     private static string FormatEventCounts(TitleBackgroundCameraProbeTimelineEventCounts events)

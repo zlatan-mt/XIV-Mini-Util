@@ -1044,6 +1044,43 @@ Test("title background phase2e detects native return matching active look at y",
         && result.ComparedCallCount == 2;
 });
 
+Test("title background phase2f accepts early stable curve timeline for one shot write", () =>
+{
+    var samples = new[]
+    {
+        new TitleBackgroundPhase2FCurveTimelineSample(0, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(16, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(300, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(450, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(600, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+    };
+
+    var result = TitleBackgroundCameraProbeReport.AnalyzePhase2F(samples);
+    return result.CurveGeneratedEarly == "observed"
+        && result.CurveStableByFinalWindow == "observed"
+        && result.CurveRegeneratedAfterEarlyFrame == "not-observed"
+        && result.OneShotWriteViability == "plausible";
+});
+
+Test("title background phase2f flags late curve regeneration as one shot risk", () =>
+{
+    var samples = new[]
+    {
+        new TitleBackgroundPhase2FCurveTimelineSample(0, true, true, 1.1f, 1.1f, 3.3f, 0.7f, 5.5f, 0.5f),
+        new TitleBackgroundPhase2FCurveTimelineSample(60, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(300, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(450, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(600, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+    };
+
+    var result = TitleBackgroundCameraProbeReport.AnalyzePhase2F(samples);
+    return result.CurveGeneratedEarly == "observed"
+        && result.CurveStableByFinalWindow == "observed"
+        && result.CurveRegeneratedAfterEarlyFrame == "observed"
+        && result.LastChangedFrame == 60
+        && result.OneShotWriteViability == "risky";
+});
+
 Test("title background capture preset builder keeps existing fov when unavailable", () =>
 {
     var existing = new TitleBackgroundPreset
