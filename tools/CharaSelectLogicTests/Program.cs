@@ -1030,6 +1030,20 @@ Test("title background phase2d analysis reports unstabilized late camera", () =>
         && result.DistanceEventuallyOverwritten == "observed";
 });
 
+Test("title background phase2e detects native return matching active look at y", () =>
+{
+    var samples = new[]
+    {
+        new TitleBackgroundPhase2EProbeSample(1, 0, 10f, 9.8f),
+        new TitleBackgroundPhase2EProbeSample(2, 1, 14.6f, 14.6f),
+    };
+
+    var result = TitleBackgroundCameraProbeReport.AnalyzePhase2E(samples, finalStableLookAtY: 14.6f);
+    return result.NativeReturnMatchesActiveLookAtY == "observed"
+        && result.NativeReturnMatchesFinalStableLookAtY == "observed"
+        && result.ComparedCallCount == 2;
+});
+
 Test("title background capture preset builder keeps existing fov when unavailable", () =>
 {
     var existing = new TitleBackgroundPreset

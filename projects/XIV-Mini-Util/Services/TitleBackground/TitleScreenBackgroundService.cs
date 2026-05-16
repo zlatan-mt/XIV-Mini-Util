@@ -29,6 +29,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private Hook<LoadLobbySceneDelegate>? _loadLobbySceneHook;
     private Hook<LobbySceneLoadedDelegate>? _lobbySceneLoadedHook;
     private Hook<LobbyCameraFixOnDelegate>? _cameraFixOnHook;
+    private Hook<CalculateLobbyCameraLookAtYDelegate>? _calculateLobbyCameraLookAtYHook;
     private TitleBackgroundServiceState _state = TitleBackgroundServiceState.Disabled;
     private string _stateReason = "無効";
     private string _validatedTerritoryPath = string.Empty;
@@ -113,7 +114,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private string _phase2CTimelineStatus = "not-run";
     private string _phase2CTimelineError = string.Empty;
     private readonly Dictionary<int, TitleBackgroundPhase2CTimelineSnapshot> _phase2CTimelineSnapshots = [];
+    private readonly List<TitleBackgroundPhase2ECalculateLookAtYCall> _phase2ECalculateLookAtYCalls = [];
+    private int _phase2ECalculateLookAtYCallCount;
+    private string _phase2ECalculateLookAtYLastError = string.Empty;
     private static readonly int[] CameraProbeTimelineFrames = [0, 1, 2, 4, 8, 16, 30, 60, 90, 120, 180, 240, 300, 450, 600];
+    private const int Phase2EMaxRecordedCalls = 64;
 
     private GameLobbyType EffectiveLobbyType =>
         _loadingLobbyType != GameLobbyType.None
@@ -364,7 +369,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             || IsHookEnabled(_lobbyUpdateHook)
             || IsHookEnabled(_loadLobbySceneHook)
             || IsHookEnabled(_lobbySceneLoadedHook)
-            || IsHookEnabled(_cameraFixOnHook);
+            || IsHookEnabled(_cameraFixOnHook)
+            || IsHookEnabled(_calculateLobbyCameraLookAtYHook);
         var capturePreset = _lastCameraCaptureResult.Preset;
         var currentCameraCaptured = TryCaptureActiveCameraSnapshot(out var currentCamera, out var currentCaptureError);
         var currentCaptureStatus = currentCameraCaptured ? "success" : "failed";
@@ -387,6 +393,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             .OrderByDescending(sample => sample.Frame)
             .FirstOrDefault();
         var phase2DVerdicts = BuildPhase2DVerdicts(phase2CTimelineSamples);
+        var phase2ECallSamples = BuildPhase2EProbeSamples();
+        var phase2EFinalStableLookAtY = phase2DLatestSample.ActiveCameraCaptured
+            ? phase2DLatestSample.SceneCameraLookAtVector?.Y
+            : null;
+        var phase2EVerdicts = TitleBackgroundCameraProbeReport.AnalyzePhase2E(
+            phase2ECallSamples,
+            phase2EFinalStableLookAtY);
         var effectiveOverrideTerritoryId = GetEffectiveOverrideTerritoryId();
         var lines = new List<string>
         {
@@ -419,7 +432,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"cameraHookReady={cameraHookReady}",
             $"cameraHookRequired={cameraHookRequired}",
             $"cameraHookEnabled={IsHookEnabled(_cameraFixOnHook)}",
+            $"calculateLobbyCameraLookAtYHookEnabled={IsHookEnabled(_calculateLobbyCameraLookAtYHook)}",
             "fixOnHookPolicy=disabled-in-phase1",
+            "calculateLobbyCameraLookAtYHookPolicy=read-only-probe",
             $"cameraOverrideEnabled={_configuration.TitleBackgroundCameraOverrideEnabled}",
             $"charaSelectCameraAdapter.state={_charaSelectCameraAdapter.State}",
             $"charaSelectCameraAdapter.lastEvent={_charaSelectCameraAdapter.LastEvent}",
@@ -510,6 +525,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"verdict.finalCameraStabilizationObserved={phase2DVerdicts.FinalCameraStabilizationObserved}",
             $"verdict.distanceEventuallyOverwritten={phase2DVerdicts.DistanceEventuallyOverwritten}",
             $"verdict.sceneTransformShiftObserved={phase2DVerdicts.SceneTransformShiftObserved}",
+            $"verdict.phase2E.nativeReturnMatchesActiveLookAtY={phase2EVerdicts.NativeReturnMatchesActiveLookAtY}",
+            $"verdict.phase2E.nativeReturnMatchesFinalStableLookAtY={phase2EVerdicts.NativeReturnMatchesFinalStableLookAtY}",
+            $"verdict.phase2E.comparedCallCount={phase2EVerdicts.ComparedCallCount}",
+            $"phase2E.calculateLobbyCameraLookAtY.callCount={_phase2ECalculateLookAtYCallCount}",
+            $"phase2E.calculateLobbyCameraLookAtY.recordedCallCount={_phase2ECalculateLookAtYCalls.Count}",
+            $"phase2E.calculateLobbyCameraLookAtY.lastError={FormatNone(_phase2ECalculateLookAtYLastError)}",
+            $"phase2E.calculateLobbyCameraLookAtY.finalStableLookAtY={FormatFloat(phase2EFinalStableLookAtY)}",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
             $"cameraCapture.lastStatus={_lastCameraCaptureResult.Status}",
@@ -611,6 +633,21 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             lines.Add($"phase2D.timeline[{sample.Frame}].lobbyCamera.tiltOffsetReadback=readback unavailable");
         }
 
+        foreach (var call in _phase2ECalculateLookAtYCalls)
+        {
+            lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].frame={FormatFrame(call.Frame)}");
+            lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].distance={FormatFloat(call.Distance)}");
+            lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].lowPoint={FormatCurvePoint(call.LowPoint)}");
+            lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].midPoint={FormatCurvePoint(call.MidPoint)}");
+            lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].highPoint={FormatCurvePoint(call.HighPoint)}");
+            lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].returnValue={FormatFloat(call.ReturnValue)}");
+            lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].activeLookAtY.before={FormatFloat(call.ActiveLookAtYBeforeOriginal)}");
+            lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].activeLookAtY.after={FormatFloat(call.ActiveLookAtYAfterOriginal)}");
+            lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].returnToActiveAfterDelta={FormatFloatDelta(call.ReturnValue, call.ActiveLookAtYAfterOriginal)}");
+            lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].status={call.Status}");
+            lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].error={FormatNone(call.Error)}");
+        }
+
         lines.AddRange(
         [
             "",
@@ -662,6 +699,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             "LobbyCameraFixOn.method=TryScanText",
             $"LobbyCameraFixOn.hookTargetVerified={GetHookTargetVerified("LobbyCameraFixOn")}",
             $"LobbyCameraFixOn.targetWithinText={GetTargetWithinText("LobbyCameraFixOn")}",
+            "",
+            BuildAddressLine("CalculateLobbyCameraLookAtY.configured", _configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature),
+            $"CalculateLobbyCameraLookAtY.address={FormatAddress(_addressResolver.CalculateLobbyCameraLookAtY)}",
+            "CalculateLobbyCameraLookAtY.method=TryScanText",
+            $"CalculateLobbyCameraLookAtY.hookTargetVerified={GetHookTargetVerified("CalculateLobbyCameraLookAtY")}",
+            $"CalculateLobbyCameraLookAtY.targetWithinText={GetTargetWithinText("CalculateLobbyCameraLookAtY")}",
             "",
             "UpdateLobbyUIStage.optional=True",
             $"UpdateLobbyUIStage.address={FormatAddress(_addressResolver.UpdateLobbyUIStage)}",
@@ -1115,10 +1158,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 _lobbySceneLoadedHook = _gameInteropProvider.HookFromAddress<LobbySceneLoadedDelegate>(_addressResolver.UpdateLobbyUIStage, LobbySceneLoadedDetour);
             }
 
+            if (_addressResolver.CalculateLobbyCameraLookAtY != nint.Zero)
+            {
+                _calculateLobbyCameraLookAtYHook = _gameInteropProvider.HookFromAddress<CalculateLobbyCameraLookAtYDelegate>(
+                    _addressResolver.CalculateLobbyCameraLookAtY,
+                    CalculateLobbyCameraLookAtYDetour);
+            }
+
             _createSceneHook.Enable();
             _lobbyUpdateHook.Enable();
             _loadLobbySceneHook.Enable();
             _lobbySceneLoadedHook?.Enable();
+            _calculateLobbyCameraLookAtYHook?.Enable();
 
             _state = TitleBackgroundServiceState.Disabled;
             _stateReason = "無効";
@@ -1135,6 +1186,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private void LoadLobbySceneDetour(GameLobbyType mapId)
     {
         RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.LoadLobbyScene);
+        if (TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(mapId))
+        {
+            ResetPhase2ECalculateLookAtYObservation();
+        }
+
         _loadingLobbyType = mapId;
         RecordCharaSelectRuntimeCameraStateBeforeSceneReload(mapId);
         _charaSelectCameraAdapter.NotifySceneLoadStarted(mapId);
@@ -1341,6 +1397,65 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return result;
     }
 
+    private float CalculateLobbyCameraLookAtYDetour(
+        nint self,
+        float distance,
+        CurvePoint* lowPoint,
+        CurvePoint* midPoint,
+        CurvePoint* highPoint)
+    {
+        var callIndex = ++_phase2ECalculateLookAtYCallCount;
+        var frame = GetCurrentPhase2CFrame();
+        var low = ReadCurvePoint(lowPoint);
+        var mid = ReadCurvePoint(midPoint);
+        var high = ReadCurvePoint(highPoint);
+        var activeBefore = TryCaptureActiveCameraSnapshot(out var beforeSnapshot, out _)
+            ? beforeSnapshot.LookAtVector.Y
+            : (float?)null;
+        float returnValue;
+        try
+        {
+            returnValue = _calculateLobbyCameraLookAtYHook?.Original(self, distance, lowPoint, midPoint, highPoint) ?? 0f;
+        }
+        catch (Exception ex)
+        {
+            _phase2ECalculateLookAtYLastError = ex.Message;
+            RecordPhase2ECalculateLookAtYCall(new TitleBackgroundPhase2ECalculateLookAtYCall(
+                callIndex,
+                frame,
+                distance,
+                low,
+                mid,
+                high,
+                null,
+                activeBefore,
+                null,
+                "original-error",
+                ex.Message));
+            throw;
+        }
+
+        var activeAfter = TryCaptureActiveCameraSnapshot(out var afterSnapshot, out var afterError)
+            ? afterSnapshot.LookAtVector.Y
+            : (float?)null;
+        var status = activeAfter.HasValue ? "success" : "active-camera-unavailable";
+        var error = activeAfter.HasValue ? string.Empty : afterError;
+        _phase2ECalculateLookAtYLastError = error;
+        RecordPhase2ECalculateLookAtYCall(new TitleBackgroundPhase2ECalculateLookAtYCall(
+            callIndex,
+            frame,
+            distance,
+            low,
+            mid,
+            high,
+            float.IsFinite(returnValue) ? returnValue : null,
+            activeBefore,
+            activeAfter,
+            status,
+            error));
+        return returnValue;
+    }
+
     private void OnFrameworkUpdate(IFramework _)
     {
         if (_disposed)
@@ -1510,6 +1625,46 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
 
         return samples;
+    }
+
+    private IReadOnlyList<TitleBackgroundPhase2EProbeSample> BuildPhase2EProbeSamples()
+    {
+        return _phase2ECalculateLookAtYCalls
+            .Select(call => new TitleBackgroundPhase2EProbeSample(
+                call.CallIndex,
+                call.Frame,
+                call.ReturnValue,
+                call.ActiveLookAtYAfterOriginal))
+            .ToArray();
+    }
+
+    private void RecordPhase2ECalculateLookAtYCall(TitleBackgroundPhase2ECalculateLookAtYCall call)
+    {
+        _phase2ECalculateLookAtYCalls.Add(call);
+        while (_phase2ECalculateLookAtYCalls.Count > Phase2EMaxRecordedCalls)
+        {
+            _phase2ECalculateLookAtYCalls.RemoveAt(0);
+        }
+    }
+
+    private void ResetPhase2ECalculateLookAtYObservation()
+    {
+        _phase2ECalculateLookAtYCallCount = 0;
+        _phase2ECalculateLookAtYLastError = string.Empty;
+        _phase2ECalculateLookAtYCalls.Clear();
+    }
+
+    private static TitleBackgroundCurvePointSnapshot? ReadCurvePoint(CurvePoint* point)
+    {
+        if (point == null)
+        {
+            return null;
+        }
+
+        var snapshot = new TitleBackgroundCurvePointSnapshot(point->X, point->Y);
+        return float.IsFinite(snapshot.X) && float.IsFinite(snapshot.Y)
+            ? snapshot
+            : null;
     }
 
     private bool TryCaptureLobbyCameraSnapshot(out TitleBackgroundLobbyCameraSnapshot snapshot, out string errorMessage)
@@ -2282,6 +2437,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundLobbyUpdateSignature = NormalizeSignature(_configuration.TitleBackgroundLobbyUpdateSignature);
         _configuration.TitleBackgroundLoadLobbySceneSignature = NormalizeSignature(_configuration.TitleBackgroundLoadLobbySceneSignature);
         _configuration.TitleBackgroundLobbyCurrentMapSignature = NormalizeSignature(_configuration.TitleBackgroundLobbyCurrentMapSignature);
+        _configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature = NormalizeSignature(_configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature);
         TitleBackgroundPresetApplicator.ClearInvalidSelectedPreset(_configuration);
     }
 
@@ -2433,6 +2589,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _phase2CTimelineStatus = "not-run";
         _phase2CTimelineError = string.Empty;
         _phase2CTimelineSnapshots.Clear();
+        ResetPhase2ECalculateLookAtYObservation();
         ClearPostFixOnCameraObservation();
         _lastPostFixOnCameraCaptureStatus = "not-run";
     }
@@ -2463,11 +2620,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private void DisposeHooks()
     {
         DisposeHook(_cameraFixOnHook, nameof(_cameraFixOnHook));
+        DisposeHook(_calculateLobbyCameraLookAtYHook, nameof(_calculateLobbyCameraLookAtYHook));
         DisposeHook(_lobbySceneLoadedHook, nameof(_lobbySceneLoadedHook));
         DisposeHook(_loadLobbySceneHook, nameof(_loadLobbySceneHook));
         DisposeHook(_lobbyUpdateHook, nameof(_lobbyUpdateHook));
         DisposeHook(_createSceneHook, nameof(_createSceneHook));
         _cameraFixOnHook = null;
+        _calculateLobbyCameraLookAtYHook = null;
         _lobbySceneLoadedHook = null;
         _loadLobbySceneHook = null;
         _lobbyUpdateHook = null;
@@ -2677,6 +2836,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private static string FormatUnavailable(float? value, string status)
     {
         return value.HasValue ? FormatFloat(value) : FormatNone(status);
+    }
+
+    private static string FormatCurvePoint(TitleBackgroundCurvePointSnapshot? value)
+    {
+        return value.HasValue
+            ? $"({FormatFloat(value.Value.X)}, {FormatFloat(value.Value.Y)})"
+            : "none";
     }
 
     private static string FormatNullableInt(int? value)
@@ -2979,7 +3145,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             || IsHookEnabled(_lobbyUpdateHook)
             || IsHookEnabled(_loadLobbySceneHook)
             || IsHookEnabled(_lobbySceneLoadedHook)
-            || IsHookEnabled(_cameraFixOnHook);
+            || IsHookEnabled(_cameraFixOnHook)
+            || IsHookEnabled(_calculateLobbyCameraLookAtYHook);
     }
 
     private static TitleBackgroundResolverMode NormalizeResolverMode(TitleBackgroundResolverMode mode)
@@ -3005,6 +3172,21 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     // UNVERIFIED ABI - DO NOT ENABLE BY DEFAULT. Phase 1 does not create this hook.
     private delegate nint LobbyCameraFixOnDelegate(nint self, float* cameraPos, float* focusPos, float fovY);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float CalculateLobbyCameraLookAtYDelegate(
+        nint self,
+        float distance,
+        CurvePoint* lowPoint,
+        CurvePoint* midPoint,
+        CurvePoint* highPoint);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CurvePoint
+    {
+        public float X;
+        public float Y;
+    }
+
     private readonly record struct TitleBackgroundActiveCameraSnapshot(
         Vector3 SceneCameraPosition,
         Vector3 LookAtVector,
@@ -3023,6 +3205,23 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private readonly record struct TitleBackgroundLobbyCameraSnapshot(
         Vector3 LastLookAtVector);
+
+    private readonly record struct TitleBackgroundCurvePointSnapshot(
+        float X,
+        float Y);
+
+    private readonly record struct TitleBackgroundPhase2ECalculateLookAtYCall(
+        int CallIndex,
+        int? Frame,
+        float Distance,
+        TitleBackgroundCurvePointSnapshot? LowPoint,
+        TitleBackgroundCurvePointSnapshot? MidPoint,
+        TitleBackgroundCurvePointSnapshot? HighPoint,
+        float? ReturnValue,
+        float? ActiveLookAtYBeforeOriginal,
+        float? ActiveLookAtYAfterOriginal,
+        string Status,
+        string Error);
 
     private readonly record struct TitleBackgroundPhase2CVerdicts(
         string LookAtYImmediateReflection,

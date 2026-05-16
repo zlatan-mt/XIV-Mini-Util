@@ -106,6 +106,7 @@ public sealed class Configuration : IPluginConfiguration
     public string TitleBackgroundLobbyUpdateSignature { get; set; } = "E8 ?? ?? ?? ?? 80 BF ?? ?? ?? ?? ?? 48 8D 35";
     public string TitleBackgroundLoadLobbySceneSignature { get; set; } = "48 89 5C 24 ?? 57 48 83 EC ?? 8B D9 E8";
     public string TitleBackgroundLobbyCurrentMapSignature { get; set; } = "66 89 05 ?? ?? ?? ?? 66 89 05 ?? ?? ?? ?? 66 89 05 ?? ?? ?? ?? 48 8B 4B";
+    public string TitleBackgroundCalculateLobbyCameraLookAtYSignature { get; set; } = "48 83 EC ?? F3 41 0F 10 01 0F 28 D1";
 
     private IDalamudPluginInterface? _pluginInterface;
 
@@ -299,6 +300,7 @@ public sealed class Configuration : IPluginConfiguration
         TitleBackgroundLobbyUpdateSignature = NormalizeSignature(source.TitleBackgroundLobbyUpdateSignature);
         TitleBackgroundLoadLobbySceneSignature = NormalizeSignature(source.TitleBackgroundLoadLobbySceneSignature);
         TitleBackgroundLobbyCurrentMapSignature = NormalizeSignature(source.TitleBackgroundLobbyCurrentMapSignature);
+        TitleBackgroundCalculateLobbyCameraLookAtYSignature = NormalizeSignature(source.TitleBackgroundCalculateLobbyCameraLookAtYSignature);
         NormalizeAndMigrate();
     }
 
@@ -609,6 +611,7 @@ public sealed class Configuration : IPluginConfiguration
         changed |= NormalizeSignatureProperty(TitleBackgroundLobbyUpdateSignature, value => TitleBackgroundLobbyUpdateSignature = value);
         changed |= NormalizeSignatureProperty(TitleBackgroundLoadLobbySceneSignature, value => TitleBackgroundLoadLobbySceneSignature = value);
         changed |= NormalizeSignatureProperty(TitleBackgroundLobbyCurrentMapSignature, value => TitleBackgroundLobbyCurrentMapSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundCalculateLobbyCameraLookAtYSignature, value => TitleBackgroundCalculateLobbyCameraLookAtYSignature = value);
         changed |= TitleBackgroundPresetApplicator.ClearInvalidSelectedPreset(this);
 
         return changed;

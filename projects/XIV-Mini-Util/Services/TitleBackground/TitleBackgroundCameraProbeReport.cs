@@ -52,6 +52,17 @@ internal readonly record struct TitleBackgroundPhase2DAnalysis(
     string DistanceEventuallyOverwritten,
     string SceneTransformShiftObserved);
 
+internal readonly record struct TitleBackgroundPhase2EProbeSample(
+    int CallIndex,
+    int? Frame,
+    float? ReturnValue,
+    float? ActiveLookAtYAfterOriginal);
+
+internal readonly record struct TitleBackgroundPhase2EAnalysis(
+    string NativeReturnMatchesActiveLookAtY,
+    string NativeReturnMatchesFinalStableLookAtY,
+    int ComparedCallCount);
+
 internal readonly record struct TitleBackgroundCameraProbeReportInput(
     bool Armed,
     Vector3 BaselineCamera,
@@ -167,6 +178,37 @@ internal static class TitleBackgroundCameraProbeReport
             finalCameraStabilizationObserved,
             distanceEventuallyOverwritten,
             sceneTransformShiftObserved);
+    }
+
+    public static TitleBackgroundPhase2EAnalysis AnalyzePhase2E(
+        IReadOnlyList<TitleBackgroundPhase2EProbeSample> samples,
+        float? finalStableLookAtY)
+    {
+        var comparedCalls = samples
+            .Where(sample => sample.ReturnValue.HasValue && sample.ActiveLookAtYAfterOriginal.HasValue)
+            .ToArray();
+        var nativeReturnMatchesActiveLookAtY = comparedCalls.Length == 0
+            ? "inconclusive"
+            : comparedCalls.Any(sample => Math.Abs(sample.ReturnValue!.Value - sample.ActiveLookAtYAfterOriginal!.Value) <= StabilizationVectorTolerance)
+                ? "observed"
+                : "not-observed";
+
+        var latestReturn = samples
+            .Where(sample => sample.ReturnValue.HasValue)
+            .OrderByDescending(sample => sample.CallIndex)
+            .Select(sample => sample.ReturnValue!.Value)
+            .Cast<float?>()
+            .FirstOrDefault();
+        var nativeReturnMatchesFinalStableLookAtY = latestReturn.HasValue && finalStableLookAtY.HasValue
+            ? Math.Abs(latestReturn.Value - finalStableLookAtY.Value) <= StabilizationVectorTolerance
+                ? "observed"
+                : "not-observed"
+            : "inconclusive";
+
+        return new TitleBackgroundPhase2EAnalysis(
+            nativeReturnMatchesActiveLookAtY,
+            nativeReturnMatchesFinalStableLookAtY,
+            comparedCalls.Length);
     }
 
     public static string DescribeCoincidentEvents(

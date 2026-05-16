@@ -915,6 +915,7 @@ public sealed class SettingsTab : ITabComponent
             _configuration.TitleBackgroundLobbyUpdateSignature = string.Empty;
             _configuration.TitleBackgroundLoadLobbySceneSignature = string.Empty;
             _configuration.TitleBackgroundLobbyCurrentMapSignature = string.Empty;
+            _configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature = string.Empty;
             _configuration.Save();
             _titleScreenBackgroundService.ReloadNativeIntegration();
         }
@@ -929,11 +930,13 @@ public sealed class SettingsTab : ITabComponent
         var lobbyUpdateSignature = _configuration.TitleBackgroundLobbyUpdateSignature;
         var loadLobbySceneSignature = _configuration.TitleBackgroundLoadLobbySceneSignature;
         var lobbyCurrentMapSignature = _configuration.TitleBackgroundLobbyCurrentMapSignature;
+        var calculateLobbyCameraLookAtYSignature = _configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature;
         var changed = DrawTitleBackgroundSignatureInput("CreateScene", ref createSceneSignature);
         changed |= DrawTitleBackgroundSignatureInput("FixOn", ref fixOnSignature);
         changed |= DrawTitleBackgroundSignatureInput("LobbyUpdate", ref lobbyUpdateSignature);
         changed |= DrawTitleBackgroundSignatureInput("LoadLobbyScene", ref loadLobbySceneSignature);
         changed |= DrawTitleBackgroundSignatureInput("LobbyCurrentMap", ref lobbyCurrentMapSignature);
+        changed |= DrawTitleBackgroundSignatureInput("CalculateLobbyCameraLookAtY", ref calculateLobbyCameraLookAtYSignature);
 
         if (!changed)
         {
@@ -945,6 +948,7 @@ public sealed class SettingsTab : ITabComponent
         _configuration.TitleBackgroundLobbyUpdateSignature = lobbyUpdateSignature.Trim();
         _configuration.TitleBackgroundLoadLobbySceneSignature = loadLobbySceneSignature.Trim();
         _configuration.TitleBackgroundLobbyCurrentMapSignature = lobbyCurrentMapSignature.Trim();
+        _configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature = calculateLobbyCameraLookAtYSignature.Trim();
         _configuration.Save();
     }
 
@@ -998,6 +1002,7 @@ public sealed class SettingsTab : ITabComponent
         _configuration.TitleBackgroundLobbyUpdateSignature = (_configuration.TitleBackgroundLobbyUpdateSignature ?? string.Empty).Trim();
         _configuration.TitleBackgroundLoadLobbySceneSignature = (_configuration.TitleBackgroundLoadLobbySceneSignature ?? string.Empty).Trim();
         _configuration.TitleBackgroundLobbyCurrentMapSignature = (_configuration.TitleBackgroundLobbyCurrentMapSignature ?? string.Empty).Trim();
+        _configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature = (_configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature ?? string.Empty).Trim();
     }
 
     private void ClearTitleBackgroundSelectedPreset()
@@ -1092,6 +1097,7 @@ public sealed class SettingsTab : ITabComponent
         _configuration.TitleBackgroundLobbyUpdateSignature = string.Empty;
         _configuration.TitleBackgroundLoadLobbySceneSignature = string.Empty;
         _configuration.TitleBackgroundLobbyCurrentMapSignature = string.Empty;
+        _configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature = string.Empty;
         _configuration.Save();
         _titleScreenBackgroundService.ReloadNativeIntegration();
     }

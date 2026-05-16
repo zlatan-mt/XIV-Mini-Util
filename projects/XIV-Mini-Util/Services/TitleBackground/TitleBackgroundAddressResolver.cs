@@ -22,6 +22,7 @@ internal sealed unsafe class TitleBackgroundAddressResolver
     public nint LoadLobbyScene { get; private set; }
     public nint LobbyCurrentMap { get; private set; }
     public nint UpdateLobbyUIStage { get; private set; }
+    public nint CalculateLobbyCameraLookAtY { get; private set; }
     public string LastError { get; private set; } = string.Empty;
     public IReadOnlyList<TitleBackgroundSignatureScanResult> ScanResults => _scanResults;
 
@@ -35,6 +36,7 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         LoadLobbyScene = nint.Zero;
         LobbyCurrentMap = nint.Zero;
         UpdateLobbyUIStage = nint.Zero;
+        CalculateLobbyCameraLookAtY = nint.Zero;
         LastError = string.Empty;
         _scanResults.Clear();
 
@@ -59,6 +61,12 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             out var lobbyUpdate);
         var loadLobbySceneResolved = TryResolveText(sigScanner, configuration.TitleBackgroundLoadLobbySceneSignature, nameof(LoadLobbyScene), out var loadLobbyScene);
         var currentMapResolved = TryResolveStatic(sigScanner, configuration.TitleBackgroundLobbyCurrentMapSignature, nameof(LobbyCurrentMap), out var lobbyCurrentMap);
+        _ = TryResolveText(
+            sigScanner,
+            configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature,
+            nameof(CalculateLobbyCameraLookAtY),
+            out var calculateLobbyCameraLookAtY,
+            required: false);
         var cameraHookRequired = TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(
             configuration.TitleBackgroundRuntimeMode,
             configuration.TitleBackgroundOverrideEnabled,
@@ -74,6 +82,7 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         LobbyCurrentMap = lobbyCurrentMap;
         FixOn = fixOn;
         UpdateLobbyUIStage = updateLobbyUiStage;
+        CalculateLobbyCameraLookAtY = calculateLobbyCameraLookAtY;
         if (configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.HookProbe)
         {
             return createSceneResolved
