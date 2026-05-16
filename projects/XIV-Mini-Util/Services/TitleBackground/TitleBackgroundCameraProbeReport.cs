@@ -39,6 +39,19 @@ internal readonly record struct TitleBackgroundCameraProbeTimelineAnalysis(
     TitleBackgroundCameraOverwritePattern CameraOverwritePattern,
     TitleBackgroundCameraOverwritePattern FocusOverwritePattern);
 
+internal readonly record struct TitleBackgroundPhase2DTimelineSample(
+    int Frame,
+    Vector3? SceneCameraPosition,
+    Vector3? LookAtVector,
+    float? Distance,
+    float? DirH,
+    float? DirV);
+
+internal readonly record struct TitleBackgroundPhase2DAnalysis(
+    string FinalCameraStabilizationObserved,
+    string DistanceEventuallyOverwritten,
+    string SceneTransformShiftObserved);
+
 internal readonly record struct TitleBackgroundCameraProbeReportInput(
     bool Armed,
     Vector3 BaselineCamera,
@@ -63,6 +76,11 @@ internal static class TitleBackgroundCameraProbeReport
 {
     public const float ReflectionTolerance = 1f;
     public const float OverwriteThreshold = 5f;
+    public const float DistanceOverwriteThreshold = 0.1f;
+    public const float StabilizationDistanceTolerance = 0.02f;
+    public const float StabilizationAngleTolerance = 0.01f;
+    public const float StabilizationVectorTolerance = 0.05f;
+    public const int FinalStabilizationMinimumFrame = 300;
 
     public static TitleBackgroundCameraProbeReportResult Evaluate(TitleBackgroundCameraProbeReportInput input)
     {
@@ -131,6 +149,24 @@ internal static class TitleBackgroundCameraProbeReport
             TitleBackgroundCameraOverwritePattern.Late => "late",
             _ => "inconclusive",
         };
+    }
+
+    public static TitleBackgroundPhase2DAnalysis AnalyzePhase2D(
+        IReadOnlyList<TitleBackgroundPhase2DTimelineSample> samples,
+        float? restoredDistance)
+    {
+        var capturedSamples = samples
+            .Where(HasAnyPhase2DCameraValue)
+            .OrderBy(sample => sample.Frame)
+            .ToArray();
+        var sceneTransformShiftObserved = EvaluateSceneTransformShift(capturedSamples);
+        var distanceEventuallyOverwritten = EvaluateDistanceEventuallyOverwritten(capturedSamples, restoredDistance);
+        var finalCameraStabilizationObserved = EvaluateFinalCameraStabilization(capturedSamples);
+
+        return new TitleBackgroundPhase2DAnalysis(
+            finalCameraStabilizationObserved,
+            distanceEventuallyOverwritten,
+            sceneTransformShiftObserved);
     }
 
     public static string DescribeCoincidentEvents(
@@ -246,6 +282,108 @@ internal static class TitleBackgroundCameraProbeReport
         return firstObservedFrame.Value >= 16
             ? TitleBackgroundCameraOverwritePattern.Late
             : TitleBackgroundCameraOverwritePattern.Gradual;
+    }
+
+    private static string EvaluateSceneTransformShift(IReadOnlyList<TitleBackgroundPhase2DTimelineSample> samples)
+    {
+        var baseline = samples.FirstOrDefault(sample => sample.SceneCameraPosition.HasValue);
+        if (!baseline.SceneCameraPosition.HasValue)
+        {
+            return "inconclusive";
+        }
+
+        return samples.Any(sample =>
+        {
+            var delta = TitleBackgroundCameraMath.CalculateVectorDelta(sample.SceneCameraPosition, baseline.SceneCameraPosition);
+            return delta.HasValue && delta.Value.Length() >= OverwriteThreshold;
+        })
+            ? "observed"
+            : "not-observed";
+    }
+
+    private static string EvaluateDistanceEventuallyOverwritten(
+        IReadOnlyList<TitleBackgroundPhase2DTimelineSample> samples,
+        float? restoredDistance)
+    {
+        if (!restoredDistance.HasValue)
+        {
+            return "inconclusive";
+        }
+
+        var capturedDistances = samples
+            .Where(sample => sample.Distance.HasValue)
+            .Select(sample => sample.Distance!.Value)
+            .ToArray();
+        if (capturedDistances.Length == 0)
+        {
+            return "inconclusive";
+        }
+
+        return capturedDistances.Any(distance => Math.Abs(distance - restoredDistance.Value) >= DistanceOverwriteThreshold)
+            ? "observed"
+            : "not-observed";
+    }
+
+    private static string EvaluateFinalCameraStabilization(IReadOnlyList<TitleBackgroundPhase2DTimelineSample> samples)
+    {
+        var stableWindow = samples
+            .Where(sample => sample.Frame >= FinalStabilizationMinimumFrame && HasFullPhase2DCameraValue(sample))
+            .OrderByDescending(sample => sample.Frame)
+            .Take(3)
+            .OrderBy(sample => sample.Frame)
+            .ToArray();
+        if (stableWindow.Length < 3)
+        {
+            return "inconclusive";
+        }
+
+        for (var i = 1; i < stableWindow.Length; i++)
+        {
+            if (!IsStablePair(stableWindow[i - 1], stableWindow[i]))
+            {
+                return "not-observed";
+            }
+        }
+
+        return "observed";
+    }
+
+    private static bool HasAnyPhase2DCameraValue(TitleBackgroundPhase2DTimelineSample sample)
+    {
+        return sample.SceneCameraPosition.HasValue
+            || sample.LookAtVector.HasValue
+            || sample.Distance.HasValue
+            || sample.DirH.HasValue
+            || sample.DirV.HasValue;
+    }
+
+    private static bool HasFullPhase2DCameraValue(TitleBackgroundPhase2DTimelineSample sample)
+    {
+        return sample.SceneCameraPosition.HasValue
+            && sample.LookAtVector.HasValue
+            && sample.Distance.HasValue
+            && sample.DirH.HasValue
+            && sample.DirV.HasValue;
+    }
+
+    private static bool IsStablePair(TitleBackgroundPhase2DTimelineSample previous, TitleBackgroundPhase2DTimelineSample current)
+    {
+        var positionDelta = TitleBackgroundCameraMath.CalculateVectorDelta(current.SceneCameraPosition, previous.SceneCameraPosition);
+        var lookAtDelta = TitleBackgroundCameraMath.CalculateVectorDelta(current.LookAtVector, previous.LookAtVector);
+        var distanceDelta = TitleBackgroundCameraMath.CalculateFloatDelta(current.Distance, previous.Distance);
+        var dirHDelta = TitleBackgroundCameraMath.CalculateFloatDelta(current.DirH, previous.DirH);
+        var dirVDelta = TitleBackgroundCameraMath.CalculateFloatDelta(current.DirV, previous.DirV);
+
+        return positionDelta.HasValue
+            && lookAtDelta.HasValue
+            && distanceDelta.HasValue
+            && dirHDelta.HasValue
+            && dirVDelta.HasValue
+            && positionDelta.Value.Length() <= StabilizationVectorTolerance
+            && lookAtDelta.Value.Length() <= StabilizationVectorTolerance
+            && Math.Abs(distanceDelta.Value) <= StabilizationDistanceTolerance
+            && Math.Abs(dirHDelta.Value) <= StabilizationAngleTolerance
+            && Math.Abs(dirVDelta.Value) <= StabilizationAngleTolerance;
     }
 
     private static string FormatEventCounts(TitleBackgroundCameraProbeTimelineEventCounts events)

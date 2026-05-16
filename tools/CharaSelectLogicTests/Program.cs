@@ -997,6 +997,39 @@ Test("title background camera probe timeline summarizes coincident events", () =
         && focusDriftEvents == "fixOn=0,lobbyUpdate=2,loadLobbyScene=0,createScene=0";
 });
 
+Test("title background phase2d analysis detects late transform and distance overwrite", () =>
+{
+    var samples = new[]
+    {
+        new TitleBackgroundPhase2DTimelineSample(0, new Vector3(0f, 0.8f, 3.3f), new Vector3(0f, 0.8f, 0f), 3.3f, 0.1f, 0.2f),
+        new TitleBackgroundPhase2DTimelineSample(60, new Vector3(0f, 0.8f, 3.3f), new Vector3(0f, 0.8f, 0f), 3.3f, 0.1f, 0.2f),
+        new TitleBackgroundPhase2DTimelineSample(300, new Vector3(-48.5f, 15.8f, 9.1f), new Vector3(-52.7f, 14.6f, 9.4f), 4.25f, 0.5f, 0.4f),
+        new TitleBackgroundPhase2DTimelineSample(450, new Vector3(-48.5f, 15.8f, 9.1f), new Vector3(-52.7f, 14.6f, 9.4f), 4.25f, 0.5f, 0.4f),
+        new TitleBackgroundPhase2DTimelineSample(600, new Vector3(-48.5f, 15.8f, 9.1f), new Vector3(-52.7f, 14.6f, 9.4f), 4.25f, 0.5f, 0.4f),
+    };
+
+    var result = TitleBackgroundCameraProbeReport.AnalyzePhase2D(samples, restoredDistance: 3.3f);
+
+    return result.SceneTransformShiftObserved == "observed"
+        && result.DistanceEventuallyOverwritten == "observed"
+        && result.FinalCameraStabilizationObserved == "observed";
+});
+
+Test("title background phase2d analysis reports unstabilized late camera", () =>
+{
+    var samples = new[]
+    {
+        new TitleBackgroundPhase2DTimelineSample(300, new Vector3(10f, 10f, 10f), new Vector3(0f, 0f, 0f), 3.3f, 0.1f, 0.2f),
+        new TitleBackgroundPhase2DTimelineSample(450, new Vector3(12f, 10f, 10f), new Vector3(0f, 2f, 0f), 3.4f, 0.2f, 0.2f),
+        new TitleBackgroundPhase2DTimelineSample(600, new Vector3(14f, 10f, 10f), new Vector3(0f, 4f, 0f), 3.5f, 0.3f, 0.2f),
+    };
+
+    var result = TitleBackgroundCameraProbeReport.AnalyzePhase2D(samples, restoredDistance: 3.3f);
+
+    return result.FinalCameraStabilizationObserved == "not-observed"
+        && result.DistanceEventuallyOverwritten == "observed";
+});
+
 Test("title background capture preset builder keeps existing fov when unavailable", () =>
 {
     var existing = new TitleBackgroundPreset
