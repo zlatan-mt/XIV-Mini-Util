@@ -79,8 +79,14 @@ internal readonly record struct TitleBackgroundPhase2FAnalysis(
     string CurveStableByFinalWindow,
     string CurveRegeneratedAfterEarlyFrame,
     string OneShotWriteViability,
+    string CurvePointValuesChangedAfterEarlyFrame,
+    string CameraCurveEnabledTransitionObserved,
+    int? CameraCurveEnabledFirstObservedFrame,
+    string OneShotCurvePointWriteValueStability,
+    string OneShotCurvePointWriteTimingRisk,
     int? FirstCapturedFrame,
-    int? LastChangedFrame);
+    int? LastChangedFrame,
+    int? LastPointValueChangedFrame);
 
 internal readonly record struct TitleBackgroundCameraProbeReportInput(
     bool Armed,
@@ -246,32 +252,54 @@ internal static class TitleBackgroundCameraProbeReport
                 "inconclusive",
                 "inconclusive",
                 "inconclusive",
+                "inconclusive",
+                "inconclusive",
+                null,
+                "inconclusive",
+                "inconclusive",
+                null,
                 null,
                 null);
         }
 
         var firstCapturedFrame = captured[0].Frame;
-        var lastChangedFrame = FindLastChangedFrame(captured);
-        var stableByFinalWindow = EvaluateFinalCurveStability(captured);
+        var lastPointValueChangedFrame = FindLastCurvePointValueChangedFrame(captured);
+        var lastChangedFrame = FindLastCurveOrEnabledChangedFrame(captured);
+        var cameraCurveEnabledFirstObservedFrame = captured.FirstOrDefault(sample => sample.CameraCurveEnabled == true).Frame;
+        int? enabledFirstFrame = cameraCurveEnabledFirstObservedFrame == default && captured.All(sample => sample.CameraCurveEnabled != true)
+            ? null
+            : cameraCurveEnabledFirstObservedFrame;
+        var enabledTransitionObserved = HasCameraCurveEnabledTransition(captured) ? "observed" : "not-observed";
+        var stableByFinalWindow = EvaluateFinalCurvePointValueStability(captured);
         var generatedEarly = firstCapturedFrame <= EarlyCurveGenerationMaximumFrame
             ? "observed"
             : "not-observed";
-        var regeneratedAfterEarlyFrame = lastChangedFrame.HasValue && lastChangedFrame.Value > EarlyCurveGenerationMaximumFrame
+        var pointValuesChangedAfterEarlyFrame = lastPointValueChangedFrame.HasValue && lastPointValueChangedFrame.Value > EarlyCurveGenerationMaximumFrame
             ? "observed"
             : "not-observed";
+        var regeneratedAfterEarlyFrame = pointValuesChangedAfterEarlyFrame;
         var oneShotWriteViability = stableByFinalWindow == "observed" && regeneratedAfterEarlyFrame == "not-observed"
             ? "plausible"
             : stableByFinalWindow == "observed"
                 ? "risky"
                 : "inconclusive";
+        var timingRisk = enabledTransitionObserved == "observed" && enabledFirstFrame.HasValue && enabledFirstFrame.Value > EarlyCurveGenerationMaximumFrame
+            ? "observed"
+            : "not-observed";
 
         return new TitleBackgroundPhase2FAnalysis(
             generatedEarly,
             stableByFinalWindow,
             regeneratedAfterEarlyFrame,
             oneShotWriteViability,
+            pointValuesChangedAfterEarlyFrame,
+            enabledTransitionObserved,
+            enabledFirstFrame,
+            stableByFinalWindow,
+            timingRisk,
             firstCapturedFrame,
-            lastChangedFrame);
+            lastChangedFrame,
+            lastPointValueChangedFrame);
     }
 
     public static string DescribeCoincidentEvents(
@@ -453,7 +481,7 @@ internal static class TitleBackgroundCameraProbeReport
         return "observed";
     }
 
-    private static string EvaluateFinalCurveStability(IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> samples)
+    private static string EvaluateFinalCurvePointValueStability(IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> samples)
     {
         var stableWindow = samples
             .Where(sample => sample.Frame >= FinalStabilizationMinimumFrame && HasFullCurvePointValue(sample))
@@ -468,7 +496,7 @@ internal static class TitleBackgroundCameraProbeReport
 
         for (var i = 1; i < stableWindow.Length; i++)
         {
-            if (!IsCurveStablePair(stableWindow[i - 1], stableWindow[i]))
+            if (!AreCurvePointValuesStable(stableWindow[i - 1], stableWindow[i]))
             {
                 return "not-observed";
             }
@@ -477,7 +505,7 @@ internal static class TitleBackgroundCameraProbeReport
         return "observed";
     }
 
-    private static int? FindLastChangedFrame(IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> samples)
+    private static int? FindLastCurveOrEnabledChangedFrame(IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> samples)
     {
         int? lastChangedFrame = null;
         for (var i = 1; i < samples.Count; i++)
@@ -489,6 +517,33 @@ internal static class TitleBackgroundCameraProbeReport
         }
 
         return lastChangedFrame;
+    }
+
+    private static int? FindLastCurvePointValueChangedFrame(IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> samples)
+    {
+        int? lastChangedFrame = null;
+        for (var i = 1; i < samples.Count; i++)
+        {
+            if (!AreCurvePointValuesStable(samples[i - 1], samples[i]))
+            {
+                lastChangedFrame = samples[i].Frame;
+            }
+        }
+
+        return lastChangedFrame;
+    }
+
+    private static bool HasCameraCurveEnabledTransition(IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> samples)
+    {
+        for (var i = 1; i < samples.Count; i++)
+        {
+            if (samples[i - 1].CameraCurveEnabled != samples[i].CameraCurveEnabled)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool HasAnyPhase2DCameraValue(TitleBackgroundPhase2DTimelineSample sample)
@@ -544,7 +599,12 @@ internal static class TitleBackgroundCameraProbeReport
     private static bool IsCurveStablePair(TitleBackgroundPhase2FCurveTimelineSample previous, TitleBackgroundPhase2FCurveTimelineSample current)
     {
         return previous.CameraCurveEnabled == current.CameraCurveEnabled
-            && IsStableFloat(previous.LowPosition, current.LowPosition, CurvePointTolerance)
+            && AreCurvePointValuesStable(previous, current);
+    }
+
+    private static bool AreCurvePointValuesStable(TitleBackgroundPhase2FCurveTimelineSample previous, TitleBackgroundPhase2FCurveTimelineSample current)
+    {
+        return IsStableFloat(previous.LowPosition, current.LowPosition, CurvePointTolerance)
             && IsStableFloat(previous.LowValue, current.LowValue, CurvePointTolerance)
             && IsStableFloat(previous.MidPosition, current.MidPosition, CurvePointTolerance)
             && IsStableFloat(previous.MidValue, current.MidValue, CurvePointTolerance)

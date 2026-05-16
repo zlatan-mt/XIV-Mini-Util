@@ -107,6 +107,8 @@ public sealed class Configuration : IPluginConfiguration
     public string TitleBackgroundLoadLobbySceneSignature { get; set; } = "48 89 5C 24 ?? 57 48 83 EC ?? 8B D9 E8";
     public string TitleBackgroundLobbyCurrentMapSignature { get; set; } = "66 89 05 ?? ?? ?? ?? 66 89 05 ?? ?? ?? ?? 66 89 05 ?? ?? ?? ?? 48 8B 4B";
     public string TitleBackgroundCalculateLobbyCameraLookAtYSignature { get; set; } = "48 83 EC ?? F3 41 0F 10 01 0F 28 D1";
+    public string TitleBackgroundSetCameraCurveMidPointSignature { get; set; } = "0F 57 C0 0F 2F C1 73 ?? F3 0F 11 89";
+    public string TitleBackgroundCalculateCameraCurveLowAndHighPointSignature { get; set; } = "F3 0F 10 81 ?? ?? ?? ?? F3 0F 11 89";
 
     private IDalamudPluginInterface? _pluginInterface;
 
@@ -301,6 +303,8 @@ public sealed class Configuration : IPluginConfiguration
         TitleBackgroundLoadLobbySceneSignature = NormalizeSignature(source.TitleBackgroundLoadLobbySceneSignature);
         TitleBackgroundLobbyCurrentMapSignature = NormalizeSignature(source.TitleBackgroundLobbyCurrentMapSignature);
         TitleBackgroundCalculateLobbyCameraLookAtYSignature = NormalizeSignature(source.TitleBackgroundCalculateLobbyCameraLookAtYSignature);
+        TitleBackgroundSetCameraCurveMidPointSignature = NormalizeSignature(source.TitleBackgroundSetCameraCurveMidPointSignature);
+        TitleBackgroundCalculateCameraCurveLowAndHighPointSignature = NormalizeSignature(source.TitleBackgroundCalculateCameraCurveLowAndHighPointSignature);
         NormalizeAndMigrate();
     }
 
@@ -612,6 +616,8 @@ public sealed class Configuration : IPluginConfiguration
         changed |= NormalizeSignatureProperty(TitleBackgroundLoadLobbySceneSignature, value => TitleBackgroundLoadLobbySceneSignature = value);
         changed |= NormalizeSignatureProperty(TitleBackgroundLobbyCurrentMapSignature, value => TitleBackgroundLobbyCurrentMapSignature = value);
         changed |= NormalizeSignatureProperty(TitleBackgroundCalculateLobbyCameraLookAtYSignature, value => TitleBackgroundCalculateLobbyCameraLookAtYSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundSetCameraCurveMidPointSignature, value => TitleBackgroundSetCameraCurveMidPointSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundCalculateCameraCurveLowAndHighPointSignature, value => TitleBackgroundCalculateCameraCurveLowAndHighPointSignature = value);
         changed |= TitleBackgroundPresetApplicator.ClearInvalidSelectedPreset(this);
 
         return changed;

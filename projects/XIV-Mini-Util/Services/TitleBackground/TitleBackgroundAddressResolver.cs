@@ -23,6 +23,8 @@ internal sealed unsafe class TitleBackgroundAddressResolver
     public nint LobbyCurrentMap { get; private set; }
     public nint UpdateLobbyUIStage { get; private set; }
     public nint CalculateLobbyCameraLookAtY { get; private set; }
+    public nint SetCameraCurveMidPoint { get; private set; }
+    public nint CalculateCameraCurveLowAndHighPoint { get; private set; }
     public string LastError { get; private set; } = string.Empty;
     public IReadOnlyList<TitleBackgroundSignatureScanResult> ScanResults => _scanResults;
 
@@ -37,6 +39,8 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         LobbyCurrentMap = nint.Zero;
         UpdateLobbyUIStage = nint.Zero;
         CalculateLobbyCameraLookAtY = nint.Zero;
+        SetCameraCurveMidPoint = nint.Zero;
+        CalculateCameraCurveLowAndHighPoint = nint.Zero;
         LastError = string.Empty;
         _scanResults.Clear();
 
@@ -67,6 +71,18 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             nameof(CalculateLobbyCameraLookAtY),
             out var calculateLobbyCameraLookAtY,
             required: false);
+        _ = TryResolveText(
+            sigScanner,
+            configuration.TitleBackgroundSetCameraCurveMidPointSignature,
+            nameof(SetCameraCurveMidPoint),
+            out var setCameraCurveMidPoint,
+            required: false);
+        _ = TryResolveText(
+            sigScanner,
+            configuration.TitleBackgroundCalculateCameraCurveLowAndHighPointSignature,
+            nameof(CalculateCameraCurveLowAndHighPoint),
+            out var calculateCameraCurveLowAndHighPoint,
+            required: false);
         var cameraHookRequired = TitleBackgroundRuntimeModeHelper.ShouldCreateCameraHook(
             configuration.TitleBackgroundRuntimeMode,
             configuration.TitleBackgroundOverrideEnabled,
@@ -83,6 +99,8 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         FixOn = fixOn;
         UpdateLobbyUIStage = updateLobbyUiStage;
         CalculateLobbyCameraLookAtY = calculateLobbyCameraLookAtY;
+        SetCameraCurveMidPoint = setCameraCurveMidPoint;
+        CalculateCameraCurveLowAndHighPoint = calculateCameraCurveLowAndHighPoint;
         if (configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.HookProbe)
         {
             return createSceneResolved

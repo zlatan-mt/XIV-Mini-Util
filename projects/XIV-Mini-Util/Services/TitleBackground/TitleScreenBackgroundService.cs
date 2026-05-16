@@ -30,6 +30,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private Hook<LobbySceneLoadedDelegate>? _lobbySceneLoadedHook;
     private Hook<LobbyCameraFixOnDelegate>? _cameraFixOnHook;
     private Hook<CalculateLobbyCameraLookAtYDelegate>? _calculateLobbyCameraLookAtYHook;
+    private Hook<SetCameraCurveMidPointDelegate>? _setCameraCurveMidPointHook;
+    private Hook<CalculateCameraCurveLowAndHighPointDelegate>? _calculateCameraCurveLowAndHighPointHook;
     private TitleBackgroundServiceState _state = TitleBackgroundServiceState.Disabled;
     private string _stateReason = "無効";
     private string _validatedTerritoryPath = string.Empty;
@@ -115,10 +117,17 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private string _phase2CTimelineError = string.Empty;
     private readonly Dictionary<int, TitleBackgroundPhase2CTimelineSnapshot> _phase2CTimelineSnapshots = [];
     private readonly List<TitleBackgroundPhase2ECalculateLookAtYCall> _phase2ECalculateLookAtYCalls = [];
+    private readonly List<TitleBackgroundPhase2FGeneratedCurveCall> _phase2FSetCameraCurveMidPointCalls = [];
+    private readonly List<TitleBackgroundPhase2FGeneratedCurveCall> _phase2FCalculateCameraCurveLowAndHighPointCalls = [];
     private int _phase2ECalculateLookAtYCallCount;
+    private int _phase2FSetCameraCurveMidPointCallCount;
+    private int _phase2FCalculateCameraCurveLowAndHighPointCallCount;
     private string _phase2ECalculateLookAtYLastError = string.Empty;
+    private string _phase2FSetCameraCurveMidPointLastError = string.Empty;
+    private string _phase2FCalculateCameraCurveLowAndHighPointLastError = string.Empty;
     private static readonly int[] CameraProbeTimelineFrames = [0, 1, 2, 4, 8, 16, 30, 60, 90, 120, 180, 240, 300, 450, 600];
     private const int Phase2EMaxRecordedCalls = 64;
+    private const int Phase2FMaxRecordedGeneratedCurveCalls = 64;
     private const int LobbyCameraExpandedCameraCurveEnabledOffset = 0x2C2;
     private const int LobbyCameraExpandedMidPointOffset = 0x2D0;
     private const int LobbyCameraExpandedLowPointOffset = 0x2E0;
@@ -374,7 +383,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             || IsHookEnabled(_loadLobbySceneHook)
             || IsHookEnabled(_lobbySceneLoadedHook)
             || IsHookEnabled(_cameraFixOnHook)
-            || IsHookEnabled(_calculateLobbyCameraLookAtYHook);
+            || IsHookEnabled(_calculateLobbyCameraLookAtYHook)
+            || IsHookEnabled(_setCameraCurveMidPointHook)
+            || IsHookEnabled(_calculateCameraCurveLowAndHighPointHook);
         var capturePreset = _lastCameraCaptureResult.Preset;
         var currentCameraCaptured = TryCaptureActiveCameraSnapshot(out var currentCamera, out var currentCaptureError);
         var currentCaptureStatus = currentCameraCaptured ? "success" : "failed";
@@ -439,8 +450,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"cameraHookRequired={cameraHookRequired}",
             $"cameraHookEnabled={IsHookEnabled(_cameraFixOnHook)}",
             $"calculateLobbyCameraLookAtYHookEnabled={IsHookEnabled(_calculateLobbyCameraLookAtYHook)}",
+            $"setCameraCurveMidPointHookEnabled={IsHookEnabled(_setCameraCurveMidPointHook)}",
+            $"calculateCameraCurveLowAndHighPointHookEnabled={IsHookEnabled(_calculateCameraCurveLowAndHighPointHook)}",
             "fixOnHookPolicy=disabled-in-phase1",
             "calculateLobbyCameraLookAtYHookPolicy=read-only-probe",
+            "setCameraCurveMidPointHookPolicy=read-only-probe",
+            "calculateCameraCurveLowAndHighPointHookPolicy=read-only-probe",
             $"cameraOverrideEnabled={_configuration.TitleBackgroundCameraOverrideEnabled}",
             $"charaSelectCameraAdapter.state={_charaSelectCameraAdapter.State}",
             $"charaSelectCameraAdapter.lastEvent={_charaSelectCameraAdapter.LastEvent}",
@@ -544,6 +559,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"phase2F.curveTimeline.curveStableByFinalWindow={phase2FVerdicts.CurveStableByFinalWindow}",
             $"phase2F.curveTimeline.curveRegeneratedAfterEarlyFrame={phase2FVerdicts.CurveRegeneratedAfterEarlyFrame}",
             $"phase2F.curveTimeline.oneShotWriteViability={phase2FVerdicts.OneShotWriteViability}",
+            $"verdict.phase2F.curvePointValuesChangedAfterEarlyFrame={phase2FVerdicts.CurvePointValuesChangedAfterEarlyFrame}",
+            $"verdict.phase2F.cameraCurveEnabledTransitionObserved={phase2FVerdicts.CameraCurveEnabledTransitionObserved}",
+            $"verdict.phase2F.cameraCurveEnabledFirstObservedFrame={FormatFrame(phase2FVerdicts.CameraCurveEnabledFirstObservedFrame)}",
+            $"verdict.phase2F.oneShotCurvePointWriteValueStability={phase2FVerdicts.OneShotCurvePointWriteValueStability}",
+            $"verdict.phase2F.oneShotCurvePointWriteTimingRisk={phase2FVerdicts.OneShotCurvePointWriteTimingRisk}",
+            $"phase2F.curveTimeline.lastPointValueChangedFrame={FormatFrame(phase2FVerdicts.LastPointValueChangedFrame)}",
+            $"phase2F.setCameraCurveMidPoint.callCount={_phase2FSetCameraCurveMidPointCallCount}",
+            $"phase2F.setCameraCurveMidPoint.recordedCallCount={_phase2FSetCameraCurveMidPointCalls.Count}",
+            $"phase2F.setCameraCurveMidPoint.lastError={FormatNone(_phase2FSetCameraCurveMidPointLastError)}",
+            $"phase2F.calculateCameraCurveLowAndHighPoint.callCount={_phase2FCalculateCameraCurveLowAndHighPointCallCount}",
+            $"phase2F.calculateCameraCurveLowAndHighPoint.recordedCallCount={_phase2FCalculateCameraCurveLowAndHighPointCalls.Count}",
+            $"phase2F.calculateCameraCurveLowAndHighPoint.lastError={FormatNone(_phase2FCalculateCameraCurveLowAndHighPointLastError)}",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
             $"cameraCapture.lastStatus={_lastCameraCaptureResult.Status}",
@@ -675,6 +702,16 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].error={FormatNone(call.Error)}");
         }
 
+        foreach (var call in _phase2FSetCameraCurveMidPointCalls)
+        {
+            AddGeneratedCurveCallLines(lines, "phase2F.setCameraCurveMidPoint", call);
+        }
+
+        foreach (var call in _phase2FCalculateCameraCurveLowAndHighPointCalls)
+        {
+            AddGeneratedCurveCallLines(lines, "phase2F.calculateCameraCurveLowAndHighPoint", call);
+        }
+
         lines.AddRange(
         [
             "",
@@ -732,6 +769,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             "CalculateLobbyCameraLookAtY.method=TryScanText",
             $"CalculateLobbyCameraLookAtY.hookTargetVerified={GetHookTargetVerified("CalculateLobbyCameraLookAtY")}",
             $"CalculateLobbyCameraLookAtY.targetWithinText={GetTargetWithinText("CalculateLobbyCameraLookAtY")}",
+            "",
+            BuildAddressLine("SetCameraCurveMidPoint.configured", _configuration.TitleBackgroundSetCameraCurveMidPointSignature),
+            $"SetCameraCurveMidPoint.address={FormatAddress(_addressResolver.SetCameraCurveMidPoint)}",
+            "SetCameraCurveMidPoint.method=TryScanText",
+            $"SetCameraCurveMidPoint.hookTargetVerified={GetHookTargetVerified("SetCameraCurveMidPoint")}",
+            $"SetCameraCurveMidPoint.targetWithinText={GetTargetWithinText("SetCameraCurveMidPoint")}",
+            "",
+            BuildAddressLine("CalculateCameraCurveLowAndHighPoint.configured", _configuration.TitleBackgroundCalculateCameraCurveLowAndHighPointSignature),
+            $"CalculateCameraCurveLowAndHighPoint.address={FormatAddress(_addressResolver.CalculateCameraCurveLowAndHighPoint)}",
+            "CalculateCameraCurveLowAndHighPoint.method=TryScanText",
+            $"CalculateCameraCurveLowAndHighPoint.hookTargetVerified={GetHookTargetVerified("CalculateCameraCurveLowAndHighPoint")}",
+            $"CalculateCameraCurveLowAndHighPoint.targetWithinText={GetTargetWithinText("CalculateCameraCurveLowAndHighPoint")}",
             "",
             "UpdateLobbyUIStage.optional=True",
             $"UpdateLobbyUIStage.address={FormatAddress(_addressResolver.UpdateLobbyUIStage)}",
@@ -1192,11 +1241,27 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                     CalculateLobbyCameraLookAtYDetour);
             }
 
+            if (_addressResolver.SetCameraCurveMidPoint != nint.Zero)
+            {
+                _setCameraCurveMidPointHook = _gameInteropProvider.HookFromAddress<SetCameraCurveMidPointDelegate>(
+                    _addressResolver.SetCameraCurveMidPoint,
+                    SetCameraCurveMidPointDetour);
+            }
+
+            if (_addressResolver.CalculateCameraCurveLowAndHighPoint != nint.Zero)
+            {
+                _calculateCameraCurveLowAndHighPointHook = _gameInteropProvider.HookFromAddress<CalculateCameraCurveLowAndHighPointDelegate>(
+                    _addressResolver.CalculateCameraCurveLowAndHighPoint,
+                    CalculateCameraCurveLowAndHighPointDetour);
+            }
+
             _createSceneHook.Enable();
             _lobbyUpdateHook.Enable();
             _loadLobbySceneHook.Enable();
             _lobbySceneLoadedHook?.Enable();
             _calculateLobbyCameraLookAtYHook?.Enable();
+            _setCameraCurveMidPointHook?.Enable();
+            _calculateCameraCurveLowAndHighPointHook?.Enable();
 
             _state = TitleBackgroundServiceState.Disabled;
             _stateReason = "無効";
@@ -1483,6 +1548,72 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return returnValue;
     }
 
+    private void SetCameraCurveMidPointDetour(nint self, float value)
+    {
+        var callIndex = ++_phase2FSetCameraCurveMidPointCallCount;
+        var frame = GetCurrentPhase2CFrame();
+        var beforeCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var before, out var beforeError);
+        var activeBefore = TryCaptureActiveCameraSnapshot(out var activeBeforeSnapshot, out _)
+            ? activeBeforeSnapshot
+            : (TitleBackgroundActiveCameraSnapshot?)null;
+        try
+        {
+            _setCameraCurveMidPointHook?.Original(self, value);
+        }
+        catch (Exception ex)
+        {
+            _phase2FSetCameraCurveMidPointLastError = ex.Message;
+            RecordPhase2FGeneratedCurveCall(
+                _phase2FSetCameraCurveMidPointCalls,
+                BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, null, activeBefore, null, "original-error", ex.Message));
+            throw;
+        }
+
+        var afterCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var after, out var afterError);
+        var activeAfter = TryCaptureActiveCameraSnapshot(out var activeAfterSnapshot, out _)
+            ? activeAfterSnapshot
+            : (TitleBackgroundActiveCameraSnapshot?)null;
+        var status = beforeCaptured && afterCaptured ? "success" : "partial";
+        var error = JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError);
+        _phase2FSetCameraCurveMidPointLastError = error;
+        RecordPhase2FGeneratedCurveCall(
+            _phase2FSetCameraCurveMidPointCalls,
+            BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
+    }
+
+    private void CalculateCameraCurveLowAndHighPointDetour(nint self, float value)
+    {
+        var callIndex = ++_phase2FCalculateCameraCurveLowAndHighPointCallCount;
+        var frame = GetCurrentPhase2CFrame();
+        var beforeCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var before, out var beforeError);
+        var activeBefore = TryCaptureActiveCameraSnapshot(out var activeBeforeSnapshot, out _)
+            ? activeBeforeSnapshot
+            : (TitleBackgroundActiveCameraSnapshot?)null;
+        try
+        {
+            _calculateCameraCurveLowAndHighPointHook?.Original(self, value);
+        }
+        catch (Exception ex)
+        {
+            _phase2FCalculateCameraCurveLowAndHighPointLastError = ex.Message;
+            RecordPhase2FGeneratedCurveCall(
+                _phase2FCalculateCameraCurveLowAndHighPointCalls,
+                BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, null, activeBefore, null, "original-error", ex.Message));
+            throw;
+        }
+
+        var afterCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var after, out var afterError);
+        var activeAfter = TryCaptureActiveCameraSnapshot(out var activeAfterSnapshot, out _)
+            ? activeAfterSnapshot
+            : (TitleBackgroundActiveCameraSnapshot?)null;
+        var status = beforeCaptured && afterCaptured ? "success" : "partial";
+        var error = JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError);
+        _phase2FCalculateCameraCurveLowAndHighPointLastError = error;
+        RecordPhase2FGeneratedCurveCall(
+            _phase2FCalculateCameraCurveLowAndHighPointCalls,
+            BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
+    }
+
     private void OnFrameworkUpdate(IFramework _)
     {
         if (_disposed)
@@ -1703,6 +1834,52 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _phase2ECalculateLookAtYCallCount = 0;
         _phase2ECalculateLookAtYLastError = string.Empty;
         _phase2ECalculateLookAtYCalls.Clear();
+        _phase2FSetCameraCurveMidPointCallCount = 0;
+        _phase2FCalculateCameraCurveLowAndHighPointCallCount = 0;
+        _phase2FSetCameraCurveMidPointLastError = string.Empty;
+        _phase2FCalculateCameraCurveLowAndHighPointLastError = string.Empty;
+        _phase2FSetCameraCurveMidPointCalls.Clear();
+        _phase2FCalculateCameraCurveLowAndHighPointCalls.Clear();
+    }
+
+    private TitleBackgroundPhase2FGeneratedCurveCall BuildPhase2FGeneratedCurveCall(
+        int callIndex,
+        int? frame,
+        float inputValue,
+        TitleBackgroundExpandedLobbyCameraSnapshot? before,
+        TitleBackgroundExpandedLobbyCameraSnapshot? after,
+        TitleBackgroundActiveCameraSnapshot? activeBefore,
+        TitleBackgroundActiveCameraSnapshot? activeAfter,
+        string status,
+        string error)
+    {
+        return new TitleBackgroundPhase2FGeneratedCurveCall(
+            callIndex,
+            frame,
+            inputValue,
+            _charaSelectCameraAdapter.Input.CharacterPosition.Y,
+            _charaSelectCameraAdapter.Curve.Low,
+            _charaSelectCameraAdapter.Curve.Mid,
+            _charaSelectCameraAdapter.Curve.High,
+            before,
+            after,
+            activeBefore?.Distance,
+            activeBefore?.LookAtVector.Y,
+            activeAfter?.Distance,
+            activeAfter?.LookAtVector.Y,
+            status,
+            error);
+    }
+
+    private static void RecordPhase2FGeneratedCurveCall(
+        List<TitleBackgroundPhase2FGeneratedCurveCall> calls,
+        TitleBackgroundPhase2FGeneratedCurveCall call)
+    {
+        calls.Add(call);
+        while (calls.Count > Phase2FMaxRecordedGeneratedCurveCalls)
+        {
+            calls.RemoveAt(0);
+        }
     }
 
     private static TitleBackgroundCurvePointSnapshot? ReadCurvePoint(CurvePoint* point)
@@ -1777,22 +1954,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             }
 
             var baseAddress = (byte*)lobbyCamera;
-            var cameraCurveEnabled = *(byte*)(baseAddress + LobbyCameraExpandedCameraCurveEnabledOffset) != 0;
-            var lowPoint = ReadCurvePoint((CurvePoint*)(baseAddress + LobbyCameraExpandedLowPointOffset));
-            var midPoint = ReadCurvePoint((CurvePoint*)(baseAddress + LobbyCameraExpandedMidPointOffset));
-            var highPoint = ReadCurvePoint((CurvePoint*)(baseAddress + LobbyCameraExpandedHighPointOffset));
-            if (!lowPoint.HasValue || !midPoint.HasValue || !highPoint.HasValue)
-            {
-                errorMessage = "LobbyCameraExpanded curve point contains non-finite values";
-                return false;
-            }
-
-            snapshot = new TitleBackgroundExpandedLobbyCameraSnapshot(
-                cameraCurveEnabled,
-                lowPoint.Value,
-                midPoint.Value,
-                highPoint.Value);
-            return true;
+            return TryCaptureExpandedLobbyCameraSnapshot((nint)baseAddress, out snapshot, out errorMessage);
         }
         catch (Exception ex)
         {
@@ -1800,6 +1962,38 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _log.Warning(ex, "TitleBackground expanded lobby camera capture failed.");
             return false;
         }
+    }
+
+    private static bool TryCaptureExpandedLobbyCameraSnapshot(
+        nint lobbyCameraAddress,
+        out TitleBackgroundExpandedLobbyCameraSnapshot snapshot,
+        out string errorMessage)
+    {
+        snapshot = default;
+        errorMessage = string.Empty;
+        if (lobbyCameraAddress == nint.Zero)
+        {
+            errorMessage = "LobbyCamera address unavailable";
+            return false;
+        }
+
+        var baseAddress = (byte*)lobbyCameraAddress;
+        var cameraCurveEnabled = *(byte*)(baseAddress + LobbyCameraExpandedCameraCurveEnabledOffset) != 0;
+        var lowPoint = ReadCurvePoint((CurvePoint*)(baseAddress + LobbyCameraExpandedLowPointOffset));
+        var midPoint = ReadCurvePoint((CurvePoint*)(baseAddress + LobbyCameraExpandedMidPointOffset));
+        var highPoint = ReadCurvePoint((CurvePoint*)(baseAddress + LobbyCameraExpandedHighPointOffset));
+        if (!lowPoint.HasValue || !midPoint.HasValue || !highPoint.HasValue)
+        {
+            errorMessage = "LobbyCameraExpanded curve point contains non-finite values";
+            return false;
+        }
+
+        snapshot = new TitleBackgroundExpandedLobbyCameraSnapshot(
+            cameraCurveEnabled,
+            lowPoint.Value,
+            midPoint.Value,
+            highPoint.Value);
+        return true;
     }
 
     private int? GetCurrentPhase2CFrame()
@@ -2535,6 +2729,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundLoadLobbySceneSignature = NormalizeSignature(_configuration.TitleBackgroundLoadLobbySceneSignature);
         _configuration.TitleBackgroundLobbyCurrentMapSignature = NormalizeSignature(_configuration.TitleBackgroundLobbyCurrentMapSignature);
         _configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature = NormalizeSignature(_configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature);
+        _configuration.TitleBackgroundSetCameraCurveMidPointSignature = NormalizeSignature(_configuration.TitleBackgroundSetCameraCurveMidPointSignature);
+        _configuration.TitleBackgroundCalculateCameraCurveLowAndHighPointSignature = NormalizeSignature(_configuration.TitleBackgroundCalculateCameraCurveLowAndHighPointSignature);
         TitleBackgroundPresetApplicator.ClearInvalidSelectedPreset(_configuration);
     }
 
@@ -2718,12 +2914,16 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         DisposeHook(_cameraFixOnHook, nameof(_cameraFixOnHook));
         DisposeHook(_calculateLobbyCameraLookAtYHook, nameof(_calculateLobbyCameraLookAtYHook));
+        DisposeHook(_setCameraCurveMidPointHook, nameof(_setCameraCurveMidPointHook));
+        DisposeHook(_calculateCameraCurveLowAndHighPointHook, nameof(_calculateCameraCurveLowAndHighPointHook));
         DisposeHook(_lobbySceneLoadedHook, nameof(_lobbySceneLoadedHook));
         DisposeHook(_loadLobbySceneHook, nameof(_loadLobbySceneHook));
         DisposeHook(_lobbyUpdateHook, nameof(_lobbyUpdateHook));
         DisposeHook(_createSceneHook, nameof(_createSceneHook));
         _cameraFixOnHook = null;
         _calculateLobbyCameraLookAtYHook = null;
+        _setCameraCurveMidPointHook = null;
+        _calculateCameraCurveLowAndHighPointHook = null;
         _lobbySceneLoadedHook = null;
         _loadLobbySceneHook = null;
         _lobbyUpdateHook = null;
@@ -2933,6 +3133,23 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private static string FormatBool(bool? value)
     {
         return value.HasValue ? value.Value.ToString() : "none";
+    }
+
+    private static string JoinErrors(string first, string second)
+    {
+        first = string.IsNullOrWhiteSpace(first) ? string.Empty : first;
+        second = string.IsNullOrWhiteSpace(second) ? string.Empty : second;
+        if (first.Length == 0)
+        {
+            return second;
+        }
+
+        if (second.Length == 0)
+        {
+            return first;
+        }
+
+        return $"{first}; {second}";
     }
 
     private static string FormatUnavailable(float? value, string status)
@@ -3205,6 +3422,39 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return history.Count == 0 ? "none" : string.Join(" | ", history);
     }
 
+    private static void AddGeneratedCurveCallLines(
+        List<string> lines,
+        string prefix,
+        TitleBackgroundPhase2FGeneratedCurveCall call)
+    {
+        lines.Add($"{prefix}.call[{call.CallIndex}].frame={FormatFrame(call.Frame)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].inputValue={FormatFloat(call.InputValue)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].savedCharacterY={FormatFloat(call.SavedCharacterY)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveLow={FormatFloat(call.SavedCurveLow)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveMid={FormatFloat(call.SavedCurveMid)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveHigh={FormatFloat(call.SavedCurveHigh)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveLowMinusCharacterY={FormatFloat(call.SavedCurveLow - call.SavedCharacterY)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveMidMinusCharacterY={FormatFloat(call.SavedCurveMid - call.SavedCharacterY)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveHighMinusCharacterY={FormatFloat(call.SavedCurveHigh - call.SavedCharacterY)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].before.CameraCurveEnabled={FormatBool(call.Before?.CameraCurveEnabled)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].before.lowPoint={FormatCurvePoint(call.Before?.LowPoint)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].before.midPoint={FormatCurvePoint(call.Before?.MidPoint)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].before.highPoint={FormatCurvePoint(call.Before?.HighPoint)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].after.CameraCurveEnabled={FormatBool(call.After?.CameraCurveEnabled)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].after.lowPoint={FormatCurvePoint(call.After?.LowPoint)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].after.midPoint={FormatCurvePoint(call.After?.MidPoint)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].after.highPoint={FormatCurvePoint(call.After?.HighPoint)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].after.LowPoint.ValueMinusInput={FormatFloatDelta(call.After?.LowPoint.Y, call.InputValue)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].after.MidPoint.ValueMinusInput={FormatFloatDelta(call.After?.MidPoint.Y, call.InputValue)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].after.HighPoint.ValueMinusInput={FormatFloatDelta(call.After?.HighPoint.Y, call.InputValue)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].activeBefore.Distance={FormatFloat(call.ActiveDistanceBefore)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].activeBefore.LookAtY={FormatFloat(call.ActiveLookAtYBefore)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].activeAfter.Distance={FormatFloat(call.ActiveDistanceAfter)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].activeAfter.LookAtY={FormatFloat(call.ActiveLookAtYAfter)}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].status={call.Status}");
+        lines.Add($"{prefix}.call[{call.CallIndex}].error={FormatNone(call.Error)}");
+    }
+
     private void RecordProbeLobbyUpdate(GameLobbyType mapId, int time)
     {
         if (_automaticProbeCountersEnabled)
@@ -3248,7 +3498,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             || IsHookEnabled(_loadLobbySceneHook)
             || IsHookEnabled(_lobbySceneLoadedHook)
             || IsHookEnabled(_cameraFixOnHook)
-            || IsHookEnabled(_calculateLobbyCameraLookAtYHook);
+            || IsHookEnabled(_calculateLobbyCameraLookAtYHook)
+            || IsHookEnabled(_setCameraCurveMidPointHook)
+            || IsHookEnabled(_calculateCameraCurveLowAndHighPointHook);
     }
 
     private static TitleBackgroundResolverMode NormalizeResolverMode(TitleBackgroundResolverMode mode)
@@ -3281,6 +3533,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         CurvePoint* lowPoint,
         CurvePoint* midPoint,
         CurvePoint* highPoint);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void SetCameraCurveMidPointDelegate(nint self, float value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void CalculateCameraCurveLowAndHighPointDelegate(nint self, float value);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct CurvePoint
@@ -3328,6 +3586,23 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         float? ReturnValue,
         float? ActiveLookAtYBeforeOriginal,
         float? ActiveLookAtYAfterOriginal,
+        string Status,
+        string Error);
+
+    private readonly record struct TitleBackgroundPhase2FGeneratedCurveCall(
+        int CallIndex,
+        int? Frame,
+        float InputValue,
+        float SavedCharacterY,
+        float SavedCurveLow,
+        float SavedCurveMid,
+        float SavedCurveHigh,
+        TitleBackgroundExpandedLobbyCameraSnapshot? Before,
+        TitleBackgroundExpandedLobbyCameraSnapshot? After,
+        float? ActiveDistanceBefore,
+        float? ActiveLookAtYBefore,
+        float? ActiveDistanceAfter,
+        float? ActiveLookAtYAfter,
         string Status,
         string Error);
 

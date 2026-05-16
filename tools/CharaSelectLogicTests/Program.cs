@@ -1059,7 +1059,11 @@ Test("title background phase2f accepts early stable curve timeline for one shot 
     return result.CurveGeneratedEarly == "observed"
         && result.CurveStableByFinalWindow == "observed"
         && result.CurveRegeneratedAfterEarlyFrame == "not-observed"
-        && result.OneShotWriteViability == "plausible";
+        && result.OneShotWriteViability == "plausible"
+        && result.CurvePointValuesChangedAfterEarlyFrame == "not-observed"
+        && result.CameraCurveEnabledTransitionObserved == "not-observed"
+        && result.OneShotCurvePointWriteValueStability == "observed"
+        && result.OneShotCurvePointWriteTimingRisk == "not-observed";
 });
 
 Test("title background phase2f flags late curve regeneration as one shot risk", () =>
@@ -1078,7 +1082,30 @@ Test("title background phase2f flags late curve regeneration as one shot risk", 
         && result.CurveStableByFinalWindow == "observed"
         && result.CurveRegeneratedAfterEarlyFrame == "observed"
         && result.LastChangedFrame == 60
+        && result.LastPointValueChangedFrame == 60
         && result.OneShotWriteViability == "risky";
+});
+
+Test("title background phase2f separates camera curve enabled transition from point value changes", () =>
+{
+    var samples = new[]
+    {
+        new TitleBackgroundPhase2FCurveTimelineSample(0, true, false, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(16, true, false, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(30, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(300, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(450, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+        new TitleBackgroundPhase2FCurveTimelineSample(600, true, true, 1.1f, 1.393f, 3.3f, 0.834f, 5.5f, 0.655f),
+    };
+
+    var result = TitleBackgroundCameraProbeReport.AnalyzePhase2F(samples);
+    return result.CurvePointValuesChangedAfterEarlyFrame == "not-observed"
+        && result.CurveRegeneratedAfterEarlyFrame == "not-observed"
+        && result.CameraCurveEnabledTransitionObserved == "observed"
+        && result.CameraCurveEnabledFirstObservedFrame == 30
+        && result.OneShotCurvePointWriteValueStability == "observed"
+        && result.OneShotCurvePointWriteTimingRisk == "observed"
+        && result.OneShotWriteViability == "plausible";
 });
 
 Test("title background capture preset builder keeps existing fov when unavailable", () =>
