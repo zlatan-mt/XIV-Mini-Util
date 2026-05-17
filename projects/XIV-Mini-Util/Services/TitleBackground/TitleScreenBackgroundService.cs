@@ -119,15 +119,23 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private readonly List<TitleBackgroundPhase2ECalculateLookAtYCall> _phase2ECalculateLookAtYCalls = [];
     private readonly List<TitleBackgroundPhase2FGeneratedCurveCall> _phase2FSetCameraCurveMidPointCalls = [];
     private readonly List<TitleBackgroundPhase2FGeneratedCurveCall> _phase2FCalculateCameraCurveLowAndHighPointCalls = [];
+    private readonly List<TitleBackgroundPhase2FGeneratedCurveCall> _phase2FSetCameraCurveMidPointInterestingCalls = [];
+    private readonly List<TitleBackgroundPhase2FGeneratedCurveCall> _phase2FCalculateCameraCurveLowAndHighPointInterestingCalls = [];
     private int _phase2ECalculateLookAtYCallCount;
     private int _phase2FSetCameraCurveMidPointCallCount;
     private int _phase2FCalculateCameraCurveLowAndHighPointCallCount;
+    private float? _phase2FSetCameraCurveMidPointPreviousInputValue;
+    private float? _phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue;
     private string _phase2ECalculateLookAtYLastError = string.Empty;
     private string _phase2FSetCameraCurveMidPointLastError = string.Empty;
     private string _phase2FCalculateCameraCurveLowAndHighPointLastError = string.Empty;
     private static readonly int[] CameraProbeTimelineFrames = [0, 1, 2, 4, 8, 16, 30, 60, 90, 120, 180, 240, 300, 450, 600];
+    private static readonly int[] Phase2FGeneratedCurveSamplingFrames = [0, 1, 2, 4, 8, 16, 30, 60, 90, 120];
     private const int Phase2EMaxRecordedCalls = 64;
     private const int Phase2FMaxRecordedGeneratedCurveCalls = 64;
+    private const int Phase2FMaxInterestingGeneratedCurveCalls = 256;
+    private const int Phase2FGeneratedCurveInterestingMaximumFrame = 120;
+    private const int Phase2FGeneratedCurveSamplingFrameRange = 1;
     private const int LobbyCameraExpandedCameraCurveEnabledOffset = 0x2C2;
     private const int LobbyCameraExpandedMidPointOffset = 0x2D0;
     private const int LobbyCameraExpandedLowPointOffset = 0x2E0;
@@ -417,6 +425,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             phase2EFinalStableLookAtY);
         var phase2FCurveSamples = BuildPhase2FCurveTimelineSamples(phase2CTimelineSamples);
         var phase2FVerdicts = TitleBackgroundCameraProbeReport.AnalyzePhase2F(phase2FCurveSamples);
+        var phase2FGeneratedCurveTransitions = BuildPhase2FGeneratedCurveTransitionSummary();
         var effectiveOverrideTerritoryId = GetEffectiveOverrideTerritoryId();
         var lines = new List<string>
         {
@@ -565,11 +574,20 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"verdict.phase2F.oneShotCurvePointWriteValueStability={phase2FVerdicts.OneShotCurvePointWriteValueStability}",
             $"verdict.phase2F.oneShotCurvePointWriteTimingRisk={phase2FVerdicts.OneShotCurvePointWriteTimingRisk}",
             $"phase2F.curveTimeline.lastPointValueChangedFrame={FormatFrame(phase2FVerdicts.LastPointValueChangedFrame)}",
+            $"phase2F.generatedCurveTransitions.count={phase2FGeneratedCurveTransitions.Count}",
+            $"phase2F.generatedCurveTransitions.firstFrame={FormatFrame(phase2FGeneratedCurveTransitions.FirstFrame)}",
+            $"phase2F.generatedCurveTransitions.lastFrame={FormatFrame(phase2FGeneratedCurveTransitions.LastFrame)}",
+            $"phase2F.generatedCurveTransitions.setCameraCurveMidPointCount={phase2FGeneratedCurveTransitions.SetCameraCurveMidPointCount}",
+            $"phase2F.generatedCurveTransitions.calculateCameraCurveLowAndHighPointCount={phase2FGeneratedCurveTransitions.CalculateCameraCurveLowAndHighPointCount}",
             $"phase2F.setCameraCurveMidPoint.callCount={_phase2FSetCameraCurveMidPointCallCount}",
             $"phase2F.setCameraCurveMidPoint.recordedCallCount={_phase2FSetCameraCurveMidPointCalls.Count}",
+            $"phase2F.setCameraCurveMidPoint.recentCallCount={_phase2FSetCameraCurveMidPointCalls.Count}",
+            $"phase2F.setCameraCurveMidPoint.interestingCallCount={_phase2FSetCameraCurveMidPointInterestingCalls.Count}",
             $"phase2F.setCameraCurveMidPoint.lastError={FormatNone(_phase2FSetCameraCurveMidPointLastError)}",
             $"phase2F.calculateCameraCurveLowAndHighPoint.callCount={_phase2FCalculateCameraCurveLowAndHighPointCallCount}",
             $"phase2F.calculateCameraCurveLowAndHighPoint.recordedCallCount={_phase2FCalculateCameraCurveLowAndHighPointCalls.Count}",
+            $"phase2F.calculateCameraCurveLowAndHighPoint.recentCallCount={_phase2FCalculateCameraCurveLowAndHighPointCalls.Count}",
+            $"phase2F.calculateCameraCurveLowAndHighPoint.interestingCallCount={_phase2FCalculateCameraCurveLowAndHighPointInterestingCalls.Count}",
             $"phase2F.calculateCameraCurveLowAndHighPoint.lastError={FormatNone(_phase2FCalculateCameraCurveLowAndHighPointLastError)}",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
@@ -707,9 +725,19 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             AddGeneratedCurveCallLines(lines, "phase2F.setCameraCurveMidPoint", call);
         }
 
+        foreach (var call in _phase2FSetCameraCurveMidPointInterestingCalls)
+        {
+            AddGeneratedCurveCallLines(lines, "phase2F.setCameraCurveMidPoint", "interestingCall", call);
+        }
+
         foreach (var call in _phase2FCalculateCameraCurveLowAndHighPointCalls)
         {
             AddGeneratedCurveCallLines(lines, "phase2F.calculateCameraCurveLowAndHighPoint", call);
+        }
+
+        foreach (var call in _phase2FCalculateCameraCurveLowAndHighPointInterestingCalls)
+        {
+            AddGeneratedCurveCallLines(lines, "phase2F.calculateCameraCurveLowAndHighPoint", "interestingCall", call);
         }
 
         lines.AddRange(
@@ -1563,8 +1591,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         catch (Exception ex)
         {
             _phase2FSetCameraCurveMidPointLastError = ex.Message;
-            RecordPhase2FGeneratedCurveCall(
-                _phase2FSetCameraCurveMidPointCalls,
+            RecordPhase2FSetCameraCurveMidPointCall(
                 BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, null, activeBefore, null, "original-error", ex.Message));
             throw;
         }
@@ -1576,8 +1603,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var status = beforeCaptured && afterCaptured ? "success" : "partial";
         var error = JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError);
         _phase2FSetCameraCurveMidPointLastError = error;
-        RecordPhase2FGeneratedCurveCall(
-            _phase2FSetCameraCurveMidPointCalls,
+        RecordPhase2FSetCameraCurveMidPointCall(
             BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
     }
 
@@ -1596,8 +1622,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         catch (Exception ex)
         {
             _phase2FCalculateCameraCurveLowAndHighPointLastError = ex.Message;
-            RecordPhase2FGeneratedCurveCall(
-                _phase2FCalculateCameraCurveLowAndHighPointCalls,
+            RecordPhase2FCalculateCameraCurveLowAndHighPointCall(
                 BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, null, activeBefore, null, "original-error", ex.Message));
             throw;
         }
@@ -1609,8 +1634,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var status = beforeCaptured && afterCaptured ? "success" : "partial";
         var error = JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError);
         _phase2FCalculateCameraCurveLowAndHighPointLastError = error;
-        RecordPhase2FGeneratedCurveCall(
-            _phase2FCalculateCameraCurveLowAndHighPointCalls,
+        RecordPhase2FCalculateCameraCurveLowAndHighPointCall(
             BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
     }
 
@@ -1840,6 +1864,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _phase2FCalculateCameraCurveLowAndHighPointLastError = string.Empty;
         _phase2FSetCameraCurveMidPointCalls.Clear();
         _phase2FCalculateCameraCurveLowAndHighPointCalls.Clear();
+        _phase2FSetCameraCurveMidPointInterestingCalls.Clear();
+        _phase2FCalculateCameraCurveLowAndHighPointInterestingCalls.Clear();
+        _phase2FSetCameraCurveMidPointPreviousInputValue = null;
+        _phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue = null;
     }
 
     private TitleBackgroundPhase2FGeneratedCurveCall BuildPhase2FGeneratedCurveCall(
@@ -1867,19 +1895,182 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             activeBefore?.LookAtVector.Y,
             activeAfter?.Distance,
             activeAfter?.LookAtVector.Y,
+            string.Empty,
+            0,
             status,
             error);
     }
 
+    private void RecordPhase2FSetCameraCurveMidPointCall(TitleBackgroundPhase2FGeneratedCurveCall call)
+    {
+        RecordPhase2FGeneratedCurveCall(
+            _phase2FSetCameraCurveMidPointCalls,
+            _phase2FSetCameraCurveMidPointInterestingCalls,
+            call,
+            _phase2FSetCameraCurveMidPointPreviousInputValue);
+        _phase2FSetCameraCurveMidPointPreviousInputValue = call.InputValue;
+    }
+
+    private void RecordPhase2FCalculateCameraCurveLowAndHighPointCall(TitleBackgroundPhase2FGeneratedCurveCall call)
+    {
+        RecordPhase2FGeneratedCurveCall(
+            _phase2FCalculateCameraCurveLowAndHighPointCalls,
+            _phase2FCalculateCameraCurveLowAndHighPointInterestingCalls,
+            call,
+            _phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue);
+        _phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue = call.InputValue;
+    }
+
     private static void RecordPhase2FGeneratedCurveCall(
         List<TitleBackgroundPhase2FGeneratedCurveCall> calls,
-        TitleBackgroundPhase2FGeneratedCurveCall call)
+        List<TitleBackgroundPhase2FGeneratedCurveCall> interestingCalls,
+        TitleBackgroundPhase2FGeneratedCurveCall call,
+        float? previousInputValue)
     {
         calls.Add(call);
         while (calls.Count > Phase2FMaxRecordedGeneratedCurveCalls)
         {
             calls.RemoveAt(0);
         }
+
+        if (!TryClassifyPhase2FGeneratedCurveInterestingCall(call, previousInputValue, out var interestingReason, out var interestingPriority))
+        {
+            return;
+        }
+
+        interestingCalls.Add(call with
+        {
+            InterestingReason = interestingReason,
+            InterestingPriority = interestingPriority,
+        });
+        while (interestingCalls.Count > Phase2FMaxInterestingGeneratedCurveCalls)
+        {
+            RemoveLowestPriorityGeneratedCurveCall(interestingCalls);
+        }
+    }
+
+    private static bool TryClassifyPhase2FGeneratedCurveInterestingCall(
+        TitleBackgroundPhase2FGeneratedCurveCall call,
+        float? previousInputValue,
+        out string reason,
+        out int priority)
+    {
+        reason = string.Empty;
+        priority = 0;
+        if (!call.Frame.HasValue)
+        {
+            return false;
+        }
+
+        var reasons = new List<string>();
+        if (call.Frame.Value >= 0 && call.Frame.Value <= Phase2FGeneratedCurveInterestingMaximumFrame)
+        {
+            reasons.Add("early-frame");
+            priority = Math.Max(priority, 10);
+        }
+
+        if (HasGeneratedCurvePointChanged(call))
+        {
+            reasons.Add("curve-point-changed");
+            priority = Math.Max(priority, 100);
+        }
+
+        if (HasGeneratedCurveEnabledChanged(call))
+        {
+            reasons.Add("camera-curve-enabled-changed");
+            priority = Math.Max(priority, 90);
+        }
+
+        if (previousInputValue.HasValue
+            && Math.Abs(call.InputValue - previousInputValue.Value) > TitleBackgroundCameraProbeReport.CurvePointTolerance)
+        {
+            reasons.Add("input-value-changed");
+            priority = Math.Max(priority, 50);
+        }
+
+        if (IsNearPhase2FGeneratedCurveSamplingFrame(call.Frame.Value))
+        {
+            reasons.Add("timeline-sampling-nearby");
+            priority = Math.Max(priority, 40);
+        }
+
+        if (reasons.Count == 0)
+        {
+            return false;
+        }
+
+        reason = string.Join(",", reasons);
+        return true;
+    }
+
+    private static void RemoveLowestPriorityGeneratedCurveCall(List<TitleBackgroundPhase2FGeneratedCurveCall> calls)
+    {
+        var removeIndex = 0;
+        for (var i = 1; i < calls.Count; i++)
+        {
+            if (calls[i].InterestingPriority < calls[removeIndex].InterestingPriority)
+            {
+                removeIndex = i;
+            }
+        }
+
+        calls.RemoveAt(removeIndex);
+    }
+
+    private static bool IsNearPhase2FGeneratedCurveSamplingFrame(int frame)
+    {
+        foreach (var samplingFrame in Phase2FGeneratedCurveSamplingFrames)
+        {
+            if (Math.Abs(frame - samplingFrame) <= Phase2FGeneratedCurveSamplingFrameRange)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private TitleBackgroundPhase2FGeneratedCurveTransitionSummary BuildPhase2FGeneratedCurveTransitionSummary()
+    {
+        var setCameraCurveMidPointCount = _phase2FSetCameraCurveMidPointInterestingCalls.Count(HasGeneratedCurvePointChanged);
+        var calculateCameraCurveLowAndHighPointCount = _phase2FCalculateCameraCurveLowAndHighPointInterestingCalls.Count(HasGeneratedCurvePointChanged);
+        var transitionFrames = _phase2FSetCameraCurveMidPointInterestingCalls
+            .Concat(_phase2FCalculateCameraCurveLowAndHighPointInterestingCalls)
+            .Where(HasGeneratedCurvePointChanged)
+            .Select(call => call.Frame)
+            .Where(frame => frame.HasValue)
+            .Select(frame => frame!.Value)
+            .Order()
+            .ToArray();
+
+        return new TitleBackgroundPhase2FGeneratedCurveTransitionSummary(
+            setCameraCurveMidPointCount + calculateCameraCurveLowAndHighPointCount,
+            transitionFrames.Length == 0 ? null : transitionFrames[0],
+            transitionFrames.Length == 0 ? null : transitionFrames[^1],
+            setCameraCurveMidPointCount,
+            calculateCameraCurveLowAndHighPointCount);
+    }
+
+    private static bool HasGeneratedCurveEnabledChanged(TitleBackgroundPhase2FGeneratedCurveCall call)
+    {
+        return call.Before.HasValue
+            && call.After.HasValue
+            && call.Before.Value.CameraCurveEnabled != call.After.Value.CameraCurveEnabled;
+    }
+
+    private static bool HasGeneratedCurvePointChanged(TitleBackgroundPhase2FGeneratedCurveCall call)
+    {
+        return call.Before.HasValue
+            && call.After.HasValue
+            && (!AreCurvePointsEqual(call.Before.Value.LowPoint, call.After.Value.LowPoint)
+                || !AreCurvePointsEqual(call.Before.Value.MidPoint, call.After.Value.MidPoint)
+                || !AreCurvePointsEqual(call.Before.Value.HighPoint, call.After.Value.HighPoint));
+    }
+
+    private static bool AreCurvePointsEqual(TitleBackgroundCurvePointSnapshot left, TitleBackgroundCurvePointSnapshot right)
+    {
+        return Math.Abs(left.X - right.X) <= TitleBackgroundCameraProbeReport.CurvePointTolerance
+            && Math.Abs(left.Y - right.Y) <= TitleBackgroundCameraProbeReport.CurvePointTolerance;
     }
 
     private static TitleBackgroundCurvePointSnapshot? ReadCurvePoint(CurvePoint* point)
@@ -3427,32 +3618,43 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         string prefix,
         TitleBackgroundPhase2FGeneratedCurveCall call)
     {
-        lines.Add($"{prefix}.call[{call.CallIndex}].frame={FormatFrame(call.Frame)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].inputValue={FormatFloat(call.InputValue)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].savedCharacterY={FormatFloat(call.SavedCharacterY)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveLow={FormatFloat(call.SavedCurveLow)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveMid={FormatFloat(call.SavedCurveMid)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveHigh={FormatFloat(call.SavedCurveHigh)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveLowMinusCharacterY={FormatFloat(call.SavedCurveLow - call.SavedCharacterY)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveMidMinusCharacterY={FormatFloat(call.SavedCurveMid - call.SavedCharacterY)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].savedCurveHighMinusCharacterY={FormatFloat(call.SavedCurveHigh - call.SavedCharacterY)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].before.CameraCurveEnabled={FormatBool(call.Before?.CameraCurveEnabled)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].before.lowPoint={FormatCurvePoint(call.Before?.LowPoint)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].before.midPoint={FormatCurvePoint(call.Before?.MidPoint)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].before.highPoint={FormatCurvePoint(call.Before?.HighPoint)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].after.CameraCurveEnabled={FormatBool(call.After?.CameraCurveEnabled)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].after.lowPoint={FormatCurvePoint(call.After?.LowPoint)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].after.midPoint={FormatCurvePoint(call.After?.MidPoint)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].after.highPoint={FormatCurvePoint(call.After?.HighPoint)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].after.LowPoint.ValueMinusInput={FormatFloatDelta(call.After?.LowPoint.Y, call.InputValue)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].after.MidPoint.ValueMinusInput={FormatFloatDelta(call.After?.MidPoint.Y, call.InputValue)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].after.HighPoint.ValueMinusInput={FormatFloatDelta(call.After?.HighPoint.Y, call.InputValue)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].activeBefore.Distance={FormatFloat(call.ActiveDistanceBefore)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].activeBefore.LookAtY={FormatFloat(call.ActiveLookAtYBefore)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].activeAfter.Distance={FormatFloat(call.ActiveDistanceAfter)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].activeAfter.LookAtY={FormatFloat(call.ActiveLookAtYAfter)}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].status={call.Status}");
-        lines.Add($"{prefix}.call[{call.CallIndex}].error={FormatNone(call.Error)}");
+        AddGeneratedCurveCallLines(lines, prefix, "call", call);
+    }
+
+    private static void AddGeneratedCurveCallLines(
+        List<string> lines,
+        string prefix,
+        string callLabel,
+        TitleBackgroundPhase2FGeneratedCurveCall call)
+    {
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].frame={FormatFrame(call.Frame)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].inputValue={FormatFloat(call.InputValue)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].interestingReason={FormatNone(call.InterestingReason)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].interestingPriority={call.InterestingPriority}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].savedCharacterY={FormatFloat(call.SavedCharacterY)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].savedCurveLow={FormatFloat(call.SavedCurveLow)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].savedCurveMid={FormatFloat(call.SavedCurveMid)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].savedCurveHigh={FormatFloat(call.SavedCurveHigh)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].savedCurveLowMinusCharacterY={FormatFloat(call.SavedCurveLow - call.SavedCharacterY)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].savedCurveMidMinusCharacterY={FormatFloat(call.SavedCurveMid - call.SavedCharacterY)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].savedCurveHighMinusCharacterY={FormatFloat(call.SavedCurveHigh - call.SavedCharacterY)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].before.CameraCurveEnabled={FormatBool(call.Before?.CameraCurveEnabled)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].before.lowPoint={FormatCurvePoint(call.Before?.LowPoint)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].before.midPoint={FormatCurvePoint(call.Before?.MidPoint)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].before.highPoint={FormatCurvePoint(call.Before?.HighPoint)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].after.CameraCurveEnabled={FormatBool(call.After?.CameraCurveEnabled)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].after.lowPoint={FormatCurvePoint(call.After?.LowPoint)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].after.midPoint={FormatCurvePoint(call.After?.MidPoint)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].after.highPoint={FormatCurvePoint(call.After?.HighPoint)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].after.LowPoint.ValueMinusInput={FormatFloatDelta(call.After?.LowPoint.Y, call.InputValue)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].after.MidPoint.ValueMinusInput={FormatFloatDelta(call.After?.MidPoint.Y, call.InputValue)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].after.HighPoint.ValueMinusInput={FormatFloatDelta(call.After?.HighPoint.Y, call.InputValue)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].activeBefore.Distance={FormatFloat(call.ActiveDistanceBefore)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].activeBefore.LookAtY={FormatFloat(call.ActiveLookAtYBefore)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].activeAfter.Distance={FormatFloat(call.ActiveDistanceAfter)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].activeAfter.LookAtY={FormatFloat(call.ActiveLookAtYAfter)}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].status={call.Status}");
+        lines.Add($"{prefix}.{callLabel}[{call.CallIndex}].error={FormatNone(call.Error)}");
     }
 
     private void RecordProbeLobbyUpdate(GameLobbyType mapId, int time)
@@ -3603,8 +3805,17 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         float? ActiveLookAtYBefore,
         float? ActiveDistanceAfter,
         float? ActiveLookAtYAfter,
+        string InterestingReason,
+        int InterestingPriority,
         string Status,
         string Error);
+
+    private readonly record struct TitleBackgroundPhase2FGeneratedCurveTransitionSummary(
+        int Count,
+        int? FirstFrame,
+        int? LastFrame,
+        int SetCameraCurveMidPointCount,
+        int CalculateCameraCurveLowAndHighPointCount);
 
     private readonly record struct TitleBackgroundPhase2CVerdicts(
         string LookAtYImmediateReflection,
