@@ -162,6 +162,43 @@ internal static class TitleBackgroundCharaSelectCameraLogic
             TitleBackgroundPreset.SanitizeCoordinate(MagicHigh + y));
     }
 
+    public static bool TryBuildPoseFromCameraFocus(
+        Vector3 camera,
+        Vector3 focus,
+        out float yaw,
+        out float pitch,
+        out float distance,
+        out float lookAtY,
+        out string errorMessage)
+    {
+        yaw = 0f;
+        pitch = 0f;
+        distance = 0f;
+        lookAtY = 0f;
+        errorMessage = string.Empty;
+        if (!TitleBackgroundCameraMath.IsFiniteVector(camera)
+            || !TitleBackgroundCameraMath.IsFiniteVector(focus))
+        {
+            errorMessage = "preset camera/focus contains non-finite values";
+            return false;
+        }
+
+        var direction = focus - camera;
+        distance = direction.Length();
+        if (!float.IsFinite(distance) || distance < MinDistance)
+        {
+            errorMessage = "preset camera/focus distance is too small";
+            return false;
+        }
+
+        var horizontalDistance = MathF.Sqrt((direction.X * direction.X) + (direction.Z * direction.Z));
+        yaw = NormalizeRadians(MathF.Atan2(direction.X, direction.Z));
+        pitch = Math.Clamp(MathF.Atan2(direction.Y, horizontalDistance), -MathF.PI / 2f, MathF.PI / 2f);
+        distance = Math.Clamp(distance, MinDistance, MaxDistance);
+        lookAtY = TitleBackgroundPreset.SanitizeCoordinate(focus.Y);
+        return true;
+    }
+
     public static float CalculateYawOffset(float yaw, float characterRotation)
     {
         return NormalizeRadians(yaw - characterRotation);

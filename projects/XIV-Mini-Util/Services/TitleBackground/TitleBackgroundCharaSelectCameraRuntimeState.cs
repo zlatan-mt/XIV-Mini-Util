@@ -77,6 +77,29 @@ internal readonly record struct TitleBackgroundCharaSelectCameraRuntimeState(
             sceneGeneration);
     }
 
+    public static TitleBackgroundCharaSelectCameraRuntimeState FromPresetPose(
+        float yaw,
+        float pitch,
+        float distance,
+        float lookAtY,
+        Vector3? lookAt,
+        TitleBackgroundCharaSelectCameraCurve curveAtRecord,
+        float characterRotation,
+        int sceneGeneration)
+    {
+        return Create(
+            yaw,
+            null,
+            pitch,
+            distance,
+            lookAtY,
+            lookAt,
+            curveAtRecord,
+            TitleBackgroundCharaSelectCameraLogic.NormalizeRadians(characterRotation),
+            true,
+            sceneGeneration);
+    }
+
     public float? GetRestoredYaw(float characterRotation)
     {
         return YawOffset.HasValue

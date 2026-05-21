@@ -108,6 +108,19 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
             RuntimeState.SceneGeneration);
     }
 
+    public void SavePresetCameraState(float yaw, float pitch, float distance, float lookAtY, System.Numerics.Vector3? lookAt)
+    {
+        RuntimeState = TitleBackgroundCharaSelectCameraRuntimeState.FromPresetPose(
+            yaw,
+            pitch,
+            distance,
+            lookAtY,
+            lookAt,
+            Curve,
+            Input.CharacterRotation,
+            RuntimeState.SceneGeneration);
+    }
+
     public float? GetRestoredYaw()
     {
         return RuntimeState.GetRestoredYaw(Input.CharacterRotation);

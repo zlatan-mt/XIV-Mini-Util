@@ -79,6 +79,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private float? _runtimeRestoreLastRestoredYaw;
     private float? _runtimeRestoreLastRestoredPitch;
     private float? _runtimeRestoreLastRestoredDistance;
+    private float? _runtimeRestoreLastRestoredFovY;
     private int _curveApplyAttemptCount;
     private int _curveApplySuccessCount;
     private string _curveApplyLastStatus = "not-run";
@@ -493,7 +494,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             .FirstOrDefault();
         var phase2CVerdicts = BuildPhase2CVerdicts(phase2CStableSample);
         var phase2DLatestSample = phase2CTimelineSamples
-            .Where(sample => sample.ActiveCameraCaptured)
+            .Where(sample => sample.ActiveCameraCaptured || sample.LobbyCameraCaptured || sample.ExpandedLobbyCameraCaptured)
             .OrderByDescending(sample => sample.Frame)
             .FirstOrDefault();
         var phase2DVerdicts = BuildPhase2DVerdicts(phase2CTimelineSamples);
@@ -539,6 +540,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"lastOverrideNewPath={FormatNone(_lastOverrideNewPath)}",
             $"lastOverrideTerritoryId={_lastOverrideTerritoryId}",
             $"lastOverrideLayerFilterKey={_lastOverrideLayerFilterKey}",
+            $"failureSummary={BuildFailureSummary(phase2DLatestSample)}",
             $"hooksReady={hooksReady}",
             $"sceneHooksReady={sceneHooksReady}",
             $"cameraHookReady={cameraHookReady}",
@@ -592,11 +594,20 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"runtimeRestore.successCount={_runtimeRestoreSuccessCount}",
             $"runtimeRestore.lastStatus={_lastCharaSelectCameraRuntimeRestoreStatus}",
             $"runtimeRestore.lastFailureReason={FormatNone(_lastCharaSelectCameraRuntimeRestoreFailureReason)}",
-            "runtimeRestore.target=ActiveCamera.DirH/DirV/Distance/InterpDistance",
+            "runtimeRestore.target=LobbyCamera.DirH/DirV/Distance/InterpDistance/FoV",
             $"runtimeRestore.restoredYaw={FormatFloat(_runtimeRestoreLastRestoredYaw)}",
             $"runtimeRestore.restoredPitch={FormatFloat(_runtimeRestoreLastRestoredPitch)}",
             $"runtimeRestore.restoredDistance={FormatFloat(_runtimeRestoreLastRestoredDistance)}",
+            $"runtimeRestore.restoredFovY={FormatFloat(_runtimeRestoreLastRestoredFovY)}",
             $"runtimeRestore.appliedFrame={FormatFrame(_runtimeRestoreAppliedFrame)}",
+            $"cameraOneShotApply.status={_lastCharaSelectCameraRuntimeRestoreStatus}",
+            $"cameraOneShotApply.failureReason={FormatNone(_lastCharaSelectCameraRuntimeRestoreFailureReason)}",
+            $"cameraOneShotApply.appliedYaw={FormatFloat(_runtimeRestoreLastRestoredYaw)}",
+            $"cameraOneShotApply.appliedPitch={FormatFloat(_runtimeRestoreLastRestoredPitch)}",
+            $"cameraOneShotApply.appliedDistance={FormatFloat(_runtimeRestoreLastRestoredDistance)}",
+            $"cameraOneShotApply.finalYaw={FormatFloat(phase2DLatestSample.LobbyDirH)}",
+            $"cameraOneShotApply.finalPitch={FormatFloat(phase2DLatestSample.LobbyDirV)}",
+            $"cameraOneShotApply.finalDistance={FormatFloat(phase2DLatestSample.LobbyDistance)}",
             $"curveApply.attemptCount={_curveApplyAttemptCount}",
             $"curveApply.successCount={_curveApplySuccessCount}",
             $"curveApply.lastStatus={_curveApplyLastStatus}",
@@ -604,6 +615,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"curveApply.appliedLow={FormatFloat(_curveApplyLastAppliedLow)}",
             $"curveApply.appliedMid={FormatFloat(_curveApplyLastAppliedMid)}",
             $"curveApply.appliedHigh={FormatFloat(_curveApplyLastAppliedHigh)}",
+            $"curveApply.finalLow={FormatFloat(phase2DLatestSample.LowPoint?.Y)}",
+            $"curveApply.finalMid={FormatFloat(phase2DLatestSample.MidPoint?.Y)}",
+            $"curveApply.finalHigh={FormatFloat(phase2DLatestSample.HighPoint?.Y)}",
             "curveApply.target=LobbyCamera.SetTiltOffset(mid); low/mid/high are recorded because FFXIVClientStructs does not expose separate lobby camera curve fields",
             $"curveApply.appliedFrame={FormatFrame(_curveApplyAppliedFrame)}",
             $"curveApply.requestedMid={FormatFloat(_curveApplyRequestedMid)}",
@@ -625,6 +639,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"lookAtYApply.lastStatus={_lookAtYApplyLastStatus}",
             $"lookAtYApply.lastFailureReason={FormatNone(_lookAtYApplyLastFailureReason)}",
             $"lookAtYApply.appliedValue={FormatFloat(_lookAtYApplyLastAppliedValue)}",
+            $"lookAtYApply.finalValue={FormatFloat(phase2DLatestSample.SceneCameraLookAtVector?.Y)}",
             "lookAtYApply.target=LobbyCamera.LastLookAtVector.Y",
             $"lookAtYApply.appliedFrame={FormatFrame(_lookAtYApplyAppliedFrame)}",
             $"lookAtYApply.requestedValue={FormatFloat(_lookAtYApplyRequestedValue)}",
@@ -2184,6 +2199,52 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             : "not-observed";
     }
 
+    private string BuildFailureSummary(TitleBackgroundPhase2CTimelineSnapshot latestSample)
+    {
+        var items = new List<string>();
+        if (!_lastOverrideApplied)
+        {
+            items.Add("scene-not-overridden");
+        }
+
+        if (_sceneReadySignalAcceptedCount == 0)
+        {
+            items.Add("scene-ready-not-accepted");
+        }
+
+        if (_lastCharaSelectCameraRuntimeRecordStatus is "failed")
+        {
+            items.Add($"camera-pose-build-failed:{FormatNone(_lastCharaSelectCameraRuntimeRecordError)}");
+        }
+
+        if (_lastCharaSelectCameraRuntimeRestoreStatus is "failed")
+        {
+            items.Add($"camera-apply-failed:{FormatNone(_lastCharaSelectCameraRuntimeRestoreFailureReason)}");
+        }
+
+        if (_curveApplyLastStatus is "failed")
+        {
+            items.Add($"curve-apply-failed:{FormatNone(_curveApplyLastFailureReason)}");
+        }
+
+        if (_lookAtYApplyLastStatus is "failed")
+        {
+            items.Add($"lookAtY-apply-failed:{FormatNone(_lookAtYApplyLastFailureReason)}");
+        }
+
+        if (!latestSample.LobbyCameraCaptured)
+        {
+            items.Add("final-lobby-camera-missing");
+        }
+
+        if (!latestSample.ExpandedLobbyCameraCaptured)
+        {
+            items.Add("final-curve-missing");
+        }
+
+        return items.Count == 0 ? "none" : string.Join(",", items);
+    }
+
     private void ClearSelfTestObservationBuffers()
     {
         ResetSceneOverrideObservation();
@@ -2990,27 +3051,35 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         if (!ShouldRecordCharaSelectRuntimeCameraState(mapId))
         {
             _lastCharaSelectCameraRuntimeRecordStatus = "skipped";
+            _lastCharaSelectCameraRuntimeRecordError = string.Empty;
             return;
         }
 
-        if (!TryCaptureActiveCameraRuntimePose(out var pose, out var errorMessage))
+        if (IsRuntimeCameraStateCurrentPreset())
+        {
+            _lastCharaSelectCameraRuntimeRecordStatus = "kept-runtime";
+            _lastCharaSelectCameraRuntimeRecordError = string.Empty;
+            return;
+        }
+
+        if (!TryBuildPresetCameraRuntimePose(out var pose, out var errorMessage))
         {
             _lastCharaSelectCameraRuntimeRecordStatus = "failed";
             _lastCharaSelectCameraRuntimeRecordError = errorMessage;
-            _log.Debug("[XMU BG] CharaSelect camera runtime state capture skipped. reason={Reason}", errorMessage);
+            _log.Debug("[XMU BG] CharaSelect camera preset pose build skipped. reason={Reason}", errorMessage);
             return;
         }
 
-        _charaSelectCameraAdapter.SaveRuntimeCameraState(
+        _charaSelectCameraAdapter.SavePresetCameraState(
             pose.Yaw,
             pose.Pitch,
             pose.Distance,
             pose.LookAtY,
             pose.LookAt);
-        _lastCharaSelectCameraRuntimeRecordStatus = "success";
+        _lastCharaSelectCameraRuntimeRecordStatus = "preset-derived";
         _lastCharaSelectCameraRuntimeRecordError = string.Empty;
         _log.Debug(
-            "[XMU BG] CharaSelect camera runtime state recorded. yaw={Yaw}, pitch={Pitch}, distance={Distance}, lookAtY={LookAtY}, generation={Generation}",
+            "[XMU BG] CharaSelect camera preset pose derived. yaw={Yaw}, pitch={Pitch}, distance={Distance}, lookAtY={LookAtY}, generation={Generation}",
             pose.Yaw,
             pose.Pitch,
             pose.Distance,
@@ -3024,6 +3093,73 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             && !IsHookProbeMode()
             && TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(mapId)
             && _charaSelectCameraAdapter.IsArmed;
+    }
+
+    private bool IsRuntimeCameraStateCurrentPreset()
+    {
+        var runtimeState = _charaSelectCameraAdapter.RuntimeState;
+        if (!runtimeState.HasCameraPose || !runtimeState.HasLookAt || !runtimeState.CurveAtRecord.HasValue)
+        {
+            return false;
+        }
+
+        if (!TryBuildPresetCameraRuntimePose(out var expectedPose, out _))
+        {
+            return false;
+        }
+
+        var expectedFocus = new Vector3(
+            _configuration.TitleBackgroundFocusX,
+            _configuration.TitleBackgroundFocusY,
+            _configuration.TitleBackgroundFocusZ);
+        var curve = _charaSelectCameraAdapter.Curve;
+        var restoredYaw = runtimeState.GetRestoredYaw(_charaSelectCameraAdapter.Input.CharacterRotation);
+        return restoredYaw.HasValue
+            && IsNear(restoredYaw.Value, expectedPose.Yaw)
+            && runtimeState.Pitch.HasValue
+            && IsNear(runtimeState.Pitch.Value, expectedPose.Pitch)
+            && runtimeState.Distance.HasValue
+            && IsNear(runtimeState.Distance.Value, expectedPose.Distance)
+            && TitleBackgroundCameraMath.CalculateVectorDelta(runtimeState.LookAt, expectedFocus) is { } focusDelta
+            && Math.Abs(focusDelta.X) <= TitleBackgroundCameraProbeReport.StabilizationVectorTolerance
+            && Math.Abs(focusDelta.Y) <= TitleBackgroundCameraProbeReport.StabilizationVectorTolerance
+            && Math.Abs(focusDelta.Z) <= TitleBackgroundCameraProbeReport.StabilizationVectorTolerance
+            && IsNear(runtimeState.CurveAtRecord.Value.Low, curve.Low)
+            && IsNear(runtimeState.CurveAtRecord.Value.Mid, curve.Mid)
+            && IsNear(runtimeState.CurveAtRecord.Value.High, curve.High);
+    }
+
+    private bool TryBuildPresetCameraRuntimePose(out TitleBackgroundRuntimeCameraPose pose, out string errorMessage)
+    {
+        pose = default;
+        var camera = new Vector3(
+            _configuration.TitleBackgroundCameraX,
+            _configuration.TitleBackgroundCameraY,
+            _configuration.TitleBackgroundCameraZ);
+        var focus = new Vector3(
+            _configuration.TitleBackgroundFocusX,
+            _configuration.TitleBackgroundFocusY,
+            _configuration.TitleBackgroundFocusZ);
+
+        if (!TitleBackgroundCharaSelectCameraLogic.TryBuildPoseFromCameraFocus(
+                camera,
+                focus,
+                out var yaw,
+                out var pitch,
+                out var distance,
+                out var lookAtY,
+                out errorMessage))
+        {
+            return false;
+        }
+
+        pose = new TitleBackgroundRuntimeCameraPose(
+            yaw,
+            pitch,
+            distance,
+            lookAtY,
+            focus);
+        return true;
     }
 
     private GameLobbyType ResolveSceneReadySignalLobbyMap()
@@ -3077,6 +3213,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _runtimeRestoreLastRestoredYaw = restoredYaw;
         _runtimeRestoreLastRestoredPitch = restoredPitch;
         _runtimeRestoreLastRestoredDistance = restoredDistance;
+        _runtimeRestoreLastRestoredFovY = _configuration.TitleBackgroundFovY;
         _runtimeRestoreAppliedFrame = GetCurrentPhase2CFrame();
         _log.Information(
             "[XMU BG] CharaSelect camera runtime state restored. yaw={Yaw}, pitch={Pitch}, distance={Distance}, generation={Generation}",
@@ -3371,63 +3508,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             lobbyCamera->DirV = runtimeState.Pitch.Value;
             lobbyCamera->Distance = runtimeState.Distance.Value;
             lobbyCamera->InterpDistance = runtimeState.Distance.Value;
+            lobbyCamera->FoV = _configuration.TitleBackgroundFovY;
             return true;
         }
         catch (Exception ex)
         {
             errorMessage = ex.Message;
             _log.Warning(ex, "TitleBackground runtime camera pose restore failed.");
-            return false;
-        }
-    }
-
-    private bool TryCaptureActiveCameraRuntimePose(out TitleBackgroundRuntimeCameraPose pose, out string errorMessage)
-    {
-        pose = default;
-        errorMessage = string.Empty;
-        try
-        {
-            var cameraManager = CameraManager.Instance();
-            if (cameraManager == null)
-            {
-                errorMessage = "CameraManager.Instance() unavailable";
-                return false;
-            }
-
-            var activeCamera = cameraManager->GetActiveCamera();
-            if (activeCamera == null)
-            {
-                errorMessage = "active camera unavailable";
-                return false;
-            }
-
-            var lookAt = ToNumerics(activeCamera->CameraBase.SceneCamera.LookAtVector);
-            if (!TitleBackgroundCameraMath.IsFiniteVector(lookAt))
-            {
-                errorMessage = "SceneCamera.LookAtVector contains non-finite values";
-                return false;
-            }
-
-            if (!float.IsFinite(activeCamera->DirH)
-                || !float.IsFinite(activeCamera->DirV)
-                || !float.IsFinite(activeCamera->Distance))
-            {
-                errorMessage = "camera yaw/pitch/distance contains non-finite values";
-                return false;
-            }
-
-            pose = new TitleBackgroundRuntimeCameraPose(
-                activeCamera->DirH,
-                activeCamera->DirV,
-                activeCamera->Distance,
-                lookAt.Y,
-                lookAt);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = ex.Message;
-            _log.Warning(ex, "TitleBackground runtime camera pose capture failed.");
             return false;
         }
     }
@@ -3647,6 +3734,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _runtimeRestoreLastRestoredYaw = null;
         _runtimeRestoreLastRestoredPitch = null;
         _runtimeRestoreLastRestoredDistance = null;
+        _runtimeRestoreLastRestoredFovY = null;
         _runtimeRestoreAppliedFrame = null;
         _curveApplyAttemptCount = 0;
         _curveApplySuccessCount = 0;

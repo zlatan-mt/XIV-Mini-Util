@@ -253,11 +253,11 @@ public sealed class Plugin : IDalamudPlugin
         });
         _commandManager.AddHandler(TitleBackgroundSelfTestCommandName, new CommandInfo(OnTitleBackgroundSelfTestCommand)
         {
-            HelpMessage = "タイトル背景差し替えのself-testを実行し、PASS/FAILを1行で表示します。",
+            HelpMessage = "debug-only: タイトル背景差し替えのself-testを実行します。通常確認では使用しません。",
         });
         _commandManager.AddHandler(TitleBackgroundReloadCommandName, new CommandInfo(OnTitleBackgroundReloadCommand)
         {
-            HelpMessage = "キャラ選択ロビー中にタイトル背景とカメラを再適用します。",
+            HelpMessage = "debug-only: キャラ選択ロビー中にタイトル背景とカメラを再適用します。通常確認では使用しません。",
         });
         _shopSearchService.OnSearchCompleted += OnShopSearchCompleted;
         _ = InitializeShopDataAsync();
@@ -536,8 +536,6 @@ public sealed class Plugin : IDalamudPlugin
         _chatGui.Print("/xmuc : キャラ選択画面のエモート/声診断情報を表示します。");
         _chatGui.Print("/xmutbg : タイトル背景差し替えの診断情報を表示します。");
         _chatGui.Print("/xmutbg copy : タイトル背景差し替えの診断情報をクリップボードへコピーします。");
-        _chatGui.Print("/xmutbgtest : タイトル背景差し替えのself-testを実行します。");
-        _chatGui.Print("/xmutbgreload : キャラ選択ロビー中に背景とカメラを再適用します。");
         _chatGui.Print("/xmutbgcamprobe arm-y : CameraY / FocusY one-shot probeを準備します。");
         _chatGui.Print("/xmu : /xivminiutil のエイリアス");
     }

@@ -463,6 +463,37 @@ Test("title background camera override plan clamps fov", () =>
     return plan.FovY == TitleBackgroundPreset.MaxFovY;
 });
 
+Test("title background preset camera focus derives lobby pose", () =>
+{
+    var camera = new Vector3(0f, 1f, 0f);
+    var focus = new Vector3(0f, 1f, 10f);
+    return TitleBackgroundCharaSelectCameraLogic.TryBuildPoseFromCameraFocus(
+            camera,
+            focus,
+            out var yaw,
+            out var pitch,
+            out var distance,
+            out var lookAtY,
+            out _)
+        && Math.Abs(yaw) < 0.0001f
+        && Math.Abs(pitch) < 0.0001f
+        && Math.Abs(distance - 10f) < 0.0001f
+        && Math.Abs(lookAtY - 1f) < 0.0001f;
+});
+
+Test("title background preset camera focus rejects zero distance", () =>
+{
+    return !TitleBackgroundCharaSelectCameraLogic.TryBuildPoseFromCameraFocus(
+        new Vector3(1f, 2f, 3f),
+        new Vector3(1f, 2f, 3f),
+        out _,
+        out _,
+        out _,
+        out _,
+        out var errorMessage)
+        && errorMessage.Contains("distance", StringComparison.Ordinal);
+});
+
 Test("title background legacy direct camera apply is disabled", () =>
 {
     return !TitleBackgroundCameraOverridePlan.ShouldApply(
