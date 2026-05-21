@@ -129,6 +129,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private string _phase2ECalculateLookAtYLastError = string.Empty;
     private string _phase2FSetCameraCurveMidPointLastError = string.Empty;
     private string _phase2FCalculateCameraCurveLowAndHighPointLastError = string.Empty;
+    private int _phase2GGenerationOverrideSetMidAttemptCount;
+    private int _phase2GGenerationOverrideSetMidAppliedCount;
+    private int _phase2GGenerationOverrideLowHighAttemptCount;
+    private int _phase2GGenerationOverrideLowHighAppliedCount;
+    private int? _phase2GGenerationOverrideLastAppliedFrame;
+    private int _phase2GGenerationOverrideLastAppliedSceneGeneration;
+    private string _phase2GGenerationOverrideLastStatus = "not-run";
+    private string _phase2GGenerationOverrideLastSkippedReason = string.Empty;
     private static readonly int[] CameraProbeTimelineFrames = [0, 1, 2, 4, 8, 16, 30, 60, 90, 120, 180, 240, 300, 450, 600];
     private static readonly int[] Phase2FGeneratedCurveSamplingFrames = [0, 1, 2, 4, 8, 16, 30, 60, 90, 120];
     private const int Phase2EMaxRecordedCalls = 64;
@@ -426,6 +434,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var phase2FCurveSamples = BuildPhase2FCurveTimelineSamples(phase2CTimelineSamples);
         var phase2FVerdicts = TitleBackgroundCameraProbeReport.AnalyzePhase2F(phase2FCurveSamples);
         var phase2FGeneratedCurveTransitions = BuildPhase2FGeneratedCurveTransitionSummary();
+        var phase2GGeneratedCurveOverrideEffective = BuildPhase2GGeneratedCurveOverrideEffectiveVerdict(phase2FCurveSamples);
+        var phase2GFinalLookAtYMatchesTarget = BuildPhase2GFinalLookAtYMatchesTargetVerdict(phase2DLatestSample);
         var effectiveOverrideTerritoryId = GetEffectiveOverrideTerritoryId();
         var lines = new List<string>
         {
@@ -463,8 +473,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"calculateCameraCurveLowAndHighPointHookEnabled={IsHookEnabled(_calculateCameraCurveLowAndHighPointHook)}",
             "fixOnHookPolicy=disabled-in-phase1",
             "calculateLobbyCameraLookAtYHookPolicy=read-only-probe",
-            "setCameraCurveMidPointHookPolicy=read-only-probe",
-            "calculateCameraCurveLowAndHighPointHookPolicy=read-only-probe",
+            "setCameraCurveMidPointHookPolicy=phase2g-post-original-generation-override",
+            "calculateCameraCurveLowAndHighPointHookPolicy=phase2g-post-original-generation-override",
             $"cameraOverrideEnabled={_configuration.TitleBackgroundCameraOverrideEnabled}",
             $"charaSelectCameraAdapter.state={_charaSelectCameraAdapter.State}",
             $"charaSelectCameraAdapter.lastEvent={_charaSelectCameraAdapter.LastEvent}",
@@ -589,6 +599,19 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"phase2F.calculateCameraCurveLowAndHighPoint.recentCallCount={_phase2FCalculateCameraCurveLowAndHighPointCalls.Count}",
             $"phase2F.calculateCameraCurveLowAndHighPoint.interestingCallCount={_phase2FCalculateCameraCurveLowAndHighPointInterestingCalls.Count}",
             $"phase2F.calculateCameraCurveLowAndHighPoint.lastError={FormatNone(_phase2FCalculateCameraCurveLowAndHighPointLastError)}",
+            $"phase2G.generationOverride.enabled={IsPhase2GGenerationOverrideConfigured()}",
+            "phase2G.generationOverride.writeTiming=post-original",
+            "phase2G.generationOverride.writeScope=generated-curve-points-only",
+            $"phase2G.generationOverride.setMid.attemptCount={_phase2GGenerationOverrideSetMidAttemptCount}",
+            $"phase2G.generationOverride.setMid.appliedCount={_phase2GGenerationOverrideSetMidAppliedCount}",
+            $"phase2G.generationOverride.lowHigh.attemptCount={_phase2GGenerationOverrideLowHighAttemptCount}",
+            $"phase2G.generationOverride.lowHigh.appliedCount={_phase2GGenerationOverrideLowHighAppliedCount}",
+            $"phase2G.generationOverride.lastAppliedFrame={FormatFrame(_phase2GGenerationOverrideLastAppliedFrame)}",
+            $"phase2G.generationOverride.lastAppliedSceneGeneration={_phase2GGenerationOverrideLastAppliedSceneGeneration}",
+            $"phase2G.generationOverride.lastStatus={FormatNone(_phase2GGenerationOverrideLastStatus)}",
+            $"phase2G.generationOverride.lastSkippedReason={FormatNone(_phase2GGenerationOverrideLastSkippedReason)}",
+            $"verdict.phase2G.generatedCurveOverrideEffective={phase2GGeneratedCurveOverrideEffective}",
+            $"verdict.phase2G.finalLookAtYMatchesTarget={phase2GFinalLookAtYMatchesTarget}",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
             $"cameraCapture.lastStatus={_lastCameraCaptureResult.Status}",
@@ -1584,9 +1607,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var activeBefore = TryCaptureActiveCameraSnapshot(out var activeBeforeSnapshot, out _)
             ? activeBeforeSnapshot
             : (TitleBackgroundActiveCameraSnapshot?)null;
+        string phase2GStatus;
+        string phase2GError;
         try
         {
             _setCameraCurveMidPointHook?.Original(self, value);
+            TryApplyPhase2GSetCameraCurveMidPointOverride(self, frame, out phase2GStatus, out phase2GError);
         }
         catch (Exception ex)
         {
@@ -1601,7 +1627,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             ? activeAfterSnapshot
             : (TitleBackgroundActiveCameraSnapshot?)null;
         var status = beforeCaptured && afterCaptured ? "success" : "partial";
-        var error = JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError);
+        status = string.IsNullOrWhiteSpace(phase2GStatus) ? status : $"{status}; phase2G={phase2GStatus}";
+        var error = JoinErrors(JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError), phase2GError);
         _phase2FSetCameraCurveMidPointLastError = error;
         RecordPhase2FSetCameraCurveMidPointCall(
             BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
@@ -1615,9 +1642,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var activeBefore = TryCaptureActiveCameraSnapshot(out var activeBeforeSnapshot, out _)
             ? activeBeforeSnapshot
             : (TitleBackgroundActiveCameraSnapshot?)null;
+        string phase2GStatus;
+        string phase2GError;
         try
         {
             _calculateCameraCurveLowAndHighPointHook?.Original(self, value);
+            TryApplyPhase2GLowHighCurveOverride(self, frame, out phase2GStatus, out phase2GError);
         }
         catch (Exception ex)
         {
@@ -1632,10 +1662,160 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             ? activeAfterSnapshot
             : (TitleBackgroundActiveCameraSnapshot?)null;
         var status = beforeCaptured && afterCaptured ? "success" : "partial";
-        var error = JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError);
+        status = string.IsNullOrWhiteSpace(phase2GStatus) ? status : $"{status}; phase2G={phase2GStatus}";
+        var error = JoinErrors(JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError), phase2GError);
         _phase2FCalculateCameraCurveLowAndHighPointLastError = error;
         RecordPhase2FCalculateCameraCurveLowAndHighPointCall(
             BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
+    }
+
+    private bool TryApplyPhase2GSetCameraCurveMidPointOverride(nint self, int? frame, out string status, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        if (!TryGetPhase2GGenerationOverrideCurve(out var curve, out var skippedReason))
+        {
+            status = $"skipped:{skippedReason}";
+            _phase2GGenerationOverrideLastStatus = status;
+            _phase2GGenerationOverrideLastSkippedReason = skippedReason;
+            return false;
+        }
+
+        _phase2GGenerationOverrideSetMidAttemptCount++;
+        try
+        {
+            // Original is intentionally called first so native generation can keep its side effects;
+            // Phase 2G only replaces the generated MidPoint value after that generation step.
+            WriteCurvePointY(self, LobbyCameraExpandedMidPointOffset, curve.Mid);
+            MarkPhase2GGenerationOverrideApplied(frame, "set-mid-applied");
+            _phase2GGenerationOverrideSetMidAppliedCount++;
+            status = "applied-post-original";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            status = "failed";
+            errorMessage = ex.Message;
+            _phase2GGenerationOverrideLastStatus = "set-mid-failed";
+            _phase2GGenerationOverrideLastSkippedReason = string.Empty;
+            _log.Warning(ex, "TitleBackground Phase2G SetCameraCurveMidPoint override failed.");
+            return false;
+        }
+    }
+
+    private bool TryApplyPhase2GLowHighCurveOverride(nint self, int? frame, out string status, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        if (!TryGetPhase2GGenerationOverrideCurve(out var curve, out var skippedReason))
+        {
+            status = $"skipped:{skippedReason}";
+            _phase2GGenerationOverrideLastStatus = status;
+            _phase2GGenerationOverrideLastSkippedReason = skippedReason;
+            return false;
+        }
+
+        _phase2GGenerationOverrideLowHighAttemptCount++;
+        try
+        {
+            // Original computes Low/High from the current generated inputs first; the post-original
+            // write preserves native state changes and only pins the generated curve targets.
+            WriteCurvePointY(self, LobbyCameraExpandedLowPointOffset, curve.Low);
+            WriteCurvePointY(self, LobbyCameraExpandedHighPointOffset, curve.High);
+            MarkPhase2GGenerationOverrideApplied(frame, "low-high-applied");
+            _phase2GGenerationOverrideLowHighAppliedCount++;
+            status = "applied-post-original";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            status = "failed";
+            errorMessage = ex.Message;
+            _phase2GGenerationOverrideLastStatus = "low-high-failed";
+            _phase2GGenerationOverrideLastSkippedReason = string.Empty;
+            _log.Warning(ex, "TitleBackground Phase2G CalculateCameraCurveLowAndHighPoint override failed.");
+            return false;
+        }
+    }
+
+    private bool TryGetPhase2GGenerationOverrideCurve(
+        out TitleBackgroundCharaSelectCameraCurve curve,
+        out string skippedReason)
+    {
+        curve = default;
+        if (!TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+                _state == TitleBackgroundServiceState.Ready,
+                IsHookProbeMode(),
+                IsSceneOverrideEnabled(),
+                _charaSelectCameraAdapter.IsArmed,
+                _charaSelectCameraAdapter.State,
+                _charaSelectCameraAdapter.RuntimeState))
+        {
+            skippedReason = BuildPhase2GGenerationOverrideSkippedReason();
+            return false;
+        }
+
+        curve = _charaSelectCameraAdapter.RuntimeState.CurveAtRecord!.Value;
+        skippedReason = string.Empty;
+        return true;
+    }
+
+    private string BuildPhase2GGenerationOverrideSkippedReason()
+    {
+        if (_state != TitleBackgroundServiceState.Ready)
+        {
+            return "service-not-ready";
+        }
+
+        if (IsHookProbeMode())
+        {
+            return "hook-probe";
+        }
+
+        if (!IsSceneOverrideEnabled())
+        {
+            return "scene-override-disabled";
+        }
+
+        if (!_charaSelectCameraAdapter.IsArmed)
+        {
+            return "adapter-not-armed";
+        }
+
+        if (_charaSelectCameraAdapter.State is not TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded
+            and not TitleBackgroundCharaSelectCameraAdapterState.Active)
+        {
+            return $"adapter-state-{_charaSelectCameraAdapter.State}";
+        }
+
+        if (_charaSelectCameraAdapter.RuntimeState.SceneGeneration <= 0)
+        {
+            return "scene-generation-empty";
+        }
+
+        if (!_charaSelectCameraAdapter.RuntimeState.HasCameraPose)
+        {
+            return "runtime-pose-incomplete";
+        }
+
+        if (!_charaSelectCameraAdapter.RuntimeState.CurveAtRecord.HasValue)
+        {
+            return "runtime-curve-empty";
+        }
+
+        return "unknown";
+    }
+
+    private void MarkPhase2GGenerationOverrideApplied(int? frame, string status)
+    {
+        _phase2GGenerationOverrideLastAppliedFrame = frame;
+        _phase2GGenerationOverrideLastAppliedSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+        _phase2GGenerationOverrideLastStatus = status;
+        _phase2GGenerationOverrideLastSkippedReason = string.Empty;
+    }
+
+    private static void WriteCurvePointY(nint lobbyCameraAddress, int offset, float value)
+    {
+        var point = (CurvePoint*)((byte*)lobbyCameraAddress + offset);
+        point->Y = TitleBackgroundPreset.SanitizeCoordinate(value);
     }
 
     private void OnFrameworkUpdate(IFramework _)
@@ -1868,6 +2048,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _phase2FCalculateCameraCurveLowAndHighPointInterestingCalls.Clear();
         _phase2FSetCameraCurveMidPointPreviousInputValue = null;
         _phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue = null;
+        _phase2GGenerationOverrideSetMidAttemptCount = 0;
+        _phase2GGenerationOverrideSetMidAppliedCount = 0;
+        _phase2GGenerationOverrideLowHighAttemptCount = 0;
+        _phase2GGenerationOverrideLowHighAppliedCount = 0;
+        _phase2GGenerationOverrideLastAppliedFrame = null;
+        _phase2GGenerationOverrideLastAppliedSceneGeneration = 0;
+        _phase2GGenerationOverrideLastStatus = "not-run";
+        _phase2GGenerationOverrideLastSkippedReason = string.Empty;
     }
 
     private TitleBackgroundPhase2FGeneratedCurveCall BuildPhase2FGeneratedCurveCall(
@@ -2051,6 +2239,62 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             calculateCameraCurveLowAndHighPointCount);
     }
 
+    private string BuildPhase2GGeneratedCurveOverrideEffectiveVerdict(
+        IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> samples)
+    {
+        if (_phase2GGenerationOverrideSetMidAppliedCount == 0
+            && _phase2GGenerationOverrideLowHighAppliedCount == 0)
+        {
+            return "inconclusive";
+        }
+
+        var curve = _charaSelectCameraAdapter.RuntimeState.CurveAtRecord ?? _charaSelectCameraAdapter.Curve;
+        var latest = samples
+            .Where(sample => sample.Captured)
+            .OrderByDescending(sample => sample.Frame)
+            .FirstOrDefault();
+        if (!latest.Captured
+            || !latest.LowValue.HasValue
+            || !latest.MidValue.HasValue
+            || !latest.HighValue.HasValue)
+        {
+            return "inconclusive";
+        }
+
+        return IsNear(latest.LowValue.Value, curve.Low)
+            && IsNear(latest.MidValue.Value, curve.Mid)
+            && IsNear(latest.HighValue.Value, curve.High)
+            ? "observed"
+            : "not-observed";
+    }
+
+    private string BuildPhase2GFinalLookAtYMatchesTargetVerdict(TitleBackgroundPhase2CTimelineSnapshot latestSample)
+    {
+        if (_phase2GGenerationOverrideSetMidAppliedCount == 0
+            && _phase2GGenerationOverrideLowHighAppliedCount == 0)
+        {
+            return "inconclusive";
+        }
+
+        var target = _charaSelectCameraAdapter.RuntimeState.LookAtY;
+        var actual = latestSample.SceneCameraLookAtVector?.Y;
+        if (!target.HasValue || !actual.HasValue)
+        {
+            return "inconclusive";
+        }
+
+        return Math.Abs(actual.Value - target.Value) <= TitleBackgroundCameraProbeReport.StabilizationVectorTolerance
+            ? "observed"
+            : "not-observed";
+    }
+
+    private bool IsPhase2GGenerationOverrideConfigured()
+    {
+        return _configuration.TitleBackgroundOverrideEnabled
+            && _configuration.TitleBackgroundCameraOverrideEnabled
+            && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly;
+    }
+
     private static bool HasGeneratedCurveEnabledChanged(TitleBackgroundPhase2FGeneratedCurveCall call)
     {
         return call.Before.HasValue
@@ -2069,8 +2313,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private static bool AreCurvePointsEqual(TitleBackgroundCurvePointSnapshot left, TitleBackgroundCurvePointSnapshot right)
     {
-        return Math.Abs(left.X - right.X) <= TitleBackgroundCameraProbeReport.CurvePointTolerance
-            && Math.Abs(left.Y - right.Y) <= TitleBackgroundCameraProbeReport.CurvePointTolerance;
+        return IsNear(left.X, right.X) && IsNear(left.Y, right.Y);
+    }
+
+    private static bool IsNear(float left, float right)
+    {
+        return Math.Abs(left - right) <= TitleBackgroundCameraProbeReport.CurvePointTolerance;
     }
 
     private static TitleBackgroundCurvePointSnapshot? ReadCurvePoint(CurvePoint* point)

@@ -97,6 +97,25 @@ internal static class TitleBackgroundCharaSelectCameraLogic
             && runtimeState.SceneGeneration != lastAppliedSceneGeneration;
     }
 
+    public static bool ShouldApplyGeneratedCurveOverride(
+        bool serviceReady,
+        bool hookProbeMode,
+        bool sceneOverrideEnabled,
+        bool adapterArmed,
+        TitleBackgroundCharaSelectCameraAdapterState state,
+        TitleBackgroundCharaSelectCameraRuntimeState runtimeState)
+    {
+        return serviceReady
+            && !hookProbeMode
+            && sceneOverrideEnabled
+            && adapterArmed
+            && state is TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded
+                or TitleBackgroundCharaSelectCameraAdapterState.Active
+            && runtimeState.SceneGeneration > 0
+            && runtimeState.HasCameraPose
+            && runtimeState.CurveAtRecord.HasValue;
+    }
+
     public static bool ShouldApplyLookAtY(
         TitleBackgroundCharaSelectCameraAdapterState state,
         TitleBackgroundCharaSelectCameraRuntimeState runtimeState,

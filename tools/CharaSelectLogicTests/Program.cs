@@ -661,6 +661,78 @@ Test("title background chara select camera curve apply is generation one-shot", 
         && adapter.LastCurveAppliedSceneGeneration == adapter.RuntimeState.SceneGeneration;
 });
 
+Test("title background phase2g generated curve override allows loaded and active states", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+
+    var loaded = TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+        serviceReady: true,
+        hookProbeMode: false,
+        sceneOverrideEnabled: true,
+        adapterArmed: adapter.IsArmed,
+        adapter.State,
+        adapter.RuntimeState);
+    adapter.NotifyLobbyUpdate(GameLobbyType.CharaSelect);
+    var active = TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+        serviceReady: true,
+        hookProbeMode: false,
+        sceneOverrideEnabled: true,
+        adapterArmed: adapter.IsArmed,
+        adapter.State,
+        adapter.RuntimeState);
+
+    return loaded && active;
+});
+
+Test("title background phase2g generated curve override rejects unsafe contexts", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+
+    return !TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+            serviceReady: false,
+            hookProbeMode: false,
+            sceneOverrideEnabled: true,
+            adapterArmed: adapter.IsArmed,
+            adapter.State,
+            adapter.RuntimeState)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+            serviceReady: true,
+            hookProbeMode: true,
+            sceneOverrideEnabled: true,
+            adapterArmed: adapter.IsArmed,
+            adapter.State,
+            adapter.RuntimeState)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+            serviceReady: true,
+            hookProbeMode: false,
+            sceneOverrideEnabled: false,
+            adapterArmed: adapter.IsArmed,
+            adapter.State,
+            adapter.RuntimeState)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+            serviceReady: true,
+            hookProbeMode: false,
+            sceneOverrideEnabled: true,
+            adapterArmed: adapter.IsArmed,
+            TitleBackgroundCharaSelectCameraAdapterState.SceneLoading,
+            adapter.RuntimeState)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+            serviceReady: true,
+            hookProbeMode: false,
+            sceneOverrideEnabled: true,
+            adapterArmed: false,
+            adapter.State,
+            adapter.RuntimeState);
+});
+
 Test("title background chara select camera LookAtY is consumed once per scene generation", () =>
 {
     var adapter = new TitleBackgroundCharaSelectCameraAdapter();
