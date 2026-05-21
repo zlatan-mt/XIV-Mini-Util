@@ -34,6 +34,8 @@ public sealed class Plugin : IDalamudPlugin
     private const string TitleBackgroundDiagnosticCommandAlias = "/xmutbg";
     private const string TitleBackgroundProbeCommandName = "/xmutbgprobe";
     private const string TitleBackgroundCameraProbeCommandName = "/xmutbgcamprobe";
+    private const string TitleBackgroundSelfTestCommandName = "/xmutbgtest";
+    private const string TitleBackgroundReloadCommandName = "/xmutbgreload";
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
     private readonly IChatGui _chatGui;
@@ -142,7 +144,9 @@ public sealed class Plugin : IDalamudPlugin
             objectTable,
             dataManager,
             pluginLog,
+            pluginInterface.ConfigDirectory.FullName,
             _configuration);
+        _titleScreenBackgroundService.SelfTestCompleted += OnTitleBackgroundSelfTestCompleted;
 
         _materiaService = new MateriaExtractService(
             framework,
@@ -247,6 +251,14 @@ public sealed class Plugin : IDalamudPlugin
         {
             HelpMessage = "タイトル背景camera Y probeを準備/表示/復元します。サブコマンド: arm-y / report / restore",
         });
+        _commandManager.AddHandler(TitleBackgroundSelfTestCommandName, new CommandInfo(OnTitleBackgroundSelfTestCommand)
+        {
+            HelpMessage = "タイトル背景差し替えのself-testを実行し、PASS/FAILを1行で表示します。",
+        });
+        _commandManager.AddHandler(TitleBackgroundReloadCommandName, new CommandInfo(OnTitleBackgroundReloadCommand)
+        {
+            HelpMessage = "キャラ選択ロビー中にタイトル背景とカメラを再適用します。",
+        });
         _shopSearchService.OnSearchCompleted += OnShopSearchCompleted;
         _ = InitializeShopDataAsync();
     }
@@ -268,12 +280,15 @@ public sealed class Plugin : IDalamudPlugin
         _commandManager.RemoveHandler(TitleBackgroundDiagnosticCommandAlias);
         _commandManager.RemoveHandler(TitleBackgroundProbeCommandName);
         _commandManager.RemoveHandler(TitleBackgroundCameraProbeCommandName);
+        _commandManager.RemoveHandler(TitleBackgroundSelfTestCommandName);
+        _commandManager.RemoveHandler(TitleBackgroundReloadCommandName);
         _pluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         _pluginInterface.UiBuilder.OpenMainUi -= OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi -= OpenSettingsWindow;
 
         _mainWindow.Dispose();
         _shopSearchResultWindow.Dispose();
+        _titleScreenBackgroundService.SelfTestCompleted -= OnTitleBackgroundSelfTestCompleted;
         _titleScreenBackgroundService.Dispose();
         _charaSelectService.Dispose();
         _dutyReadyNotificationService.Dispose();
@@ -444,6 +459,29 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private void OnTitleBackgroundSelfTestCommand(string command, string args)
+    {
+        var startMessage = _titleScreenBackgroundService.StartSelfTest();
+        if (!string.IsNullOrWhiteSpace(startMessage))
+        {
+            _chatGui.Print($"[XIV Mini Util] {startMessage}");
+            _pluginLog.Information("TitleBackground self-test: {Line}", startMessage);
+        }
+    }
+
+    private void OnTitleBackgroundReloadCommand(string command, string args)
+    {
+        var message = _titleScreenBackgroundService.RequestCharaSelectReload();
+        _chatGui.Print($"[XIV Mini Util] {message}");
+        _pluginLog.Information("TitleBackground reload: {Line}", message);
+    }
+
+    private void OnTitleBackgroundSelfTestCompleted(string message)
+    {
+        _chatGui.Print($"[XIV Mini Util] {message}");
+        _pluginLog.Information("TitleBackground self-test: {Line}", message);
+    }
+
     private static string GetSubCommand(string args)
     {
         var trimmed = args?.Trim();
@@ -498,6 +536,8 @@ public sealed class Plugin : IDalamudPlugin
         _chatGui.Print("/xmuc : キャラ選択画面のエモート/声診断情報を表示します。");
         _chatGui.Print("/xmutbg : タイトル背景差し替えの診断情報を表示します。");
         _chatGui.Print("/xmutbg copy : タイトル背景差し替えの診断情報をクリップボードへコピーします。");
+        _chatGui.Print("/xmutbgtest : タイトル背景差し替えのself-testを実行します。");
+        _chatGui.Print("/xmutbgreload : キャラ選択ロビー中に背景とカメラを再適用します。");
         _chatGui.Print("/xmutbgcamprobe arm-y : CameraY / FocusY one-shot probeを準備します。");
         _chatGui.Print("/xmu : /xivminiutil のエイリアス");
     }
