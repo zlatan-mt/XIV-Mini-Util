@@ -302,6 +302,44 @@ internal static class TitleBackgroundCameraProbeReport
             lastPointValueChangedFrame);
     }
 
+    public static bool IsPhase2HSelfTestSuccess(
+        string sceneVerdict,
+        string generatedCurveOverrideVerdict,
+        string finalLookAtYMatchesGeneratedCurveVerdict,
+        string finalCameraStateMatchesPresetVerdict)
+    {
+        _ = finalCameraStateMatchesPresetVerdict;
+        return sceneVerdict == "observed"
+            && generatedCurveOverrideVerdict == "observed"
+            && finalLookAtYMatchesGeneratedCurveVerdict == "observed";
+    }
+
+    public static bool IsPhase2HGeneratedCurveSuccess(
+        int setMidAttemptCount,
+        int setMidAppliedCount,
+        int lowHighAttemptCount,
+        int lowHighAppliedCount,
+        string finalLookAtYMatchesGeneratedCurveVerdict)
+    {
+        return setMidAttemptCount > 0
+            && lowHighAttemptCount > 0
+            && setMidAppliedCount == setMidAttemptCount
+            && lowHighAppliedCount == lowHighAttemptCount
+            && finalLookAtYMatchesGeneratedCurveVerdict == "observed";
+    }
+
+    public static bool IsPhase2HDetailedDiagnosticLine(string line)
+    {
+        return line.StartsWith("phase2C.timeline[", StringComparison.Ordinal)
+            || line.StartsWith("phase2D.timeline[", StringComparison.Ordinal)
+            || line.StartsWith("phase2F.timeline[", StringComparison.Ordinal)
+            || line.StartsWith("phase2E.calculateLobbyCameraLookAtY.call[", StringComparison.Ordinal)
+            || line.StartsWith("phase2F.setCameraCurveMidPoint.call[", StringComparison.Ordinal)
+            || line.StartsWith("phase2F.setCameraCurveMidPoint.interestingCall[", StringComparison.Ordinal)
+            || line.StartsWith("phase2F.calculateCameraCurveLowAndHighPoint.call[", StringComparison.Ordinal)
+            || line.StartsWith("phase2F.calculateCameraCurveLowAndHighPoint.interestingCall[", StringComparison.Ordinal);
+    }
+
     public static string DescribeCoincidentEvents(
         int? observedFrame,
         TitleBackgroundCameraProbeTimelineEventCounts events)

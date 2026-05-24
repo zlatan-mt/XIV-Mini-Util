@@ -764,6 +764,49 @@ Test("title background phase2g generated curve override rejects unsafe contexts"
             adapter.RuntimeState);
 });
 
+Test("title background phase2h treats final camera mismatch as non-blocking self-test result", () =>
+{
+    return TitleBackgroundCameraProbeReport.IsPhase2HSelfTestSuccess(
+        sceneVerdict: "observed",
+        generatedCurveOverrideVerdict: "observed",
+        finalLookAtYMatchesGeneratedCurveVerdict: "observed",
+        finalCameraStateMatchesPresetVerdict: "not-observed");
+});
+
+Test("title background phase2h requires generated curve counts and final look at y success", () =>
+{
+    return TitleBackgroundCameraProbeReport.IsPhase2HGeneratedCurveSuccess(
+            setMidAttemptCount: 3,
+            setMidAppliedCount: 3,
+            lowHighAttemptCount: 3,
+            lowHighAppliedCount: 3,
+            finalLookAtYMatchesGeneratedCurveVerdict: "observed")
+        && !TitleBackgroundCameraProbeReport.IsPhase2HGeneratedCurveSuccess(
+            setMidAttemptCount: 3,
+            setMidAppliedCount: 2,
+            lowHighAttemptCount: 3,
+            lowHighAppliedCount: 3,
+            finalLookAtYMatchesGeneratedCurveVerdict: "observed")
+        && !TitleBackgroundCameraProbeReport.IsPhase2HGeneratedCurveSuccess(
+            setMidAttemptCount: 3,
+            setMidAppliedCount: 3,
+            lowHighAttemptCount: 3,
+            lowHighAppliedCount: 3,
+            finalLookAtYMatchesGeneratedCurveVerdict: "not-observed");
+});
+
+Test("title background phase2h normal diagnostics exclude full timeline and call details", () =>
+{
+    return TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2C.timeline[60].activeCamera.DirH=1.2")
+        && TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2D.timeline[600].lobbyCamera.Distance=4.2")
+        && TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2F.timeline[600].expandedLobbyCamera.MidPoint.Value=0.834")
+        && TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.call[1].returnValue=0.834")
+        && TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2F.setCameraCurveMidPoint.call[1].status=original")
+        && TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2F.calculateCameraCurveLowAndHighPoint.interestingCall[1].status=phase2G=low-high-applied")
+        && !TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2G.generationOverride.setMid.appliedCount=3")
+        && !TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.callCount=128");
+});
+
 Test("title background chara select camera LookAtY is consumed once per scene generation", () =>
 {
     var adapter = new TitleBackgroundCharaSelectCameraAdapter();
