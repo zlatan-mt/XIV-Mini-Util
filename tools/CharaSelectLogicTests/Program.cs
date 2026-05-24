@@ -764,30 +764,30 @@ Test("title background phase2g generated curve override rejects unsafe contexts"
             adapter.RuntimeState);
 });
 
-Test("title background phase2i treats final yaw pitch distance mismatch as non-blocking self-test result", () =>
+Test("title background generated curve self-test treats final yaw pitch distance mismatch as non-blocking", () =>
 {
-    return TitleBackgroundCameraProbeReport.IsPhase2HSelfTestSuccess(
+    return TitleBackgroundCameraProbeReport.IsGeneratedCurveSelfTestSuccess(
         sceneVerdict: "observed",
         generatedCurveOverrideVerdict: "observed",
         finalLookAtYMatchesGeneratedCurveVerdict: "observed",
         finalYawPitchDistanceMatchesPresetVerdict: "not-observed");
 });
 
-Test("title background phase2h requires generated curve counts and final look at y success", () =>
+Test("title background generated curve success requires counts and final look at y", () =>
 {
-    return TitleBackgroundCameraProbeReport.IsPhase2HGeneratedCurveSuccess(
+    return TitleBackgroundCameraProbeReport.IsGeneratedCurveOverrideSuccess(
             setMidAttemptCount: 3,
             setMidAppliedCount: 3,
             lowHighAttemptCount: 3,
             lowHighAppliedCount: 3,
             finalLookAtYMatchesGeneratedCurveVerdict: "observed")
-        && !TitleBackgroundCameraProbeReport.IsPhase2HGeneratedCurveSuccess(
+        && !TitleBackgroundCameraProbeReport.IsGeneratedCurveOverrideSuccess(
             setMidAttemptCount: 3,
             setMidAppliedCount: 2,
             lowHighAttemptCount: 3,
             lowHighAppliedCount: 3,
             finalLookAtYMatchesGeneratedCurveVerdict: "observed")
-        && !TitleBackgroundCameraProbeReport.IsPhase2HGeneratedCurveSuccess(
+        && !TitleBackgroundCameraProbeReport.IsGeneratedCurveOverrideSuccess(
             setMidAttemptCount: 3,
             setMidAppliedCount: 3,
             lowHighAttemptCount: 3,
@@ -795,30 +795,30 @@ Test("title background phase2h requires generated curve counts and final look at
             finalLookAtYMatchesGeneratedCurveVerdict: "not-observed");
 });
 
-Test("title background phase2h normal diagnostics exclude full timeline and call details", () =>
+Test("title background normal diagnostics exclude detailed failure-only lines", () =>
 {
-    return TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2C.timeline[60].activeCamera.DirH=1.2")
-        && TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2D.timeline[600].lobbyCamera.Distance=4.2")
-        && TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2F.timeline[600].expandedLobbyCamera.MidPoint.Value=0.834")
-        && TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.call[1].returnValue=0.834")
-        && TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2F.setCameraCurveMidPoint.call[1].status=original")
-        && TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2F.calculateCameraCurveLowAndHighPoint.interestingCall[1].status=phase2G=low-high-applied")
-        && !TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2G.generationOverride.setMid.appliedCount=3")
-        && !TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.callCount=128");
+    return TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2C.timeline[60].activeCamera.DirH=1.2")
+        && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2D.timeline[600].lobbyCamera.Distance=4.2")
+        && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2F.timeline[600].expandedLobbyCamera.MidPoint.Value=0.834")
+        && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.call[1].returnValue=0.834")
+        && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2F.setCameraCurveMidPoint.call[1].status=original")
+        && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2F.calculateCameraCurveLowAndHighPoint.interestingCall[1].status=phase2G=low-high-applied")
+        && !TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2G.generationOverride.setMid.appliedCount=3")
+        && !TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.callCount=128");
 });
 
-Test("title background phase2i normal diagnostics exclude obsolete direct look at y fields", () =>
+Test("title background normal diagnostics exclude obsolete direct look at y fields", () =>
 {
-    return TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("lookAtYApply.attemptCount=1")
-        && TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("lookAtYApply.readBackValueImmediatelyAfterWrite=0.834")
-        && TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("verdict.lookAtYImmediateReflection=reflected")
-        && TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("verdict.lookAtYPostApplyStability=stable")
-        && !TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("verdict.phase2G.finalLookAtYMatchesGeneratedCurve=observed")
-        && !TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.call[1].returnValue=0.834")
-        && !TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("verdict.phase2G.finalYawPitchDistanceMatchesPreset=not-observed");
+    return TitleBackgroundCameraProbeReport.IsObsoleteDirectLookAtYDiagnosticLine("lookAtYApply.attemptCount=1")
+        && TitleBackgroundCameraProbeReport.IsObsoleteDirectLookAtYDiagnosticLine("lookAtYApply.readBackValueImmediatelyAfterWrite=0.834")
+        && TitleBackgroundCameraProbeReport.IsObsoleteDirectLookAtYDiagnosticLine("verdict.lookAtYImmediateReflection=reflected")
+        && TitleBackgroundCameraProbeReport.IsObsoleteDirectLookAtYDiagnosticLine("verdict.lookAtYPostApplyStability=stable")
+        && !TitleBackgroundCameraProbeReport.IsObsoleteDirectLookAtYDiagnosticLine("verdict.phase2G.finalLookAtYMatchesGeneratedCurve=observed")
+        && !TitleBackgroundCameraProbeReport.IsObsoleteDirectLookAtYDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.call[1].returnValue=0.834")
+        && !TitleBackgroundCameraProbeReport.IsObsoleteDirectLookAtYDiagnosticLine("verdict.phase2G.finalYawPitchDistanceMatchesPreset=not-observed");
 });
 
-Test("title background phase2i keeps yaw pitch distance and deprecated camera verdicts equivalent", () =>
+Test("title background normal diagnostics keep yaw pitch distance blocking flag and deprecated camera verdict", () =>
 {
     const string finalYawPitchDistanceMatchesPreset = "not-observed";
     var lines = new[]

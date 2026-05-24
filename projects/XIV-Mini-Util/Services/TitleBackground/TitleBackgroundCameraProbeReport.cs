@@ -1,6 +1,6 @@
 // Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundCameraProbeReport.cs
-// Description: one-shot camera Y probe の純粋な判定ロジックを定義する
-// Reason: 実機確認回数を減らすため、FixOn 直後反映と後段上書きを診断値から一貫判定するため
+// Description: TitleBackground character-select camera diagnostics and generated-curve verdict helpers
+// Reason: 実機確認回数を減らすため、failure-only probe data and long-term summary verdictsを一貫判定するため
 using System.Numerics;
 
 namespace XivMiniUtil.Services.TitleBackground;
@@ -302,7 +302,7 @@ internal static class TitleBackgroundCameraProbeReport
             lastPointValueChangedFrame);
     }
 
-    public static bool IsPhase2HSelfTestSuccess(
+    public static bool IsGeneratedCurveSelfTestSuccess(
         string sceneVerdict,
         string generatedCurveOverrideVerdict,
         string finalLookAtYMatchesGeneratedCurveVerdict,
@@ -314,7 +314,7 @@ internal static class TitleBackgroundCameraProbeReport
             && finalLookAtYMatchesGeneratedCurveVerdict == "observed";
     }
 
-    public static bool IsPhase2HGeneratedCurveSuccess(
+    public static bool IsGeneratedCurveOverrideSuccess(
         int setMidAttemptCount,
         int setMidAppliedCount,
         int lowHighAttemptCount,
@@ -328,7 +328,7 @@ internal static class TitleBackgroundCameraProbeReport
             && finalLookAtYMatchesGeneratedCurveVerdict == "observed";
     }
 
-    public static bool IsPhase2HDetailedDiagnosticLine(string line)
+    public static bool IsDetailedFailureDiagnosticLine(string line)
     {
         return line.StartsWith("phase2C.timeline[", StringComparison.Ordinal)
             || line.StartsWith("phase2D.timeline[", StringComparison.Ordinal)
@@ -340,7 +340,7 @@ internal static class TitleBackgroundCameraProbeReport
             || line.StartsWith("phase2F.calculateCameraCurveLowAndHighPoint.interestingCall[", StringComparison.Ordinal);
     }
 
-    public static bool IsPhase2IObsoleteDirectLookAtYDiagnosticLine(string line)
+    public static bool IsObsoleteDirectLookAtYDiagnosticLine(string line)
     {
         return line.StartsWith("lookAtYApply.", StringComparison.Ordinal)
             || line.StartsWith("verdict.lookAtYImmediateReflection=", StringComparison.Ordinal)

@@ -504,6 +504,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var phase2GFinalYawPitchDistanceMatchesPreset = BuildPhase2GFinalCameraStateMatchesPresetVerdict(phase2DLatestSample);
         if (!includeDetailedPhase2Diagnostics)
         {
+            // Keep normal /xmutbgdiag as a long-term Phase 2G summary. Detailed timelines and call
+            // traces remain failure-only so routine checks stay short.
             return
             [
                 $"hooksEnabled={hooksEnabled}",
@@ -529,6 +531,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 $"verdict.phase2G.finalLookAtYMatchesGeneratedCurve={phase2GFinalLookAtYMatchesGeneratedCurve}",
                 $"verdict.phase2G.finalYawPitchDistanceMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
                 "verdict.phase2G.finalYawPitchDistanceMatchesPreset.blocking=False",
+                // Deprecated compatibility output. Prefer finalYawPitchDistanceMatchesPreset.
                 $"verdict.phase2G.finalCameraStateMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
             ];
         }
@@ -715,6 +718,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"verdict.phase2G.finalLookAtYMatchesGeneratedCurve={phase2GFinalLookAtYMatchesGeneratedCurve}",
             $"verdict.phase2G.finalYawPitchDistanceMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
             "verdict.phase2G.finalYawPitchDistanceMatchesPreset.blocking=False",
+            // Deprecated compatibility output. Prefer finalYawPitchDistanceMatchesPreset.
             $"verdict.phase2G.finalCameraStateMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
@@ -1796,6 +1800,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             // Original is intentionally called first so native generation can keep its side effects;
             // Phase 2G only replaces the generated MidPoint value after that generation step.
+            // Do not add Framework.Update maintenance or direct SceneCamera writes here.
             WriteCurvePointY(self, LobbyCameraExpandedMidPointOffset, curve.Mid);
             MarkPhase2GGenerationOverrideApplied(frame, "set-mid-applied");
             _phase2GGenerationOverrideSetMidAppliedCount++;
@@ -1829,6 +1834,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             // Original computes Low/High from the current generated inputs first; the post-original
             // write preserves native state changes and only pins the generated curve targets.
+            // Final yaw/pitch/distance mismatch is expected and remains non-blocking.
             WriteCurvePointY(self, LobbyCameraExpandedLowPointOffset, curve.Low);
             WriteCurvePointY(self, LobbyCameraExpandedHighPointOffset, curve.High);
             MarkPhase2GGenerationOverrideApplied(frame, "low-high-applied");
@@ -2166,6 +2172,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var lookAtY = BuildPhase2GFinalLookAtYMatchesGeneratedCurveVerdict(latest);
         var yawPitchDistance = BuildPhase2GFinalCameraStateMatchesPresetVerdict(latest);
 
+        // Phase 2G success is generated-curve based. Final yaw/pitch/distance mismatch is
+        // reported for visibility but is not a self-test blocker.
         if (scene != "observed")
         {
             return TitleBackgroundSelfTestVerdict.Fail("scene-not-applied");
@@ -2181,7 +2189,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             return TitleBackgroundSelfTestVerdict.Fail("lookAtY-not-applied");
         }
 
-        if (!TitleBackgroundCameraProbeReport.IsPhase2HGeneratedCurveSuccess(
+        if (!TitleBackgroundCameraProbeReport.IsGeneratedCurveOverrideSuccess(
             _phase2GGenerationOverrideSetMidAttemptCount,
             _phase2GGenerationOverrideSetMidAppliedCount,
             _phase2GGenerationOverrideLowHighAttemptCount,
@@ -2191,7 +2199,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             return TitleBackgroundSelfTestVerdict.Fail("phase2g-counts-not-applied");
         }
 
-        if (!TitleBackgroundCameraProbeReport.IsPhase2HSelfTestSuccess(scene, curve, lookAtY, yawPitchDistance))
+        if (!TitleBackgroundCameraProbeReport.IsGeneratedCurveSelfTestSuccess(scene, curve, lookAtY, yawPitchDistance))
         {
             return TitleBackgroundSelfTestVerdict.Fail("phase2g-not-applied");
         }
