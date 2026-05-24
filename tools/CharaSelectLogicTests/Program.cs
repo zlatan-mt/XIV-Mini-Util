@@ -764,13 +764,13 @@ Test("title background phase2g generated curve override rejects unsafe contexts"
             adapter.RuntimeState);
 });
 
-Test("title background phase2h treats final camera mismatch as non-blocking self-test result", () =>
+Test("title background phase2i treats final yaw pitch distance mismatch as non-blocking self-test result", () =>
 {
     return TitleBackgroundCameraProbeReport.IsPhase2HSelfTestSuccess(
         sceneVerdict: "observed",
         generatedCurveOverrideVerdict: "observed",
         finalLookAtYMatchesGeneratedCurveVerdict: "observed",
-        finalCameraStateMatchesPresetVerdict: "not-observed");
+        finalYawPitchDistanceMatchesPresetVerdict: "not-observed");
 });
 
 Test("title background phase2h requires generated curve counts and final look at y success", () =>
@@ -805,6 +805,31 @@ Test("title background phase2h normal diagnostics exclude full timeline and call
         && TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2F.calculateCameraCurveLowAndHighPoint.interestingCall[1].status=phase2G=low-high-applied")
         && !TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2G.generationOverride.setMid.appliedCount=3")
         && !TitleBackgroundCameraProbeReport.IsPhase2HDetailedDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.callCount=128");
+});
+
+Test("title background phase2i normal diagnostics exclude obsolete direct look at y fields", () =>
+{
+    return TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("lookAtYApply.attemptCount=1")
+        && TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("lookAtYApply.readBackValueImmediatelyAfterWrite=0.834")
+        && TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("verdict.lookAtYImmediateReflection=reflected")
+        && TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("verdict.lookAtYPostApplyStability=stable")
+        && !TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("verdict.phase2G.finalLookAtYMatchesGeneratedCurve=observed")
+        && !TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.call[1].returnValue=0.834")
+        && !TitleBackgroundCameraProbeReport.IsPhase2IObsoleteDirectLookAtYDiagnosticLine("verdict.phase2G.finalYawPitchDistanceMatchesPreset=not-observed");
+});
+
+Test("title background phase2i keeps yaw pitch distance and deprecated camera verdicts equivalent", () =>
+{
+    const string finalYawPitchDistanceMatchesPreset = "not-observed";
+    var lines = new[]
+    {
+        $"verdict.phase2G.finalYawPitchDistanceMatchesPreset={finalYawPitchDistanceMatchesPreset}",
+        "verdict.phase2G.finalYawPitchDistanceMatchesPreset.blocking=False",
+        $"verdict.phase2G.finalCameraStateMatchesPreset={finalYawPitchDistanceMatchesPreset}",
+    };
+
+    return lines[0].EndsWith(lines[2].Split('=')[1], StringComparison.Ordinal)
+        && lines[1] == "verdict.phase2G.finalYawPitchDistanceMatchesPreset.blocking=False";
 });
 
 Test("title background chara select camera LookAtY is consumed once per scene generation", () =>

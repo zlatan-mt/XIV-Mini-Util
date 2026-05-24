@@ -95,15 +95,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private TitleBackgroundActiveCameraSnapshot? _curveApplyActiveCameraAfter;
     private string _curveApplyActiveCameraBeforeStatus = "not-run";
     private string _curveApplyActiveCameraAfterStatus = "not-run";
-    private int _lookAtYApplyAttemptCount;
-    private int _lookAtYApplySuccessCount;
-    private string _lookAtYApplyLastStatus = "not-run";
-    private string _lookAtYApplyLastFailureReason = string.Empty;
-    private float? _lookAtYApplyLastAppliedValue;
-    private int? _lookAtYApplyAppliedFrame;
-    private float? _lookAtYApplyRequestedValue;
-    private float? _lookAtYApplyReadBackValueImmediatelyAfterWrite;
-    private string _lookAtYApplyImmediateReadBackStatus = "not-run";
     private int? _runtimeRestoreAppliedFrame;
     private TitleBackgroundProbeSession? _activeProbeSession;
     private TitleBackgroundProbeSession? _lastProbeSession;
@@ -510,7 +501,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var phase2FGeneratedCurveTransitions = BuildPhase2FGeneratedCurveTransitionSummary();
         var phase2GGeneratedCurveOverrideEffective = BuildPhase2GGeneratedCurveOverrideEffectiveVerdict(phase2FCurveSamples);
         var phase2GFinalLookAtYMatchesGeneratedCurve = BuildPhase2GFinalLookAtYMatchesGeneratedCurveVerdict(phase2DLatestSample);
-        var phase2GFinalCameraStateMatchesPreset = BuildPhase2GFinalCameraStateMatchesPresetVerdict(phase2DLatestSample);
+        var phase2GFinalYawPitchDistanceMatchesPreset = BuildPhase2GFinalCameraStateMatchesPresetVerdict(phase2DLatestSample);
         if (!includeDetailedPhase2Diagnostics)
         {
             return
@@ -536,7 +527,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 $"phase2G.generationOverride.lastSkippedReason={FormatNone(_phase2GGenerationOverrideLastSkippedReason)}",
                 $"verdict.phase2G.generatedCurveOverrideEffective={phase2GGeneratedCurveOverrideEffective}",
                 $"verdict.phase2G.finalLookAtYMatchesGeneratedCurve={phase2GFinalLookAtYMatchesGeneratedCurve}",
-                $"verdict.phase2G.finalCameraStateMatchesPreset={phase2GFinalCameraStateMatchesPreset}",
+                $"verdict.phase2G.finalYawPitchDistanceMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
+                "verdict.phase2G.finalYawPitchDistanceMatchesPreset.blocking=False",
+                $"verdict.phase2G.finalCameraStateMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
             ];
         }
 
@@ -663,23 +656,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"curveApply.activeCameraAfter.SceneCamera.LookAtVector={FormatVector(_curveApplyActiveCameraAfter?.LookAtVector)}",
             $"curveApply.activeCameraImmediateDelta.DirV={FormatFloatDelta(_curveApplyActiveCameraAfter?.DirV, _curveApplyActiveCameraBefore?.DirV)}",
             $"curveApply.activeCameraImmediateDelta.LookAtVector={FormatVectorDelta(_curveApplyActiveCameraAfter?.LookAtVector, _curveApplyActiveCameraBefore?.LookAtVector)}",
-            $"lookAtYApply.attemptCount={_lookAtYApplyAttemptCount}",
-            $"lookAtYApply.successCount={_lookAtYApplySuccessCount}",
-            $"lookAtYApply.lastStatus={_lookAtYApplyLastStatus}",
-            $"lookAtYApply.lastFailureReason={FormatNone(_lookAtYApplyLastFailureReason)}",
-            $"lookAtYApply.appliedValue={FormatFloat(_lookAtYApplyLastAppliedValue)}",
-            $"lookAtYApply.finalValue={FormatFloat(phase2DLatestSample.SceneCameraLookAtVector?.Y)}",
-            "lookAtYApply.target=LobbyCamera.LastLookAtVector.Y",
-            $"lookAtYApply.appliedFrame={FormatFrame(_lookAtYApplyAppliedFrame)}",
-            $"lookAtYApply.requestedValue={FormatFloat(_lookAtYApplyRequestedValue)}",
-            $"lookAtYApply.readBackValueImmediatelyAfterWrite={FormatUnavailable(_lookAtYApplyReadBackValueImmediatelyAfterWrite, _lookAtYApplyImmediateReadBackStatus)}",
             $"phase2C.timelineStatus={_phase2CTimelineStatus}",
             $"phase2C.timelineError={FormatNone(_phase2CTimelineError)}",
             $"phase2D.timelineStatus={_phase2CTimelineStatus}",
             $"phase2D.timelineError={FormatNone(_phase2CTimelineError)}",
             $"phase2D.timelineLatestFrame={FormatFrame(phase2DLatestSample.ActiveCameraCaptured ? phase2DLatestSample.Frame : null)}",
-            $"verdict.lookAtYImmediateReflection={phase2CVerdicts.LookAtYImmediateReflection}",
-            $"verdict.lookAtYPostApplyStability={phase2CVerdicts.LookAtYPostApplyStability}",
             $"verdict.distancePostRestoreStability={phase2CVerdicts.DistancePostRestoreStability}",
             $"verdict.tiltOffsetPostApplyObservableEffect={phase2CVerdicts.TiltOffsetPostApplyObservableEffect}",
             $"verdict.finalCameraStabilizationObserved={phase2DVerdicts.FinalCameraStabilizationObserved}",
@@ -732,7 +713,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"phase2G.generationOverride.lastSkippedReason={FormatNone(_phase2GGenerationOverrideLastSkippedReason)}",
             $"verdict.phase2G.generatedCurveOverrideEffective={phase2GGeneratedCurveOverrideEffective}",
             $"verdict.phase2G.finalLookAtYMatchesGeneratedCurve={phase2GFinalLookAtYMatchesGeneratedCurve}",
-            $"verdict.phase2G.finalCameraStateMatchesPreset={phase2GFinalCameraStateMatchesPreset}",
+            $"verdict.phase2G.finalYawPitchDistanceMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
+            "verdict.phase2G.finalYawPitchDistanceMatchesPreset.blocking=False",
+            $"verdict.phase2G.finalCameraStateMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
             $"cameraCapture.lastStatus={_lastCameraCaptureResult.Status}",
@@ -1492,7 +1475,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 _charaSelectCameraAdapter.NotifySceneLoaded(map);
                 RestoreCharaSelectRuntimeCameraStateAfterSceneLoad();
                 ApplyCharaSelectCameraCurveAfterSceneLoad();
-                ApplyCharaSelectLookAtYAfterSceneLoad();
                 CapturePhase2CTimelineFrame(0);
             }
         }
@@ -1503,8 +1485,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _lastCharaSelectCameraRuntimeRestoreFailureReason = ex.Message;
             _curveApplyLastStatus = "runtime-error";
             _curveApplyLastFailureReason = ex.Message;
-            _lookAtYApplyLastStatus = "runtime-error";
-            _lookAtYApplyLastFailureReason = ex.Message;
         }
     }
 
@@ -2044,7 +2024,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _phase2CTimelineSnapshots.Clear();
         _runtimeRestoreAppliedFrame = null;
         _curveApplyAppliedFrame = null;
-        _lookAtYApplyAppliedFrame = null;
         _curveApplyRequestedMid = null;
         _curveApplyReadBackValueImmediatelyAfterWrite = null;
         _curveApplyImmediateReadBackStatus = "not-run";
@@ -2052,9 +2031,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _curveApplyActiveCameraAfter = null;
         _curveApplyActiveCameraBeforeStatus = "not-run";
         _curveApplyActiveCameraAfterStatus = "not-run";
-        _lookAtYApplyRequestedValue = null;
-        _lookAtYApplyReadBackValueImmediatelyAfterWrite = null;
-        _lookAtYApplyImmediateReadBackStatus = "not-run";
     }
 
     private void CapturePhase2CTimelineOnFrameworkUpdate()
@@ -2188,7 +2164,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var scene = BuildSelfTestSceneVerdict();
         var curve = BuildPhase2GGeneratedCurveOverrideEffectiveVerdict(phase2FCurveSamples, _selfTestSession?.Curve);
         var lookAtY = BuildPhase2GFinalLookAtYMatchesGeneratedCurveVerdict(latest);
-        var camera = BuildPhase2GFinalCameraStateMatchesPresetVerdict(latest);
+        var yawPitchDistance = BuildPhase2GFinalCameraStateMatchesPresetVerdict(latest);
 
         if (scene != "observed")
         {
@@ -2215,7 +2191,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             return TitleBackgroundSelfTestVerdict.Fail("phase2g-counts-not-applied");
         }
 
-        if (!TitleBackgroundCameraProbeReport.IsPhase2HSelfTestSuccess(scene, curve, lookAtY, camera))
+        if (!TitleBackgroundCameraProbeReport.IsPhase2HSelfTestSuccess(scene, curve, lookAtY, yawPitchDistance))
         {
             return TitleBackgroundSelfTestVerdict.Fail("phase2g-not-applied");
         }
@@ -2264,11 +2240,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         if (_curveApplyLastStatus is "failed")
         {
             items.Add($"curve-apply-failed:{FormatNone(_curveApplyLastFailureReason)}");
-        }
-
-        if (_lookAtYApplyLastStatus is "failed")
-        {
-            items.Add($"lookAtY-apply-failed:{FormatNone(_lookAtYApplyLastFailureReason)}");
         }
 
         if (!latestSample.LobbyCameraCaptured)
@@ -3302,111 +3273,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _charaSelectCameraAdapter.RuntimeState.SceneGeneration);
     }
 
-    private void ApplyCharaSelectLookAtYAfterSceneLoad()
-    {
-        _lookAtYApplyAttemptCount++;
-        if (!_charaSelectCameraAdapter.ShouldApplyLookAtY())
-        {
-            _lookAtYApplyLastStatus = "skipped";
-            _lookAtYApplyLastFailureReason = string.Empty;
-            return;
-        }
-
-        if (!TryCalculateCurrentLobbyCameraLookAtY(out var value, out var calculateError))
-        {
-            _lookAtYApplyLastStatus = "failed";
-            _lookAtYApplyLastFailureReason = calculateError;
-            return;
-        }
-
-        _lookAtYApplyRequestedValue = value;
-        // Phase 2G generated curve override is now the preferred LookAtY path;
-        // keep this calculation as diagnostic evidence without writing SceneCamera.
-        _lookAtYApplyLastStatus = "diagnostic-only";
-        _lookAtYApplyLastFailureReason = string.Empty;
-        _lookAtYApplyLastAppliedValue = null;
-        _lookAtYApplyAppliedFrame = GetCurrentPhase2CFrame();
-        _lookAtYApplyReadBackValueImmediatelyAfterWrite = null;
-        _lookAtYApplyImmediateReadBackStatus = "diagnostic-only";
-        _log.Debug(
-            "[XMU BG] CharaSelect LookAtY direct apply disabled; Phase2G generated curve override is preferred. value={LookAtY}, generation={Generation}",
-            value,
-            _charaSelectCameraAdapter.RuntimeState.SceneGeneration);
-    }
-
-    private bool TryCalculateCurrentLobbyCameraLookAtY(out float value, out string errorMessage)
-    {
-        value = 0f;
-        errorMessage = string.Empty;
-        if (_calculateLobbyCameraLookAtYHook == null)
-        {
-            errorMessage = "CalculateLobbyCameraLookAtY hook unavailable";
-            return false;
-        }
-
-        try
-        {
-            var cameraManager = CameraManager.Instance();
-            if (cameraManager == null)
-            {
-                errorMessage = "CameraManager.Instance() unavailable";
-                return false;
-            }
-
-            var lobbyCamera = cameraManager->LobbyCamera;
-            if (lobbyCamera == null)
-            {
-                errorMessage = "LobbyCamera unavailable";
-                return false;
-            }
-
-            var baseAddress = (byte*)lobbyCamera;
-            var lowPoint = (CurvePoint*)(baseAddress + LobbyCameraExpandedLowPointOffset);
-            var midPoint = (CurvePoint*)(baseAddress + LobbyCameraExpandedMidPointOffset);
-            var highPoint = (CurvePoint*)(baseAddress + LobbyCameraExpandedHighPointOffset);
-            var low = ReadCurvePoint(lowPoint);
-            var mid = ReadCurvePoint(midPoint);
-            var high = ReadCurvePoint(highPoint);
-            var activeBefore = TryCaptureActiveCameraSnapshot(out var beforeSnapshot, out _)
-                ? beforeSnapshot.LookAtVector.Y
-                : (float?)null;
-            value = _calculateLobbyCameraLookAtYHook.Original(
-                (nint)lobbyCamera,
-                lobbyCamera->Distance,
-                lowPoint,
-                midPoint,
-                highPoint);
-            if (!float.IsFinite(value))
-            {
-                errorMessage = "CalculateLobbyCameraLookAtY returned non-finite value";
-                return false;
-            }
-
-            var activeAfter = TryCaptureActiveCameraSnapshot(out var afterSnapshot, out _)
-                ? afterSnapshot.LookAtVector.Y
-                : (float?)null;
-            RecordPhase2ECalculateLookAtYCall(new TitleBackgroundPhase2ECalculateLookAtYCall(
-                ++_phase2ECalculateLookAtYCallCount,
-                GetCurrentPhase2CFrame(),
-                lobbyCamera->Distance,
-                low,
-                mid,
-                high,
-                value,
-                activeBefore,
-                activeAfter,
-                "self-calc",
-                string.Empty));
-            return true;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = ex.Message;
-            _log.Warning(ex, "TitleBackground generated LookAtY calculation failed.");
-            return false;
-        }
-    }
-
     private bool TryApplyCharaSelectCameraCurve(
         TitleBackgroundCharaSelectCameraCurve curve,
         out string errorMessage)
@@ -3470,15 +3336,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _curveApplyActiveCameraAfterStatus = string.IsNullOrWhiteSpace(errorMessage)
             ? "failed"
             : $"failed: {errorMessage}";
-    }
-
-    private bool TryApplyCharaSelectLookAtY(float lookAtY, out float? readBackValue, out string errorMessage)
-    {
-        // Retained as a disabled diagnostic hook while Phase 2G owns the normal LookAtY path.
-        _ = lookAtY;
-        readBackValue = null;
-        errorMessage = "direct LookAtY writes disabled; Phase 2G generated curve override is preferred";
-        return false;
     }
 
     private bool TryApplyRuntimeCameraPose(
@@ -3756,15 +3613,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _curveApplyActiveCameraAfter = null;
         _curveApplyActiveCameraBeforeStatus = "not-run";
         _curveApplyActiveCameraAfterStatus = "not-run";
-        _lookAtYApplyAttemptCount = 0;
-        _lookAtYApplySuccessCount = 0;
-        _lookAtYApplyLastStatus = "not-run";
-        _lookAtYApplyLastFailureReason = string.Empty;
-        _lookAtYApplyLastAppliedValue = null;
-        _lookAtYApplyAppliedFrame = null;
-        _lookAtYApplyRequestedValue = null;
-        _lookAtYApplyReadBackValueImmediatelyAfterWrite = null;
-        _lookAtYApplyImmediateReadBackStatus = "not-run";
         _phase2CTimelineFrameCounter = -1;
         _phase2CTimelineStatus = "not-run";
         _phase2CTimelineError = string.Empty;
@@ -3901,8 +3749,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private TitleBackgroundPhase2CVerdicts BuildPhase2CVerdicts(TitleBackgroundPhase2CTimelineSnapshot stableSample)
     {
         return new TitleBackgroundPhase2CVerdicts(
-            EvaluateImmediateFloatReflection(_lookAtYApplyRequestedValue, _lookAtYApplyReadBackValueImmediatelyAfterWrite, _lookAtYApplyImmediateReadBackStatus),
-            EvaluateFloatStability(_lookAtYApplyReadBackValueImmediatelyAfterWrite, stableSample.LobbyLastLookAtVector?.Y),
             EvaluateFloatStability(_runtimeRestoreLastRestoredDistance, stableSample.Distance),
             EvaluateTiltOffsetObservableEffect(stableSample));
     }
@@ -3953,20 +3799,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
 
         return "not-observed";
-    }
-
-    private static string EvaluateImmediateFloatReflection(float? requested, float? readBack, string readBackStatus)
-    {
-        if (!requested.HasValue || !readBack.HasValue)
-        {
-            return string.Equals(readBackStatus, "readback unavailable", StringComparison.Ordinal)
-                ? "readback-unavailable"
-                : "inconclusive";
-        }
-
-        return Math.Abs(readBack.Value - requested.Value) <= TitleBackgroundCameraProbeReport.ReflectionTolerance
-            ? "reflected"
-            : "not-reflected";
     }
 
     private static string EvaluateFloatStability(float? baseline, float? stableValue)
@@ -4520,8 +4352,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         int CalculateCameraCurveLowAndHighPointCount);
 
     private readonly record struct TitleBackgroundPhase2CVerdicts(
-        string LookAtYImmediateReflection,
-        string LookAtYPostApplyStability,
         string DistancePostRestoreStability,
         string TiltOffsetPostApplyObservableEffect);
 

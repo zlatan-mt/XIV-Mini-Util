@@ -306,9 +306,9 @@ internal static class TitleBackgroundCameraProbeReport
         string sceneVerdict,
         string generatedCurveOverrideVerdict,
         string finalLookAtYMatchesGeneratedCurveVerdict,
-        string finalCameraStateMatchesPresetVerdict)
+        string finalYawPitchDistanceMatchesPresetVerdict)
     {
-        _ = finalCameraStateMatchesPresetVerdict;
+        _ = finalYawPitchDistanceMatchesPresetVerdict;
         return sceneVerdict == "observed"
             && generatedCurveOverrideVerdict == "observed"
             && finalLookAtYMatchesGeneratedCurveVerdict == "observed";
@@ -338,6 +338,13 @@ internal static class TitleBackgroundCameraProbeReport
             || line.StartsWith("phase2F.setCameraCurveMidPoint.interestingCall[", StringComparison.Ordinal)
             || line.StartsWith("phase2F.calculateCameraCurveLowAndHighPoint.call[", StringComparison.Ordinal)
             || line.StartsWith("phase2F.calculateCameraCurveLowAndHighPoint.interestingCall[", StringComparison.Ordinal);
+    }
+
+    public static bool IsPhase2IObsoleteDirectLookAtYDiagnosticLine(string line)
+    {
+        return line.StartsWith("lookAtYApply.", StringComparison.Ordinal)
+            || line.StartsWith("verdict.lookAtYImmediateReflection=", StringComparison.Ordinal)
+            || line.StartsWith("verdict.lookAtYPostApplyStability=", StringComparison.Ordinal);
     }
 
     public static string DescribeCoincidentEvents(
