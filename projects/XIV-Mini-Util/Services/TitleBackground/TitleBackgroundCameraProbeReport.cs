@@ -337,7 +337,8 @@ internal static class TitleBackgroundCameraProbeReport
             || line.StartsWith("phase2F.setCameraCurveMidPoint.call[", StringComparison.Ordinal)
             || line.StartsWith("phase2F.setCameraCurveMidPoint.interestingCall[", StringComparison.Ordinal)
             || line.StartsWith("phase2F.calculateCameraCurveLowAndHighPoint.call[", StringComparison.Ordinal)
-            || line.StartsWith("phase2F.calculateCameraCurveLowAndHighPoint.interestingCall[", StringComparison.Ordinal);
+            || line.StartsWith("phase2F.calculateCameraCurveLowAndHighPoint.interestingCall[", StringComparison.Ordinal)
+            || line.StartsWith("transition.event[", StringComparison.Ordinal);
     }
 
     public static bool IsObsoleteDirectLookAtYDiagnosticLine(string line)

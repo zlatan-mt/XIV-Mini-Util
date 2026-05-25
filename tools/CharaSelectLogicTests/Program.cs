@@ -795,6 +795,124 @@ Test("title background generated curve success requires counts and final look at
             finalLookAtYMatchesGeneratedCurveVerdict: "not-observed");
 });
 
+Test("title background transition diagnostics retain last 128 monotonic events", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    for (var i = 0; i < 140; i++)
+    {
+        recorder.Record($"event-{i}");
+    }
+
+    var events = recorder.Events;
+    return events.Count == TitleBackgroundTransitionDiagnosticRecorder.RingCapacity
+        && events[0].Sequence == 13
+        && events[^1].Sequence == 140
+        && events.Zip(events.Skip(1)).All(pair => pair.First.Sequence < pair.Second.Sequence);
+});
+
+Test("title background transition diagnostics flag repeated sceneReady acceptance", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    recorder.RecordSceneReadyAccepted(new Dictionary<string, string>(), "first", 1, isLoggedIn: false);
+    recorder.RecordSceneReadyAccepted(new Dictionary<string, string>(), "second", 1, isLoggedIn: false);
+    var lines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
+        recorder,
+        new TitleBackgroundTransitionDelta(0, 0, 0, 0, 0, 0, 0),
+        isLoggedIn: false));
+
+    return lines.Contains("transition.sceneReady.acceptedCount=2")
+        && lines.Contains("transition.sceneReady.acceptedCount.suspicious=True")
+        && lines.Contains("transition.verdict.sceneReadyAcceptedMultipleTimes=True");
+});
+
+Test("title background transition diagnostics compute deltas since previous diag", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    var first = recorder.ComputeDeltaSinceLastDiagnostic(new TitleBackgroundTransitionCounters(10, 20, 30, 40, 50, 2, 3));
+    var second = recorder.ComputeDeltaSinceLastDiagnostic(new TitleBackgroundTransitionCounters(13, 22, 31, 41, 55, 2, 4));
+
+    return first.Phase2ELookAtYCallCount == 10
+        && first.Phase2GSetMidAttemptCount == 40
+        && second.Phase2ELookAtYCallCount == 3
+        && second.Phase2FSetMidCallCount == 2
+        && second.Phase2FLowHighCallCount == 1
+        && second.Phase2GSetMidAttemptCount == 1
+        && second.Phase2GLowHighAttemptCount == 5
+        && second.SceneReadyAcceptedCount == 0
+        && second.SceneReadyRawCallCount == 1;
+});
+
+Test("title background transition normal diagnostics include summary without full trace", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    recorder.Record("CreateSceneDetour entered");
+    var lines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
+        recorder,
+        new TitleBackgroundTransitionDelta(0, 0, 0, 0, 0, 0, 0),
+        isLoggedIn: false));
+
+    return lines.Any(line => line.StartsWith("transition.eventCount=", StringComparison.Ordinal))
+        && lines.Any(line => line.StartsWith("transition.verdict.loginTransitionSafety=", StringComparison.Ordinal))
+        && !lines.Any(line => line.StartsWith("transition.event[", StringComparison.Ordinal));
+});
+
+Test("title background transition detailed diagnostics include event trace", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    recorder.Record("CreateSceneDetour entered");
+    return recorder.BuildTraceLines().Any(line => line.StartsWith("transition.event[0].seq=1; name=CreateSceneDetour entered", StringComparison.Ordinal));
+});
+
+Test("title background transition diagnostics flag stale adapter after login", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    recorder.MarkPostLoginStaleState(new Dictionary<string, string>(), staleAdapter: true, staleCurrentLobbyMap: false, staleSceneOverride: false);
+    var lines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
+        recorder,
+        new TitleBackgroundTransitionDelta(0, 0, 0, 0, 0, 0, 0),
+        isLoggedIn: true,
+        staleAdapter: true));
+
+    return lines.Contains("transition.adapter.staleAfterLoginDetected=True")
+        && lines.Contains("transition.verdict.staleCharaSelectStateAfterLogin=True")
+        && lines.Contains("transition.verdict.loginTransitionSafety=unsafe");
+});
+
+Test("title background transition diagnostics flag Phase2G applied after login", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    recorder.RecordPhase2GApply(new Dictionary<string, string>(), isLoggedIn: true, isCharaSelectOrTitleBackground: false, "allowed");
+    var lines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
+        recorder,
+        new TitleBackgroundTransitionDelta(0, 0, 0, 1, 0, 0, 0),
+        isLoggedIn: true,
+        phase2GAppliedAfterLogin: true));
+
+    return lines.Contains("transition.phase2G.appliedAfterLogin=True")
+        && lines.Contains("transition.verdict.postLoginPhase2GStillApplying=True")
+        && lines.Contains("transition.verdict.loginTransitionSafety=unsafe");
+});
+
+Test("title background transition verdict detects post-login Phase2G from deltas", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    var input = BuildTransitionSummaryInput(
+        recorder,
+        new TitleBackgroundTransitionDelta(0, 0, 0, 1, 1, 0, 0),
+        isLoggedIn: true);
+    var verdicts = TitleBackgroundTransitionDiagnosticRecorder.BuildVerdicts(input);
+
+    return verdicts.PostLoginPhase2GStillApplying
+        && verdicts.LoginTransitionSafety == "unsafe";
+});
+
+Test("title background yaw pitch distance not-observed is safe only after login transition safety", () =>
+{
+    return !TitleBackgroundTransitionDiagnosticRecorder.IsFinalYawPitchDistanceSafe("not-observed", "unsafe")
+        && TitleBackgroundTransitionDiagnosticRecorder.IsFinalYawPitchDistanceSafe("not-observed", "safe")
+        && TitleBackgroundTransitionDiagnosticRecorder.IsFinalYawPitchDistanceSafe("observed", "unsafe");
+});
+
 Test("title background normal diagnostics exclude detailed failure-only lines", () =>
 {
     return TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2C.timeline[60].activeCamera.DirH=1.2")
@@ -803,6 +921,7 @@ Test("title background normal diagnostics exclude detailed failure-only lines", 
         && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.call[1].returnValue=0.834")
         && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2F.setCameraCurveMidPoint.call[1].status=original")
         && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2F.calculateCameraCurveLowAndHighPoint.interestingCall[1].status=phase2G=low-high-applied")
+        && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("transition.event[0].seq=1; name=CreateSceneDetour entered")
         && !TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2G.generationOverride.setMid.appliedCount=3")
         && !TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.callCount=128");
 });
@@ -1610,6 +1729,60 @@ Test("title background prologue hint does not verify unknown bytes", () =>
     byte[] bytes = [0x8B, 0xD9, 0xE8, 0x11, 0x22, 0x33, 0x44];
     return TitleBackgroundAddressResolver.ClassifyFunctionPrologue(bytes) == "unknown";
 });
+
+TitleBackgroundTransitionSummaryInput BuildTransitionSummaryInput(
+    TitleBackgroundTransitionDiagnosticRecorder recorder,
+    TitleBackgroundTransitionDelta delta,
+    bool isLoggedIn,
+    bool staleAdapter = false,
+    bool phase2GAppliedAfterLogin = false)
+{
+    return new TitleBackgroundTransitionSummaryInput(
+        new TitleBackgroundTransitionContext(
+            isLoggedIn,
+            IsCharaSelectOrTitleBackground: !isLoggedIn,
+            CurrentTerritoryId: isLoggedIn ? 777u : 0u,
+            CurrentTerritoryType: isLoggedIn ? "777" : "0",
+            CurrentLobbyMap: isLoggedIn ? "None" : "CharaSelect"),
+        new TitleBackgroundTransitionSceneOverrideState(
+            LastOverrideApplied: false,
+            LastOverrideLobbyType: "None",
+            CurrentLobbyMap: isLoggedIn ? "None" : "CharaSelect",
+            LastCurrentLobbyMapResetReason: "none",
+            StaleAfterLoginDetected: false),
+        new TitleBackgroundTransitionAdapterState(
+            State: staleAdapter ? "Active" : "Inactive",
+            LastEvent: "not-run",
+            SceneGeneration: staleAdapter ? 1 : 0,
+            StaleAfterLoginDetected: staleAdapter),
+        new TitleBackgroundTransitionPhase2GState(
+            LastApplyContext: phase2GAppliedAfterLogin ? "logged-in" : recorder.LastPhase2GApplyContext,
+            AppliedAfterLogin: phase2GAppliedAfterLogin || recorder.Phase2GAppliedAfterLogin,
+            AppliedAfterLeavingCharaSelect: recorder.Phase2GAppliedAfterLeavingCharaSelect,
+            LastAllowedReason: recorder.LastPhase2GAllowedReason,
+            LastSkippedReason: recorder.LastPhase2GSkippedReason),
+        new TitleBackgroundTransitionCameraState(
+            CurrentCaptureStatus: "not-run",
+            CurrentDirH: "none",
+            CurrentDirV: "none",
+            CurrentDistance: "none",
+            CurrentPosition: "none",
+            CurrentLookAt: "none"),
+        new TitleBackgroundTransitionCounters(0, 0, 0, 0, 0, recorder.SceneReadyAcceptedCount, recorder.SceneReadyRawCallCount),
+        delta,
+        recorder.FirstEvent,
+        recorder.LastEvent,
+        recorder.EventCount,
+        recorder.SceneReadyRawCallCount,
+        recorder.SceneReadyAcceptedCount,
+        recorder.SceneReadyRejectedCount,
+        recorder.SceneReadyAcceptedCount > 1,
+        recorder.SceneReadyLastAcceptedReason,
+        recorder.SceneReadyLastRejectedReason,
+        recorder.SceneReadyLastAcceptedSceneGeneration,
+        recorder.AcceptedGenerations,
+        recorder.PostLoginSceneReadyAccepted);
+}
 
 if (failures.Count > 0)
 {

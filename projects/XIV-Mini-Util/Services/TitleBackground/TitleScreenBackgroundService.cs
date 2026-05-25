@@ -17,6 +17,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private readonly IGameInteropProvider _gameInteropProvider;
     private readonly ISigScanner _sigScanner;
     private readonly IFramework _framework;
+    private readonly IClientState _clientState;
     private readonly IDataManager _dataManager;
     private readonly IPluginLog _log;
     private readonly string _configDirectory;
@@ -24,6 +25,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundAddressResolver _addressResolver = new();
     private readonly TitleBackgroundCameraCaptureService _cameraCaptureService;
     private readonly TitleBackgroundCharaSelectCameraAdapter _charaSelectCameraAdapter = new();
+    private readonly TitleBackgroundTransitionDiagnosticRecorder _transitionDiagnostics = new();
 
     private Hook<CreateSceneDelegate>? _createSceneHook;
     private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
@@ -132,6 +134,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private int _phase2GGenerationOverrideLastAppliedSceneGeneration;
     private string _phase2GGenerationOverrideLastStatus = "not-run";
     private string _phase2GGenerationOverrideLastSkippedReason = string.Empty;
+    private string _lastCurrentLobbyMapResetReason = "none";
+    private bool _postLoginDiagnosticSeen;
     private TitleBackgroundSelfTestSession? _selfTestSession;
     private const int SelfTestMaxFrame = 600;
     private static readonly int[] CameraProbeTimelineFrames = [0, 1, 2, 4, 8, 16, 30, 60, 90, 120, 180, 240, 300, 450, 600];
@@ -165,6 +169,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _gameInteropProvider = gameInteropProvider;
         _sigScanner = sigScanner;
         _framework = framework;
+        _clientState = clientState;
         _dataManager = dataManager;
         _log = log;
         _configDirectory = configDirectory;
@@ -172,6 +177,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _cameraCaptureService = new TitleBackgroundCameraCaptureService(clientState, objectTable, dataManager, log);
         _framework.Update += OnFrameworkUpdate;
 
+        RecordTransitionEvent("plugin initialized", "constructor");
         InitializeHooks();
         ApplyFromConfiguration();
     }
@@ -182,6 +188,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         _configuration.TitleBackgroundOverrideEnabled = enabled;
         _configuration.Save();
+        RecordTransitionEvent(enabled ? "title background feature enabled" : "title background feature disabled", "SetEnabled");
         ReloadNativeIntegration();
     }
 
@@ -189,6 +196,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         _configuration.TitleBackgroundCameraOverrideEnabled = enabled;
         _configuration.Save();
+        RecordTransitionEvent("cameraOverrideEnabled changed", enabled ? "enabled" : "disabled");
         ReloadNativeIntegration();
     }
 
@@ -335,8 +343,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         ConfigureCharaSelectCameraAdapter();
         RecordCharaSelectRuntimeCameraStateBeforeSceneReload(GameLobbyType.CharaSelect);
         _charaSelectCameraAdapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+        RecordTransitionEvent("scene generation incremented", $"generation={_charaSelectCameraAdapter.RuntimeState.SceneGeneration}");
         _currentMapWriteAttempted = true;
         _lastCurrentMapWriteSucceeded = TryWriteCurrentLobbyMap(GameLobbyType.None);
+        _lastCurrentLobbyMapResetReason = "manual-reload";
+        RecordTransitionEvent("CurrentLobbyMap reset", _lastCurrentLobbyMapResetReason);
         if (!_lastCurrentMapWriteSucceeded)
         {
             return "reload failed: CurrentLobbyMap write failed";
@@ -360,6 +371,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         NormalizeConfiguration();
         ConfigureCharaSelectCameraAdapter();
+        RecordTransitionEvent("runtimeMode changed or observed", _configuration.TitleBackgroundRuntimeMode.ToString());
+        RecordTransitionEvent("cameraOverrideEnabled changed", _configuration.TitleBackgroundCameraOverrideEnabled.ToString());
         UpdateAutomaticProbeCounterState();
         if (_configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly)
         {
@@ -415,8 +428,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     public void ReloadNativeIntegration()
     {
+        RecordTransitionEvent("adapter stop requested", "ReloadNativeIntegration");
         _cameraApplyPending = false;
         _charaSelectCameraAdapter.ResetRuntimeCameraState();
+        RecordTransitionEvent("adapter stopped/reset/cleared", "ResetRuntimeCameraState");
         ResetCameraOverrideObservation();
         ResetSceneOverrideObservation();
         _loadingLobbyType = GameLobbyType.None;
@@ -427,6 +442,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     public void ClearOverride()
     {
+        RecordTransitionEvent("title background feature disabled", "ClearOverride");
         _configuration.TitleBackgroundOverrideEnabled = false;
         _configuration.Save();
         _cameraApplyPending = false;
@@ -453,8 +469,183 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         };
     }
 
+    private IReadOnlyList<string> BuildTransitionDiagnosticSummaryLines(
+        string currentCaptureStatus,
+        float? currentDirH,
+        float? currentDirV,
+        float? currentDistance,
+        Vector3? currentSceneCameraPosition,
+        Vector3? currentLookAtVector)
+    {
+        var counters = new TitleBackgroundTransitionCounters(
+            _phase2ECalculateLookAtYCallCount,
+            _phase2FSetCameraCurveMidPointCallCount,
+            _phase2FCalculateCameraCurveLowAndHighPointCallCount,
+            _phase2GGenerationOverrideSetMidAttemptCount,
+            _phase2GGenerationOverrideLowHighAttemptCount,
+            _sceneReadySignalAcceptedCount,
+            _sceneReadySignalCallCount);
+        var delta = _transitionDiagnostics.ComputeDeltaSinceLastDiagnostic(counters);
+        var currentLobbyMap = TryReadCurrentLobbyMap(out var currentMap)
+            ? currentMap.ToString()
+            : "unavailable";
+        var isCharaSelectOrTitleBackground = IsCharaSelectOrTitleBackground(currentMap);
+        var staleAdapterAfterLogin = _clientState.IsLoggedIn
+            && _charaSelectCameraAdapter.State is not TitleBackgroundCharaSelectCameraAdapterState.Inactive
+            and not TitleBackgroundCharaSelectCameraAdapterState.Stopping;
+        var staleCurrentLobbyMapAfterLogin = _clientState.IsLoggedIn && isCharaSelectOrTitleBackground;
+        var staleSceneOverrideAfterLogin = _clientState.IsLoggedIn && _lastOverrideApplied;
+        _transitionDiagnostics.MarkPostLoginStaleState(
+            BuildTransitionSnapshot("report-time"),
+            staleAdapterAfterLogin,
+            staleCurrentLobbyMapAfterLogin,
+            staleSceneOverrideAfterLogin);
+
+        var input = new TitleBackgroundTransitionSummaryInput(
+            new TitleBackgroundTransitionContext(
+                _clientState.IsLoggedIn,
+                isCharaSelectOrTitleBackground,
+                _clientState.TerritoryType,
+                _clientState.TerritoryType.ToString(),
+                currentLobbyMap),
+            new TitleBackgroundTransitionSceneOverrideState(
+                _lastOverrideApplied,
+                _lastOverrideLobbyType.ToString(),
+                currentLobbyMap,
+                _lastCurrentLobbyMapResetReason,
+                _transitionDiagnostics.StaleSceneOverrideStateAfterLogin || staleSceneOverrideAfterLogin),
+            new TitleBackgroundTransitionAdapterState(
+                _charaSelectCameraAdapter.State.ToString(),
+                _charaSelectCameraAdapter.LastEvent,
+                _charaSelectCameraAdapter.RuntimeState.SceneGeneration,
+                _transitionDiagnostics.StaleAdapterStateAfterLogin || staleAdapterAfterLogin),
+            new TitleBackgroundTransitionPhase2GState(
+                _transitionDiagnostics.LastPhase2GApplyContext,
+                _transitionDiagnostics.Phase2GAppliedAfterLogin,
+                _transitionDiagnostics.Phase2GAppliedAfterLeavingCharaSelect,
+                _transitionDiagnostics.LastPhase2GAllowedReason,
+                string.IsNullOrWhiteSpace(_transitionDiagnostics.LastPhase2GSkippedReason)
+                    ? FormatNone(_phase2GGenerationOverrideLastSkippedReason)
+                    : _transitionDiagnostics.LastPhase2GSkippedReason),
+            new TitleBackgroundTransitionCameraState(
+                currentCaptureStatus,
+                FormatFloat(currentDirH),
+                FormatFloat(currentDirV),
+                FormatFloat(currentDistance),
+                FormatVector(currentSceneCameraPosition),
+                FormatVector(currentLookAtVector)),
+            counters,
+            delta,
+            _transitionDiagnostics.FirstEvent,
+            _transitionDiagnostics.LastEvent,
+            _transitionDiagnostics.EventCount,
+            _transitionDiagnostics.SceneReadyRawCallCount,
+            _transitionDiagnostics.SceneReadyAcceptedCount,
+            _transitionDiagnostics.SceneReadyRejectedCount,
+            _transitionDiagnostics.SceneReadyAcceptedCount > 1,
+            _transitionDiagnostics.SceneReadyLastAcceptedReason,
+            _transitionDiagnostics.SceneReadyLastRejectedReason,
+            _transitionDiagnostics.SceneReadyLastAcceptedSceneGeneration,
+            _transitionDiagnostics.AcceptedGenerations,
+            _transitionDiagnostics.PostLoginSceneReadyAccepted);
+        return TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(input);
+    }
+
+    private string SaveTransitionDiagnosticDump(IReadOnlyList<string> transitionSummaryLines)
+    {
+        try
+        {
+            Directory.CreateDirectory(_configDirectory);
+            var path = Path.Combine(_configDirectory, "title-background-transitiondiag.txt");
+            var detailedLines = GetDiagnosticLines(includeDetailedPhase2Diagnostics: true);
+            var dump = _transitionDiagnostics.BuildDetailedDump(transitionSummaryLines, detailedLines);
+            File.WriteAllText(path, dump);
+            return path;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "TitleBackground transition diagnostic save failed.");
+            return string.Empty;
+        }
+    }
+
+    private void RecordTransitionEvent(string eventName, string reason = "", string error = "")
+    {
+        _transitionDiagnostics.Record(eventName, BuildTransitionSnapshot(eventName), reason, error);
+    }
+
+    private Dictionary<string, string> BuildTransitionSnapshot(string eventName)
+    {
+        var currentMapAvailable = TryReadCurrentLobbyMap(out var currentMap);
+        var isCharaSelectOrTitleBackground = IsCharaSelectOrTitleBackground(currentMap);
+        return new Dictionary<string, string>
+        {
+            ["event"] = eventName,
+            ["runtimeMode"] = _configuration.TitleBackgroundRuntimeMode.ToString(),
+            ["probeMode"] = IsHookProbeMode().ToString(),
+            ["hooksEnabled"] = AreAnyHooksEnabled().ToString(),
+            ["sceneOverrideEnabled"] = IsSceneOverrideEnabled().ToString(),
+            ["cameraOverrideEnabled"] = _configuration.TitleBackgroundCameraOverrideEnabled.ToString(),
+            ["cameraOverrideApplyPending"] = _cameraApplyPending.ToString(),
+            ["isLoggedIn"] = _clientState.IsLoggedIn.ToString(),
+            ["isTitleScreen"] = (!_clientState.IsLoggedIn).ToString(),
+            ["isCharacterSelect"] = (currentMapAvailable && currentMap == GameLobbyType.CharaSelect).ToString(),
+            ["isLobby"] = (currentMapAvailable && currentMap != GameLobbyType.None).ToString(),
+            ["isCharaSelectOrTitleBackground"] = isCharaSelectOrTitleBackground.ToString(),
+            ["currentTerritoryId"] = _clientState.TerritoryType.ToString(),
+            ["lastOverrideLobbyType"] = _lastOverrideLobbyType.ToString(),
+            ["resolvedLobbyMap"] = ResolveSceneReadySignalLobbyMap().ToString(),
+            ["CurrentLobbyMap"] = currentMapAvailable ? currentMap.ToString() : "unavailable",
+            ["originalTerritoryPath"] = FormatNone(_lastOverrideOriginalPath),
+            ["overrideTerritoryPath"] = FormatNone(_lastOverrideNewPath),
+            ["overrideTerritoryId"] = _lastOverrideTerritoryId.ToString(),
+            ["layerFilterKey"] = _lastOverrideLayerFilterKey.ToString(),
+            ["lastOverrideApplied"] = _lastOverrideApplied.ToString(),
+            ["lastOverrideOriginalPath"] = FormatNone(_lastOverrideOriginalPath),
+            ["lastOverrideNewPath"] = FormatNone(_lastOverrideNewPath),
+            ["lastOverrideTerritoryId"] = _lastOverrideTerritoryId.ToString(),
+            ["lastOverrideLayerFilterKey"] = _lastOverrideLayerFilterKey.ToString(),
+            ["overrideMutationBranchArmed"] = IsOverrideMutationBranchArmed().ToString(),
+            ["adapterState"] = _charaSelectCameraAdapter.State.ToString(),
+            ["adapterLastEvent"] = _charaSelectCameraAdapter.LastEvent,
+            ["sceneGeneration"] = _charaSelectCameraAdapter.RuntimeState.SceneGeneration.ToString(),
+            ["curveAppliedSceneGeneration"] = _charaSelectCameraAdapter.LastCurveAppliedSceneGeneration.ToString(),
+            ["lookAtYAppliedSceneGeneration"] = _charaSelectCameraAdapter.LastLookAtYAppliedSceneGeneration.ToString(),
+            ["runtimeRestoreSceneGeneration"] = _lastCharaSelectCameraRuntimeRestoreSceneGeneration.ToString(),
+            ["shouldRestoreRuntimeCameraState"] = _charaSelectCameraAdapter.ShouldRestoreRuntimeCameraState().ToString(),
+            ["runtimeRecordStatus"] = _lastCharaSelectCameraRuntimeRecordStatus,
+            ["runtimeRecordFailureReason"] = FormatNone(_lastCharaSelectCameraRuntimeRecordError),
+            ["runtimeRestoreFailureReason"] = FormatNone(_lastCharaSelectCameraRuntimeRestoreFailureReason),
+            ["phase2G.setMid.attemptCount"] = _phase2GGenerationOverrideSetMidAttemptCount.ToString(),
+            ["phase2G.setMid.appliedCount"] = _phase2GGenerationOverrideSetMidAppliedCount.ToString(),
+            ["phase2G.lowHigh.attemptCount"] = _phase2GGenerationOverrideLowHighAttemptCount.ToString(),
+            ["phase2G.lowHigh.appliedCount"] = _phase2GGenerationOverrideLowHighAppliedCount.ToString(),
+            ["phase2G.lastStatus"] = FormatNone(_phase2GGenerationOverrideLastStatus),
+            ["phase2G.lastSkippedReason"] = FormatNone(_phase2GGenerationOverrideLastSkippedReason),
+            ["phase2G.lastAppliedSceneGeneration"] = _phase2GGenerationOverrideLastAppliedSceneGeneration.ToString(),
+        };
+    }
+
+    private bool IsCharaSelectOrTitleBackground(GameLobbyType currentMap)
+    {
+        return !_clientState.IsLoggedIn
+            || currentMap == GameLobbyType.CharaSelect
+            || currentMap == GameLobbyType.Title;
+    }
+
     public IReadOnlyList<string> GetDiagnosticLines(bool includeDetailedPhase2Diagnostics = false)
     {
+        if (!includeDetailedPhase2Diagnostics)
+        {
+            RecordTransitionEvent("command /xmutbgdiag executed", "normal");
+            if (_clientState.IsLoggedIn && !_postLoginDiagnosticSeen)
+            {
+                _postLoginDiagnosticSeen = true;
+                RecordTransitionEvent("entering logged-in world if detectable", "first logged-in diagnostic");
+                RecordTransitionEvent("first post-login /xmutbgdiag", "normal");
+            }
+        }
+
         var sceneHooksReady = AreSceneHooksReady();
         var cameraHookReady = AreCameraHookReady();
         var cameraHookRequired = IsCameraHookRequired();
@@ -477,6 +668,19 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         float? currentDistance = currentCameraCaptured ? currentCamera.Distance : null;
         float? currentInterpDistance = currentCameraCaptured ? currentCamera.InterpDistance : null;
         float? currentFovY = currentCameraCaptured ? currentCamera.FovY : null;
+        var transitionSummaryLines = BuildTransitionDiagnosticSummaryLines(
+            currentCaptureStatus,
+            currentDirH,
+            currentDirV,
+            currentDistance,
+            currentSceneCameraPosition,
+            currentLookAtVector);
+        var transitionSafety = transitionSummaryLines
+            .FirstOrDefault(line => line.StartsWith("transition.verdict.loginTransitionSafety=", StringComparison.Ordinal))
+            ?.Split('=')[1] ?? "unknown";
+        var transitionDetailPath = !includeDetailedPhase2Diagnostics && _transitionDiagnostics.EventCount > 0
+            ? SaveTransitionDiagnosticDump(transitionSummaryLines)
+            : string.Empty;
         var phase2CTimelineSamples = BuildPhase2CTimelineSamples();
         var phase2CStableSample = phase2CTimelineSamples
             .Where(sample => sample.ActiveCameraCaptured || sample.LobbyCameraCaptured)
@@ -531,8 +735,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 $"verdict.phase2G.finalLookAtYMatchesGeneratedCurve={phase2GFinalLookAtYMatchesGeneratedCurve}",
                 $"verdict.phase2G.finalYawPitchDistanceMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
                 "verdict.phase2G.finalYawPitchDistanceMatchesPreset.blocking=False",
+                $"verdict.phase2G.finalYawPitchDistanceMatchesPreset.loginTransitionConditional={TitleBackgroundTransitionDiagnosticRecorder.IsFinalYawPitchDistanceSafe(phase2GFinalYawPitchDistanceMatchesPreset, transitionSafety)}",
                 // Deprecated compatibility output. Prefer finalYawPitchDistanceMatchesPreset.
                 $"verdict.phase2G.finalCameraStateMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
+                $"transition.detailDump={FormatNone(string.IsNullOrWhiteSpace(transitionDetailPath) ? string.Empty : Path.GetFileName(transitionDetailPath))}",
+                ..transitionSummaryLines,
             ];
         }
 
@@ -718,6 +925,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"verdict.phase2G.finalLookAtYMatchesGeneratedCurve={phase2GFinalLookAtYMatchesGeneratedCurve}",
             $"verdict.phase2G.finalYawPitchDistanceMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
             "verdict.phase2G.finalYawPitchDistanceMatchesPreset.blocking=False",
+            $"verdict.phase2G.finalYawPitchDistanceMatchesPreset.loginTransitionConditional={TitleBackgroundTransitionDiagnosticRecorder.IsFinalYawPitchDistanceSafe(phase2GFinalYawPitchDistanceMatchesPreset, transitionSafety)}",
             // Deprecated compatibility output. Prefer finalYawPitchDistanceMatchesPreset.
             $"verdict.phase2G.finalCameraStateMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
@@ -793,6 +1001,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             "Phase2D.verdictScope=timeline-only; finalCameraStabilizationObserved and distanceEventuallyOverwritten are based on character-select samples, not report-time current camera",
             "Phase2F.timeline=extended-scene-ready-accepted-relative-frames; read-only LobbyCameraExpanded curve point samples through frame 600",
         };
+
+        lines.AddRange(transitionSummaryLines);
+        lines.AddRange(_transitionDiagnostics.BuildTraceLines());
 
         foreach (var sample in phase2CTimelineSamples)
         {
@@ -1429,6 +1640,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _calculateLobbyCameraLookAtYHook?.Enable();
             _setCameraCurveMidPointHook?.Enable();
             _calculateCameraCurveLowAndHighPointHook?.Enable();
+            RecordTransitionEvent("hooks enabled", "InitializeHooks");
 
             _state = TitleBackgroundServiceState.Disabled;
             _stateReason = "無効";
@@ -1444,6 +1656,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private void LoadLobbySceneDetour(GameLobbyType mapId)
     {
+        RecordTransitionEvent("LoadLobbySceneDetour entered", mapId.ToString());
         RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.LoadLobbyScene);
         if (TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(mapId))
         {
@@ -1453,9 +1666,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _loadingLobbyType = mapId;
         RecordCharaSelectRuntimeCameraStateBeforeSceneReload(mapId);
         _charaSelectCameraAdapter.NotifySceneLoadStarted(mapId);
+        RecordTransitionEvent("scene generation incremented", $"generation={_charaSelectCameraAdapter.RuntimeState.SceneGeneration}");
         RecordProbeLoadLobbyScene(mapId);
         _log.Debug("[XMU BG] LoadLobbyScene mapId={MapId}", mapId);
         _loadLobbySceneHook?.Original(mapId);
+        RecordTransitionEvent("LoadLobbySceneDetour original called", mapId.ToString());
     }
 
     private void LobbySceneLoadedDetour(nint thisPtr)
@@ -1469,22 +1684,37 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _sceneReadySignalCallCount++;
             _sceneReadySignalLastAdapterStateBeforeHandle = stateBeforeHandle.ToString();
             _sceneReadySignalLastResolvedLobbyMap = map;
+            var sceneReadySnapshot = BuildTransitionSnapshot("sceneReady");
+            _transitionDiagnostics.RecordSceneReadyRaw(sceneReadySnapshot, $"map={map}; stateBefore={stateBeforeHandle}");
 
             // Phase 2-A uses AgentLobby.UpdateLobbyUIStage as a provisional scene-ready signal.
             // This is not a confirmed native LobbySceneLoaded-equivalent hook.
             if (ShouldHandleCharaSelectSceneReadySignal(stateBeforeHandle, map))
             {
                 _sceneReadySignalAcceptedCount++;
+                _transitionDiagnostics.RecordSceneReadyAccepted(
+                    sceneReadySnapshot,
+                    $"map={map}; stateBefore={stateBeforeHandle}",
+                    _charaSelectCameraAdapter.RuntimeState.SceneGeneration,
+                    _clientState.IsLoggedIn);
                 StartPhase2CTimelineObservation();
                 _charaSelectCameraAdapter.NotifySceneLoaded(map);
+                RecordTransitionEvent("sceneLoadedNotification success", map.ToString());
                 RestoreCharaSelectRuntimeCameraStateAfterSceneLoad();
                 ApplyCharaSelectCameraCurveAfterSceneLoad();
                 CapturePhase2CTimelineFrame(0);
+            }
+            else
+            {
+                _transitionDiagnostics.RecordSceneReadyRejected(
+                    sceneReadySnapshot,
+                    $"map={map}; stateBefore={stateBeforeHandle}");
             }
         }
         catch (Exception ex)
         {
             MarkRuntimeError(ex, nameof(LobbySceneLoadedDetour));
+            RecordTransitionEvent("sceneLoadedNotification failure", nameof(LobbySceneLoadedDetour), ex.Message);
             _lastCharaSelectCameraRuntimeRestoreStatus = "runtime-error";
             _lastCharaSelectCameraRuntimeRestoreFailureReason = ex.Message;
             _curveApplyLastStatus = "runtime-error";
@@ -1499,6 +1729,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             var lobbyType = EffectiveLobbyType;
             var originalPath = territoryPath == null ? string.Empty : Marshal.PtrToStringUTF8((nint)territoryPath) ?? string.Empty;
+            RecordTransitionEvent("CreateSceneDetour entered", $"lobbyType={lobbyType}; path={originalPath}");
             RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.CreateScene);
             _lastObservedCreateScenePath = originalPath;
             RecordProbeCreateScene(lobbyType, originalPath, territoryId, layerFilterKey);
@@ -1506,6 +1737,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
             if (IsHookProbeMode())
             {
+                RecordTransitionEvent("CreateSceneDetour original path observed", "hook-probe");
                 return _createSceneHook?.Original(territoryPath, territoryId, p3, layerFilterKey, festivals, p6, contentFinderConditionId) ?? 0;
             }
 
@@ -1532,7 +1764,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 _lastOverrideNewPath = _validatedTerritoryPath;
                 _lastOverrideTerritoryId = territoryId;
                 _lastOverrideLayerFilterKey = layerFilterKey;
+                RecordTransitionEvent("CreateSceneDetour override applied", $"lobbyType={lobbyType}");
                 _log.Information("[XMU BG] Override CharaSelect scene lobbyType={LobbyType}, originalPath={OriginalPath}, newPath={NewPath}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", lobbyType, originalPath, _validatedTerritoryPath, territoryId, layerFilterKey);
+            }
+            else
+            {
+                RecordTransitionEvent("CreateSceneDetour override skipped", $"lobbyType={lobbyType}");
             }
         }
         catch (Exception ex)
@@ -1558,16 +1795,29 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private byte LobbyUpdateDetour(GameLobbyType mapId, int time)
     {
+        RecordTransitionEvent("LobbyUpdateDetour entered", $"map={mapId}; time={time}");
         var frame = RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.LobbyUpdate);
         try
         {
             RecordProbeLobbyUpdate(mapId, time);
             _charaSelectCameraAdapter.NotifyLobbyUpdate(mapId);
+            RecordTransitionEvent("adapter state transition", $"event=LobbyUpdate; map={mapId}; state={_charaSelectCameraAdapter.State}");
+            if (!TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(mapId))
+            {
+                RecordTransitionEvent("leaving title/character-select context if detectable", mapId.ToString());
+            }
+
             if (!IsHookProbeMode() && ShouldResetCurrentMapForReload(mapId))
             {
                 _currentMapWriteAttempted = true;
                 _lastCurrentMapWriteSucceeded = TryWriteCurrentLobbyMap(GameLobbyType.None);
+                _lastCurrentLobbyMapResetReason = $"reload-transition-to-{mapId}";
+                RecordTransitionEvent("CurrentLobbyMap reset", _lastCurrentLobbyMapResetReason);
                 _log.Debug("[XMU BG] CurrentLobbyMap reset requested. next={NextMap}, success={Success}", mapId, _lastCurrentMapWriteSucceeded);
+            }
+            else
+            {
+                RecordTransitionEvent("CurrentLobbyMap set", mapId.ToString());
             }
         }
         catch (Exception ex)
@@ -1663,6 +1913,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         CurvePoint* highPoint)
     {
         var callIndex = ++_phase2ECalculateLookAtYCallCount;
+        RecordTransitionEvent("calculateLobbyCameraLookAtY hook called", $"callIndex={callIndex}");
         var frame = GetCurrentPhase2CFrame();
         var low = ReadCurvePoint(lowPoint);
         var mid = ReadCurvePoint(midPoint);
@@ -1717,6 +1968,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private void SetCameraCurveMidPointDetour(nint self, float value)
     {
         var callIndex = ++_phase2FSetCameraCurveMidPointCallCount;
+        RecordTransitionEvent("SetCameraCurveMidPoint hook called", $"callIndex={callIndex}");
         var frame = GetCurrentPhase2CFrame();
         var beforeCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var before, out var beforeError);
         var activeBefore = TryCaptureActiveCameraSnapshot(out var activeBeforeSnapshot, out _)
@@ -1752,6 +2004,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private void CalculateCameraCurveLowAndHighPointDetour(nint self, float value)
     {
         var callIndex = ++_phase2FCalculateCameraCurveLowAndHighPointCallCount;
+        RecordTransitionEvent("CalculateCameraCurveLowAndHighPoint hook called", $"callIndex={callIndex}");
         var frame = GetCurrentPhase2CFrame();
         var beforeCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var before, out var beforeError);
         var activeBefore = TryCaptureActiveCameraSnapshot(out var activeBeforeSnapshot, out _)
@@ -1792,10 +2045,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             status = $"skipped:{skippedReason}";
             _phase2GGenerationOverrideLastStatus = status;
             _phase2GGenerationOverrideLastSkippedReason = skippedReason;
+            _transitionDiagnostics.RecordPhase2GSkipped(skippedReason);
+            RecordTransitionEvent("Phase 2G setMid skipped", skippedReason);
             return false;
         }
 
         _phase2GGenerationOverrideSetMidAttemptCount++;
+        RecordTransitionEvent("Phase 2G setMid attempted", $"frame={FormatFrame(frame)}");
         try
         {
             // Original is intentionally called first so native generation can keep its side effects;
@@ -1804,6 +2060,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             WriteCurvePointY(self, LobbyCameraExpandedMidPointOffset, curve.Mid);
             MarkPhase2GGenerationOverrideApplied(frame, "set-mid-applied");
             _phase2GGenerationOverrideSetMidAppliedCount++;
+            _transitionDiagnostics.RecordPhase2GApply(
+                BuildTransitionSnapshot("Phase 2G setMid applied"),
+                _clientState.IsLoggedIn,
+                IsCharaSelectOrTitleBackground(TryReadCurrentLobbyMap(out var applyMap) ? applyMap : GameLobbyType.None),
+                "ShouldApplyGeneratedCurveOverride=true");
+            RecordTransitionEvent("Phase 2G setMid applied", $"frame={FormatFrame(frame)}");
             status = "applied-post-original";
             return true;
         }
@@ -1813,6 +2075,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             errorMessage = ex.Message;
             _phase2GGenerationOverrideLastStatus = "set-mid-failed";
             _phase2GGenerationOverrideLastSkippedReason = string.Empty;
+            RecordTransitionEvent("Phase 2G setMid skipped", "failed", ex.Message);
             _log.Warning(ex, "TitleBackground Phase2G SetCameraCurveMidPoint override failed.");
             return false;
         }
@@ -1826,10 +2089,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             status = $"skipped:{skippedReason}";
             _phase2GGenerationOverrideLastStatus = status;
             _phase2GGenerationOverrideLastSkippedReason = skippedReason;
+            _transitionDiagnostics.RecordPhase2GSkipped(skippedReason);
+            RecordTransitionEvent("Phase 2G lowHigh skipped", skippedReason);
             return false;
         }
 
         _phase2GGenerationOverrideLowHighAttemptCount++;
+        RecordTransitionEvent("Phase 2G lowHigh attempted", $"frame={FormatFrame(frame)}");
         try
         {
             // Original computes Low/High from the current generated inputs first; the post-original
@@ -1839,6 +2105,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             WriteCurvePointY(self, LobbyCameraExpandedHighPointOffset, curve.High);
             MarkPhase2GGenerationOverrideApplied(frame, "low-high-applied");
             _phase2GGenerationOverrideLowHighAppliedCount++;
+            _transitionDiagnostics.RecordPhase2GApply(
+                BuildTransitionSnapshot("Phase 2G lowHigh applied"),
+                _clientState.IsLoggedIn,
+                IsCharaSelectOrTitleBackground(TryReadCurrentLobbyMap(out var applyMap) ? applyMap : GameLobbyType.None),
+                "ShouldApplyGeneratedCurveOverride=true");
+            RecordTransitionEvent("Phase 2G lowHigh applied", $"frame={FormatFrame(frame)}");
             status = "applied-post-original";
             return true;
         }
@@ -1848,6 +2120,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             errorMessage = ex.Message;
             _phase2GGenerationOverrideLastStatus = "low-high-failed";
             _phase2GGenerationOverrideLastSkippedReason = string.Empty;
+            RecordTransitionEvent("Phase 2G lowHigh skipped", "failed", ex.Message);
             _log.Warning(ex, "TitleBackground Phase2G CalculateCameraCurveLowAndHighPoint override failed.");
             return false;
         }
@@ -3066,10 +3339,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private void RecordCharaSelectRuntimeCameraStateBeforeSceneReload(GameLobbyType mapId)
     {
+        RecordTransitionEvent("runtime record attempted", mapId.ToString());
         if (!ShouldRecordCharaSelectRuntimeCameraState(mapId))
         {
             _lastCharaSelectCameraRuntimeRecordStatus = "skipped";
             _lastCharaSelectCameraRuntimeRecordError = string.Empty;
+            RecordTransitionEvent("runtime record failed", "skipped");
             return;
         }
 
@@ -3077,6 +3352,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             _lastCharaSelectCameraRuntimeRecordStatus = "kept-runtime";
             _lastCharaSelectCameraRuntimeRecordError = string.Empty;
+            RecordTransitionEvent("runtime record succeeded", "kept-runtime");
             return;
         }
 
@@ -3084,6 +3360,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             _lastCharaSelectCameraRuntimeRecordStatus = "failed";
             _lastCharaSelectCameraRuntimeRecordError = errorMessage;
+            RecordTransitionEvent("runtime record failed", errorMessage);
             _log.Debug("[XMU BG] CharaSelect camera preset pose build skipped. reason={Reason}", errorMessage);
             return;
         }
@@ -3096,6 +3373,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             pose.LookAt);
         _lastCharaSelectCameraRuntimeRecordStatus = "preset-derived";
         _lastCharaSelectCameraRuntimeRecordError = string.Empty;
+        RecordTransitionEvent("runtime record succeeded", "preset-derived");
         _log.Debug(
             "[XMU BG] CharaSelect camera preset pose derived. yaw={Yaw}, pitch={Pitch}, distance={Distance}, lookAtY={LookAtY}, generation={Generation}",
             pose.Yaw,
@@ -3205,10 +3483,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private void RestoreCharaSelectRuntimeCameraStateAfterSceneLoad()
     {
         _runtimeRestoreAttemptCount++;
+        RecordTransitionEvent("runtime restore attempted", $"attempt={_runtimeRestoreAttemptCount}");
         if (!_charaSelectCameraAdapter.ShouldRestoreRuntimeCameraState())
         {
             _lastCharaSelectCameraRuntimeRestoreStatus = "skipped";
             _lastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
+            RecordTransitionEvent("runtime restore failed", "skipped");
             return;
         }
 
@@ -3216,6 +3496,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             _lastCharaSelectCameraRuntimeRestoreStatus = "failed";
             _lastCharaSelectCameraRuntimeRestoreFailureReason = errorMessage;
+            RecordTransitionEvent("runtime restore failed", errorMessage);
             _log.Debug("[XMU BG] CharaSelect camera runtime state restore skipped. reason={Reason}", errorMessage);
             return;
         }
@@ -3233,6 +3514,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _runtimeRestoreLastRestoredDistance = restoredDistance;
         _runtimeRestoreLastRestoredFovY = _configuration.TitleBackgroundFovY;
         _runtimeRestoreAppliedFrame = GetCurrentPhase2CFrame();
+        RecordTransitionEvent("runtime restore succeeded", $"generation={_lastCharaSelectCameraRuntimeRestoreSceneGeneration}");
         _log.Information(
             "[XMU BG] CharaSelect camera runtime state restored. yaw={Yaw}, pitch={Pitch}, distance={Distance}, generation={Generation}",
             restoredYaw,
@@ -3244,10 +3526,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private void ApplyCharaSelectCameraCurveAfterSceneLoad()
     {
         _curveApplyAttemptCount++;
+        RecordTransitionEvent("curve apply attempted", $"attempt={_curveApplyAttemptCount}");
         if (!_charaSelectCameraAdapter.ShouldApplyCurve())
         {
             _curveApplyLastStatus = "skipped";
             _curveApplyLastFailureReason = string.Empty;
+            RecordTransitionEvent("curve apply failed", "skipped");
             return;
         }
 
@@ -3258,6 +3542,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             _curveApplyLastStatus = "failed";
             _curveApplyLastFailureReason = errorMessage;
+            RecordTransitionEvent("curve apply failed", errorMessage);
             _log.Debug("[XMU BG] CharaSelect camera curve apply skipped. reason={Reason}", errorMessage);
             return;
         }
@@ -3273,6 +3558,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _curveApplyReadBackValueImmediatelyAfterWrite = null;
         _curveApplyImmediateReadBackStatus = "readback unavailable";
         _curveApplySuccessCount++;
+        RecordTransitionEvent("curve apply succeeded", $"generation={_charaSelectCameraAdapter.RuntimeState.SceneGeneration}");
         _log.Information(
             "[XMU BG] CharaSelect camera curve applied. low={Low}, mid={Mid}, high={High}, generation={Generation}",
             curve.Low,
@@ -3638,6 +3924,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _lastOverrideNewPath = string.Empty;
         _lastOverrideTerritoryId = 0;
         _lastOverrideLayerFilterKey = 0;
+        RecordTransitionEvent("adapter stopped/reset/cleared", "ResetSceneOverrideObservation");
     }
 
     private void UpdateAutomaticProbeCounterState()
@@ -3657,6 +3944,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private void DisposeHooks()
     {
+        var hadEnabledHooks = AreAnyHooksEnabled();
         DisposeHook(_cameraFixOnHook, nameof(_cameraFixOnHook));
         DisposeHook(_calculateLobbyCameraLookAtYHook, nameof(_calculateLobbyCameraLookAtYHook));
         DisposeHook(_setCameraCurveMidPointHook, nameof(_setCameraCurveMidPointHook));
@@ -3673,6 +3961,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _loadLobbySceneHook = null;
         _lobbyUpdateHook = null;
         _createSceneHook = null;
+        if (hadEnabledHooks)
+        {
+            RecordTransitionEvent("hooks disabled", "DisposeHooks");
+        }
     }
 
     private void DisposeHook<T>(Hook<T>? hook, string name)
