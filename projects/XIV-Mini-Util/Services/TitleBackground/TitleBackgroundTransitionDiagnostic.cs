@@ -15,6 +15,8 @@ internal readonly record struct TitleBackgroundTransitionCounters(
     int SceneReadyRawCallCount);
 
 internal readonly record struct TitleBackgroundTransitionDelta(
+    bool BaselineEstablished,
+    bool FirstReport,
     int Phase2ELookAtYCallCount,
     int Phase2FSetMidCallCount,
     int Phase2FLowHighCallCount,
@@ -31,11 +33,15 @@ internal readonly record struct TitleBackgroundTransitionContext(
     string CurrentLobbyMap);
 
 internal readonly record struct TitleBackgroundTransitionSceneOverrideState(
-    bool LastOverrideApplied,
-    string LastOverrideLobbyType,
+    bool Active,
+    bool HistoricalLastOverrideApplied,
+    string ActiveLobbyType,
+    string ActiveOverridePath,
+    string LastHistoricalOverridePath,
     string CurrentLobbyMap,
     string LastCurrentLobbyMapResetReason,
-    bool StaleAfterLoginDetected);
+    string CleanupReason,
+    bool ActiveAfterLoginDetected);
 
 internal readonly record struct TitleBackgroundTransitionAdapterState(
     string State,
@@ -46,6 +52,7 @@ internal readonly record struct TitleBackgroundTransitionAdapterState(
 internal readonly record struct TitleBackgroundTransitionPhase2GState(
     string LastApplyContext,
     bool AppliedAfterLogin,
+    long LastAppliedAfterLoginEventSeq,
     bool AppliedAfterLeavingCharaSelect,
     string LastAllowedReason,
     string LastSkippedReason);
@@ -77,7 +84,8 @@ internal readonly record struct TitleBackgroundTransitionSummaryInput(
     string SceneReadyLastRejectedReason,
     int SceneReadyLastAcceptedSceneGeneration,
     string SceneReadyAcceptedGenerations,
-    bool PostLoginSceneReadyAcceptedDetected);
+    bool PostLoginSceneReadyAcceptedDetected,
+    long SceneReadyLastAcceptedAfterLoginEventSeq);
 
 internal sealed class TitleBackgroundTransitionDiagnosticRecorder
 {
@@ -86,6 +94,8 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
     private readonly Queue<TitleBackgroundTransitionDiagnosticEvent> _events = new(RingCapacity);
     private TitleBackgroundTransitionCounters _lastDiagnosticCounters;
     private long _nextEventSeq;
+    private bool _diagnosticBaselineEstablished;
+    private readonly Dictionary<string, int> _suppressedSpamKeys = [];
 
     public int SceneReadyRawCallCount { get; private set; }
     public int SceneReadyAcceptedCount { get; private set; }
@@ -100,7 +110,9 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
     public string LastPhase2GSkippedReason { get; private set; } = "none";
     public bool Phase2GAppliedAfterLogin { get; private set; }
     public bool Phase2GAppliedAfterLeavingCharaSelect { get; private set; }
+    public long LastPhase2GAppliedAfterLoginEventSeq { get; private set; }
     public bool PostLoginSceneReadyAccepted { get; private set; }
+    public long LastSceneReadyAcceptedAfterLoginEventSeq { get; private set; }
     public bool StaleAdapterStateAfterLogin { get; private set; }
     public bool StaleCurrentLobbyMapAfterLogin { get; private set; }
     public bool StaleSceneOverrideStateAfterLogin { get; private set; }
@@ -109,6 +121,20 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
     public string AcceptedGenerations => string.Join(",", _acceptedGenerations.OrderBy(value => value));
 
     private readonly HashSet<int> _acceptedGenerations = [];
+
+    private static bool IsImportantEvent(string name)
+    {
+        return name.Contains("accepted", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("override applied", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("CurrentLobbyMap", StringComparison.Ordinal)
+            || name.Contains("adapter state transition", StringComparison.Ordinal)
+            || name.Contains("runtime restore", StringComparison.Ordinal)
+            || name.Contains("Phase 2G", StringComparison.Ordinal)
+            || name.Contains("logged-in world", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("cleanup", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("stale", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("leak", StringComparison.OrdinalIgnoreCase);
+    }
 
     public long Record(string name, IReadOnlyDictionary<string, string>? snapshot = null, string reason = "", string error = "")
     {
@@ -127,7 +153,7 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
 
         if (_events.Count >= RingCapacity)
         {
-            _events.Dequeue();
+            DropOldestEvent(name);
         }
 
         _events.Enqueue(diagnosticEvent);
@@ -135,10 +161,53 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
         return seq;
     }
 
+    private void RecordSpamAware(string name, IReadOnlyDictionary<string, string> snapshot, string reason)
+    {
+        var key = $"{name}|{reason}|{GetSnapshotValue(snapshot, "isLoggedIn")}|{GetSnapshotValue(snapshot, "CurrentLobbyMap")}|{GetSnapshotValue(snapshot, "adapterState")}";
+        if (_suppressedSpamKeys.TryGetValue(key, out var count))
+        {
+            _suppressedSpamKeys[key] = count + 1;
+            LastEvent = name;
+            return;
+        }
+
+        _suppressedSpamKeys[key] = 1;
+        Record(name, snapshot, reason);
+    }
+
+    private void DropOldestEvent(string incomingName)
+    {
+        if (!IsImportantEvent(incomingName))
+        {
+            _events.Dequeue();
+            return;
+        }
+
+        var retained = _events.ToList();
+        var removeIndex = retained.FindIndex(static item => !IsImportantEvent(item.Name));
+        if (removeIndex < 0)
+        {
+            _events.Dequeue();
+            return;
+        }
+
+        retained.RemoveAt(removeIndex);
+        _events.Clear();
+        foreach (var item in retained)
+        {
+            _events.Enqueue(item);
+        }
+    }
+
+    private static string GetSnapshotValue(IReadOnlyDictionary<string, string> snapshot, string key)
+    {
+        return snapshot.TryGetValue(key, out var value) ? value : "none";
+    }
+
     public void RecordSceneReadyRaw(IReadOnlyDictionary<string, string> snapshot, string reason)
     {
         SceneReadyRawCallCount++;
-        Record("sceneReady raw signal received", snapshot, reason);
+        RecordSpamAware("sceneReady raw signal received", snapshot, reason);
     }
 
     public void RecordSceneReadyAccepted(IReadOnlyDictionary<string, string> snapshot, string reason, int sceneGeneration, bool isLoggedIn)
@@ -154,7 +223,7 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
         if (isLoggedIn)
         {
             PostLoginSceneReadyAccepted = true;
-            Record("post-login sceneReady accepted detected", snapshot, reason);
+            LastSceneReadyAcceptedAfterLoginEventSeq = Record("post-login sceneReady accepted detected", snapshot, reason);
         }
 
         Record("sceneReady accepted", snapshot, reason);
@@ -168,7 +237,7 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
     {
         SceneReadyRejectedCount++;
         SceneReadyLastRejectedReason = string.IsNullOrWhiteSpace(reason) ? "rejected" : reason;
-        Record("sceneReady rejected", snapshot, reason);
+        RecordSpamAware("sceneReady rejected", snapshot, reason);
     }
 
     public void RecordPhase2GApply(IReadOnlyDictionary<string, string> snapshot, bool isLoggedIn, bool isCharaSelectOrTitleBackground, string allowedReason)
@@ -180,7 +249,7 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
         if (isLoggedIn)
         {
             Phase2GAppliedAfterLogin = true;
-            Record("post-login Phase 2G apply detected", snapshot, allowedReason);
+            LastPhase2GAppliedAfterLoginEventSeq = Record("post-login Phase 2G apply detected", snapshot, allowedReason);
         }
 
         if (!isCharaSelectOrTitleBackground)
@@ -221,15 +290,19 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
 
     public TitleBackgroundTransitionDelta ComputeDeltaSinceLastDiagnostic(TitleBackgroundTransitionCounters counters)
     {
+        var firstReport = !_diagnosticBaselineEstablished;
         var delta = new TitleBackgroundTransitionDelta(
-            counters.Phase2ELookAtYCallCount - _lastDiagnosticCounters.Phase2ELookAtYCallCount,
-            counters.Phase2FSetMidCallCount - _lastDiagnosticCounters.Phase2FSetMidCallCount,
-            counters.Phase2FLowHighCallCount - _lastDiagnosticCounters.Phase2FLowHighCallCount,
-            counters.Phase2GSetMidAttemptCount - _lastDiagnosticCounters.Phase2GSetMidAttemptCount,
-            counters.Phase2GLowHighAttemptCount - _lastDiagnosticCounters.Phase2GLowHighAttemptCount,
-            counters.SceneReadyAcceptedCount - _lastDiagnosticCounters.SceneReadyAcceptedCount,
-            counters.SceneReadyRawCallCount - _lastDiagnosticCounters.SceneReadyRawCallCount);
+            BaselineEstablished: !firstReport,
+            FirstReport: firstReport,
+            firstReport ? 0 : counters.Phase2ELookAtYCallCount - _lastDiagnosticCounters.Phase2ELookAtYCallCount,
+            firstReport ? 0 : counters.Phase2FSetMidCallCount - _lastDiagnosticCounters.Phase2FSetMidCallCount,
+            firstReport ? 0 : counters.Phase2FLowHighCallCount - _lastDiagnosticCounters.Phase2FLowHighCallCount,
+            firstReport ? 0 : counters.Phase2GSetMidAttemptCount - _lastDiagnosticCounters.Phase2GSetMidAttemptCount,
+            firstReport ? 0 : counters.Phase2GLowHighAttemptCount - _lastDiagnosticCounters.Phase2GLowHighAttemptCount,
+            firstReport ? 0 : counters.SceneReadyAcceptedCount - _lastDiagnosticCounters.SceneReadyAcceptedCount,
+            firstReport ? 0 : counters.SceneReadyRawCallCount - _lastDiagnosticCounters.SceneReadyRawCallCount);
         _lastDiagnosticCounters = counters;
+        _diagnosticBaselineEstablished = true;
         return delta;
     }
 
@@ -254,17 +327,22 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
             $"transition.currentContext.currentTerritoryId={input.Context.CurrentTerritoryId}",
             $"transition.currentContext.currentTerritoryType={input.Context.CurrentTerritoryType}",
             $"transition.currentContext.currentLobbyMap={input.Context.CurrentLobbyMap}",
-            $"transition.sceneOverride.lastOverrideApplied={input.SceneOverride.LastOverrideApplied}",
-            $"transition.sceneOverride.lastOverrideLobbyType={input.SceneOverride.LastOverrideLobbyType}",
+            $"transition.sceneOverride.active={input.SceneOverride.Active}",
+            $"transition.sceneOverride.historicalLastOverrideApplied={input.SceneOverride.HistoricalLastOverrideApplied}",
+            $"transition.sceneOverride.activeLobbyType={input.SceneOverride.ActiveLobbyType}",
+            $"transition.sceneOverride.activeOverridePath={input.SceneOverride.ActiveOverridePath}",
+            $"transition.sceneOverride.lastHistoricalOverridePath={input.SceneOverride.LastHistoricalOverridePath}",
             $"transition.sceneOverride.currentLobbyMap={input.SceneOverride.CurrentLobbyMap}",
             $"transition.sceneOverride.lastCurrentLobbyMapResetReason={input.SceneOverride.LastCurrentLobbyMapResetReason}",
-            $"transition.sceneOverride.staleAfterLoginDetected={input.SceneOverride.StaleAfterLoginDetected}",
+            $"transition.sceneOverride.cleanupReason={input.SceneOverride.CleanupReason}",
+            $"transition.sceneOverride.activeAfterLoginDetected={input.SceneOverride.ActiveAfterLoginDetected}",
             $"transition.adapter.state={input.Adapter.State}",
             $"transition.adapter.lastEvent={input.Adapter.LastEvent}",
             $"transition.adapter.sceneGeneration={input.Adapter.SceneGeneration}",
             $"transition.adapter.staleAfterLoginDetected={input.Adapter.StaleAfterLoginDetected}",
             $"transition.phase2G.lastApplyContext={input.Phase2G.LastApplyContext}",
             $"transition.phase2G.appliedAfterLogin={input.Phase2G.AppliedAfterLogin}",
+            $"transition.phase2G.lastAppliedAfterLoginEventSeq={input.Phase2G.LastAppliedAfterLoginEventSeq}",
             $"transition.phase2G.appliedAfterLeavingCharaSelect={input.Phase2G.AppliedAfterLeavingCharaSelect}",
             $"transition.phase2G.lastAllowedReason={input.Phase2G.LastAllowedReason}",
             $"transition.phase2G.lastSkippedReason={input.Phase2G.LastSkippedReason}",
@@ -281,6 +359,8 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
             $"transition.verdict.staleCharaSelectStateAfterLogin={verdicts.StaleCharaSelectStateAfterLogin}",
             $"transition.verdict.sceneReadyAcceptedMultipleTimes={verdicts.SceneReadyAcceptedMultipleTimes}",
             $"transition.verdict.loginTransitionSafety={verdicts.LoginTransitionSafety}",
+            $"diagDelta.baselineEstablished={input.Delta.BaselineEstablished}",
+            $"diagDelta.firstReport={input.Delta.FirstReport}",
             $"diagDelta.phase2E.calculateLobbyCameraLookAtY.callCount={input.Delta.Phase2ELookAtYCallCount}",
             $"diagDelta.phase2F.setCameraCurveMidPoint.callCount={input.Delta.Phase2FSetMidCallCount}",
             $"diagDelta.phase2F.calculateCameraCurveLowAndHighPoint.callCount={input.Delta.Phase2FLowHighCallCount}",
@@ -294,17 +374,18 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
     public static TitleBackgroundTransitionVerdicts BuildVerdicts(TitleBackgroundTransitionSummaryInput input)
     {
         var postLoginPhase2GStillApplying = input.Context.IsLoggedIn
-            && (input.Phase2G.AppliedAfterLogin
-                || input.Delta.Phase2GSetMidAttemptCount > 0
-                || input.Delta.Phase2GLowHighAttemptCount > 0);
+            && input.Phase2G.AppliedAfterLogin
+            && input.Phase2G.LastAppliedAfterLoginEventSeq > 0;
         var postLoginSceneReadyAccepted = input.Context.IsLoggedIn
-            && (input.PostLoginSceneReadyAcceptedDetected || input.Delta.SceneReadyAcceptedCount > 0);
+            && input.PostLoginSceneReadyAcceptedDetected
+            && input.SceneReadyLastAcceptedAfterLoginEventSeq > 0;
         var staleCharaSelectStateAfterLogin = input.Context.IsLoggedIn
             && (input.Adapter.StaleAfterLoginDetected
-                || input.SceneOverride.StaleAfterLoginDetected
+                || input.SceneOverride.ActiveAfterLoginDetected
                 || input.Context.IsCharaSelectOrTitleBackground);
         var sceneReadyAcceptedMultipleTimes = input.SceneReadyAcceptedCount > 1;
-        var safe = !postLoginPhase2GStillApplying
+        var safe = input.Context.IsLoggedIn
+            && !postLoginPhase2GStillApplying
             && !postLoginSceneReadyAccepted
             && !staleCharaSelectStateAfterLogin
             && !sceneReadyAcceptedMultipleTimes;

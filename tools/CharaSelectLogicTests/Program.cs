@@ -705,18 +705,50 @@ Test("title background phase2g generated curve override allows loaded and active
         hookProbeMode: false,
         sceneOverrideEnabled: true,
         adapterArmed: adapter.IsArmed,
+        isLoggedIn: false,
+        activeCharaSelectSession: true,
+        sceneGenerationMatchesActiveSession: true,
         adapter.State,
-        adapter.RuntimeState);
+        adapter.RuntimeState,
+        GameLobbyType.CharaSelect,
+        GameLobbyType.CharaSelect);
     adapter.NotifyLobbyUpdate(GameLobbyType.CharaSelect);
     var active = TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
         serviceReady: true,
         hookProbeMode: false,
         sceneOverrideEnabled: true,
         adapterArmed: adapter.IsArmed,
+        isLoggedIn: false,
+        activeCharaSelectSession: true,
+        sceneGenerationMatchesActiveSession: true,
         adapter.State,
-        adapter.RuntimeState);
+        adapter.RuntimeState,
+        GameLobbyType.CharaSelect,
+        GameLobbyType.CharaSelect);
 
     return loaded && active;
+});
+
+Test("title background phase2g generated curve override accepts title or chara select context", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+
+    return TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+        serviceReady: true,
+        hookProbeMode: false,
+        sceneOverrideEnabled: true,
+        adapterArmed: adapter.IsArmed,
+        isLoggedIn: false,
+        activeCharaSelectSession: true,
+        sceneGenerationMatchesActiveSession: true,
+        adapter.State,
+        adapter.RuntimeState,
+        GameLobbyType.Title,
+        GameLobbyType.None);
 });
 
 Test("title background phase2g generated curve override rejects unsafe contexts", () =>
@@ -732,36 +764,121 @@ Test("title background phase2g generated curve override rejects unsafe contexts"
             hookProbeMode: false,
             sceneOverrideEnabled: true,
             adapterArmed: adapter.IsArmed,
+            isLoggedIn: false,
+            activeCharaSelectSession: true,
+            sceneGenerationMatchesActiveSession: true,
             adapter.State,
-            adapter.RuntimeState)
+            adapter.RuntimeState,
+            GameLobbyType.CharaSelect,
+            GameLobbyType.CharaSelect)
         && !TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
             serviceReady: true,
             hookProbeMode: true,
             sceneOverrideEnabled: true,
             adapterArmed: adapter.IsArmed,
+            isLoggedIn: false,
+            activeCharaSelectSession: true,
+            sceneGenerationMatchesActiveSession: true,
             adapter.State,
-            adapter.RuntimeState)
+            adapter.RuntimeState,
+            GameLobbyType.CharaSelect,
+            GameLobbyType.CharaSelect)
         && !TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
             serviceReady: true,
             hookProbeMode: false,
             sceneOverrideEnabled: false,
             adapterArmed: adapter.IsArmed,
+            isLoggedIn: false,
+            activeCharaSelectSession: true,
+            sceneGenerationMatchesActiveSession: true,
             adapter.State,
-            adapter.RuntimeState)
+            adapter.RuntimeState,
+            GameLobbyType.CharaSelect,
+            GameLobbyType.CharaSelect)
         && !TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
             serviceReady: true,
             hookProbeMode: false,
             sceneOverrideEnabled: true,
             adapterArmed: adapter.IsArmed,
+            isLoggedIn: false,
+            activeCharaSelectSession: true,
+            sceneGenerationMatchesActiveSession: true,
             TitleBackgroundCharaSelectCameraAdapterState.SceneLoading,
-            adapter.RuntimeState)
+            adapter.RuntimeState,
+            GameLobbyType.CharaSelect,
+            GameLobbyType.CharaSelect)
         && !TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
             serviceReady: true,
             hookProbeMode: false,
             sceneOverrideEnabled: true,
             adapterArmed: false,
+            isLoggedIn: false,
+            activeCharaSelectSession: true,
+            sceneGenerationMatchesActiveSession: true,
             adapter.State,
-            adapter.RuntimeState);
+            adapter.RuntimeState,
+            GameLobbyType.CharaSelect,
+            GameLobbyType.CharaSelect);
+});
+
+Test("title background phase2g generated curve override rejects logged in context", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+
+    return !TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+        serviceReady: true,
+        hookProbeMode: false,
+        sceneOverrideEnabled: true,
+        adapterArmed: adapter.IsArmed,
+        isLoggedIn: true,
+        activeCharaSelectSession: true,
+        sceneGenerationMatchesActiveSession: true,
+        adapter.State,
+        adapter.RuntimeState,
+        GameLobbyType.CharaSelect,
+        GameLobbyType.CharaSelect);
+});
+
+Test("title background phase2g generated curve override rejects inactive session", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+
+    return !TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+        serviceReady: true,
+        hookProbeMode: false,
+        sceneOverrideEnabled: true,
+        adapterArmed: adapter.IsArmed,
+        isLoggedIn: false,
+        activeCharaSelectSession: false,
+        sceneGenerationMatchesActiveSession: true,
+        adapter.State,
+        adapter.RuntimeState,
+        GameLobbyType.CharaSelect,
+        GameLobbyType.CharaSelect);
+});
+
+Test("title background adapter end session clears active runtime state", () =>
+{
+    var adapter = new TitleBackgroundCharaSelectCameraAdapter();
+    adapter.Configure(true, TitleBackgroundCharaSelectCameraInput.Create(Vector3.Zero, 0f));
+    adapter.NotifySceneLoadStarted(GameLobbyType.CharaSelect);
+    adapter.SaveRuntimeCameraState(yaw: 1f, pitch: 0.25f, distance: 4f, lookAtY: 2f);
+    adapter.NotifySceneLoaded(GameLobbyType.CharaSelect);
+
+    adapter.EndSession();
+
+    return adapter.State == TitleBackgroundCharaSelectCameraAdapterState.Stopping
+        && !adapter.RuntimeState.HasCameraPose
+        && !adapter.ShouldApplyCurve()
+        && !adapter.ShouldApplyLookAtY();
 });
 
 Test("title background generated curve self-test treats final yaw pitch distance mismatch as non-blocking", () =>
@@ -817,7 +934,7 @@ Test("title background transition diagnostics flag repeated sceneReady acceptanc
     recorder.RecordSceneReadyAccepted(new Dictionary<string, string>(), "second", 1, isLoggedIn: false);
     var lines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
         recorder,
-        new TitleBackgroundTransitionDelta(0, 0, 0, 0, 0, 0, 0),
+        TrustedDelta(0, 0, 0, 0, 0, 0, 0),
         isLoggedIn: false));
 
     return lines.Contains("transition.sceneReady.acceptedCount=2")
@@ -831,8 +948,12 @@ Test("title background transition diagnostics compute deltas since previous diag
     var first = recorder.ComputeDeltaSinceLastDiagnostic(new TitleBackgroundTransitionCounters(10, 20, 30, 40, 50, 2, 3));
     var second = recorder.ComputeDeltaSinceLastDiagnostic(new TitleBackgroundTransitionCounters(13, 22, 31, 41, 55, 2, 4));
 
-    return first.Phase2ELookAtYCallCount == 10
-        && first.Phase2GSetMidAttemptCount == 40
+    return first.FirstReport
+        && !first.BaselineEstablished
+        && first.Phase2ELookAtYCallCount == 0
+        && first.Phase2GSetMidAttemptCount == 0
+        && !second.FirstReport
+        && second.BaselineEstablished
         && second.Phase2ELookAtYCallCount == 3
         && second.Phase2FSetMidCallCount == 2
         && second.Phase2FLowHighCallCount == 1
@@ -848,7 +969,7 @@ Test("title background transition normal diagnostics include summary without ful
     recorder.Record("CreateSceneDetour entered");
     var lines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
         recorder,
-        new TitleBackgroundTransitionDelta(0, 0, 0, 0, 0, 0, 0),
+        TrustedDelta(0, 0, 0, 0, 0, 0, 0),
         isLoggedIn: false));
 
     return lines.Any(line => line.StartsWith("transition.eventCount=", StringComparison.Ordinal))
@@ -869,7 +990,7 @@ Test("title background transition diagnostics flag stale adapter after login", (
     recorder.MarkPostLoginStaleState(new Dictionary<string, string>(), staleAdapter: true, staleCurrentLobbyMap: false, staleSceneOverride: false);
     var lines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
         recorder,
-        new TitleBackgroundTransitionDelta(0, 0, 0, 0, 0, 0, 0),
+        TrustedDelta(0, 0, 0, 0, 0, 0, 0),
         isLoggedIn: true,
         staleAdapter: true));
 
@@ -878,13 +999,66 @@ Test("title background transition diagnostics flag stale adapter after login", (
         && lines.Contains("transition.verdict.loginTransitionSafety=unsafe");
 });
 
+Test("title background historical scene override alone is safe after login", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    var lines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
+        recorder,
+        TrustedDelta(0, 0, 0, 0, 0, 0, 0),
+        isLoggedIn: true,
+        historicalLastOverrideApplied: true));
+
+    return lines.Contains("transition.sceneOverride.active=False")
+        && lines.Contains("transition.sceneOverride.historicalLastOverrideApplied=True")
+        && lines.Contains("transition.sceneOverride.activeAfterLoginDetected=False")
+        && lines.Contains("transition.verdict.staleCharaSelectStateAfterLogin=False")
+        && lines.Contains("transition.verdict.loginTransitionSafety=safe");
+});
+
+Test("title background active scene override after login is unsafe", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    var lines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
+        recorder,
+        TrustedDelta(0, 0, 0, 0, 0, 0, 0),
+        isLoggedIn: true,
+        activeSceneOverride: true,
+        historicalLastOverrideApplied: true,
+        activeSceneOverrideAfterLogin: true));
+
+    return lines.Contains("transition.sceneOverride.active=True")
+        && lines.Contains("transition.sceneOverride.activeAfterLoginDetected=True")
+        && lines.Contains("transition.verdict.staleCharaSelectStateAfterLogin=True")
+        && lines.Contains("transition.verdict.loginTransitionSafety=unsafe");
+});
+
+Test("title background transition cleanup reason is reported", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    var worldLoginLines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
+        recorder,
+        TrustedDelta(0, 0, 0, 0, 0, 0, 0),
+        isLoggedIn: true,
+        cleanupReason: "world-login-transition"));
+    var leavingLines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
+        recorder,
+        TrustedDelta(0, 0, 0, 0, 0, 0, 0),
+        isLoggedIn: false,
+        cleanupReason: "leaving-chara-select-context"));
+
+    return worldLoginLines.Contains("transition.sceneOverride.lastCurrentLobbyMapResetReason=world-login-transition")
+        && worldLoginLines.Contains("transition.sceneOverride.cleanupReason=world-login-transition")
+        && leavingLines.Contains("transition.sceneOverride.lastCurrentLobbyMapResetReason=leaving-chara-select-context")
+        && leavingLines.Contains("transition.sceneOverride.cleanupReason=leaving-chara-select-context");
+});
+
 Test("title background transition diagnostics flag Phase2G applied after login", () =>
 {
     var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
     recorder.RecordPhase2GApply(new Dictionary<string, string>(), isLoggedIn: true, isCharaSelectOrTitleBackground: false, "allowed");
     var lines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
         recorder,
-        new TitleBackgroundTransitionDelta(0, 0, 0, 1, 0, 0, 0),
+        TrustedDelta(0, 0, 0, 1, 0, 0, 0),
         isLoggedIn: true,
         phase2GAppliedAfterLogin: true));
 
@@ -893,17 +1067,71 @@ Test("title background transition diagnostics flag Phase2G applied after login",
         && lines.Contains("transition.verdict.loginTransitionSafety=unsafe");
 });
 
-Test("title background transition verdict detects post-login Phase2G from deltas", () =>
+Test("title background transition diagnostics flag sceneReady accepted after login", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    recorder.RecordSceneReadyAccepted(new Dictionary<string, string>(), "after-login", 2, isLoggedIn: true);
+    var lines = TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(BuildTransitionSummaryInput(
+        recorder,
+        TrustedDelta(0, 0, 0, 0, 0, 1, 0),
+        isLoggedIn: true,
+        sceneReadyAcceptedAfterLogin: true));
+
+    return lines.Contains("transition.verdict.postLoginSceneReadyAccepted=True")
+        && lines.Contains("transition.verdict.loginTransitionSafety=unsafe");
+});
+
+Test("title background transition verdict ignores first diagnostic cumulative Phase2G delta", () =>
 {
     var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
     var input = BuildTransitionSummaryInput(
         recorder,
-        new TitleBackgroundTransitionDelta(0, 0, 0, 1, 1, 0, 0),
+        new TitleBackgroundTransitionDelta(false, true, 0, 0, 0, 1, 1, 0, 0),
         isLoggedIn: true);
     var verdicts = TitleBackgroundTransitionDiagnosticRecorder.BuildVerdicts(input);
 
-    return verdicts.PostLoginPhase2GStillApplying
-        && verdicts.LoginTransitionSafety == "unsafe";
+    return !verdicts.PostLoginPhase2GStillApplying
+        && verdicts.LoginTransitionSafety == "safe";
+});
+
+Test("title background login transition safety is safe only after login", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    var input = BuildTransitionSummaryInput(
+        recorder,
+        TrustedDelta(0, 0, 0, 0, 0, 0, 0),
+        isLoggedIn: false);
+    var verdicts = TitleBackgroundTransitionDiagnosticRecorder.BuildVerdicts(input);
+
+    return verdicts.LoginTransitionSafety == "unsafe";
+});
+
+Test("title background transition spam does not evict important events", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    recorder.Record("CreateSceneDetour override applied");
+    recorder.Record("CurrentLobbyMap reset");
+    recorder.Record("CharaSelect title background session cleanup executed");
+    var snapshot = new Dictionary<string, string>
+    {
+        ["isLoggedIn"] = "True",
+        ["CurrentLobbyMap"] = "None",
+        ["adapterState"] = "Stopping",
+    };
+
+    for (var i = 0; i < 500; i++)
+    {
+        recorder.RecordSceneReadyRaw(snapshot, "map=None; stateBefore=Stopping");
+        recorder.RecordSceneReadyRejected(snapshot, "map=None; stateBefore=Stopping");
+    }
+
+    var names = recorder.Events.Select(item => item.Name).ToArray();
+    return names.Contains("CreateSceneDetour override applied")
+        && names.Contains("CurrentLobbyMap reset")
+        && names.Contains("CharaSelect title background session cleanup executed")
+        && recorder.SceneReadyRawCallCount == 500
+        && recorder.SceneReadyRejectedCount == 500
+        && recorder.EventCount < TitleBackgroundTransitionDiagnosticRecorder.RingCapacity;
 });
 
 Test("title background yaw pitch distance not-observed is safe only after login transition safety", () =>
@@ -1500,6 +1728,15 @@ Test("title chara select transition resets current map only when override enable
         && GameLobbyTypeHelper.GetCurrentMapForTransition(GameLobbyType.Title, GameLobbyType.LaNoscea, overrideEnabled: true) == GameLobbyType.Title;
 });
 
+Test("title background session cleanup gate keeps non logged-in none map", () =>
+{
+    return !TitleBackgroundCharaSelectCameraLogic.ShouldEndCharaSelectTitleBackgroundSession(isLoggedIn: false, GameLobbyType.None)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldEndCharaSelectTitleBackgroundSession(isLoggedIn: false, GameLobbyType.Title)
+        && !TitleBackgroundCharaSelectCameraLogic.ShouldEndCharaSelectTitleBackgroundSession(isLoggedIn: false, GameLobbyType.CharaSelect)
+        && TitleBackgroundCharaSelectCameraLogic.ShouldEndCharaSelectTitleBackgroundSession(isLoggedIn: false, GameLobbyType.LaNoscea)
+        && TitleBackgroundCharaSelectCameraLogic.ShouldEndCharaSelectTitleBackgroundSession(isLoggedIn: true, GameLobbyType.None);
+});
+
 Test("title background resolve only does not create hooks", () =>
 {
     return !TitleBackgroundRuntimeModeHelper.ShouldCreateSceneHooks(TitleBackgroundRuntimeMode.ResolveOnly, overrideEnabled: true)
@@ -1735,7 +1972,12 @@ TitleBackgroundTransitionSummaryInput BuildTransitionSummaryInput(
     TitleBackgroundTransitionDelta delta,
     bool isLoggedIn,
     bool staleAdapter = false,
-    bool phase2GAppliedAfterLogin = false)
+    bool phase2GAppliedAfterLogin = false,
+    bool activeSceneOverride = false,
+    bool historicalLastOverrideApplied = false,
+    bool activeSceneOverrideAfterLogin = false,
+    bool sceneReadyAcceptedAfterLogin = false,
+    string cleanupReason = "none")
 {
     return new TitleBackgroundTransitionSummaryInput(
         new TitleBackgroundTransitionContext(
@@ -1745,11 +1987,15 @@ TitleBackgroundTransitionSummaryInput BuildTransitionSummaryInput(
             CurrentTerritoryType: isLoggedIn ? "777" : "0",
             CurrentLobbyMap: isLoggedIn ? "None" : "CharaSelect"),
         new TitleBackgroundTransitionSceneOverrideState(
-            LastOverrideApplied: false,
-            LastOverrideLobbyType: "None",
+            Active: activeSceneOverride,
+            HistoricalLastOverrideApplied: historicalLastOverrideApplied,
+            ActiveLobbyType: activeSceneOverride ? "CharaSelect" : "None",
+            ActiveOverridePath: activeSceneOverride ? "ex5/test/level/test" : "none",
+            LastHistoricalOverridePath: historicalLastOverrideApplied ? "ex5/test/level/test" : "none",
             CurrentLobbyMap: isLoggedIn ? "None" : "CharaSelect",
-            LastCurrentLobbyMapResetReason: "none",
-            StaleAfterLoginDetected: false),
+            LastCurrentLobbyMapResetReason: cleanupReason,
+            CleanupReason: cleanupReason,
+            ActiveAfterLoginDetected: activeSceneOverrideAfterLogin),
         new TitleBackgroundTransitionAdapterState(
             State: staleAdapter ? "Active" : "Inactive",
             LastEvent: "not-run",
@@ -1758,6 +2004,9 @@ TitleBackgroundTransitionSummaryInput BuildTransitionSummaryInput(
         new TitleBackgroundTransitionPhase2GState(
             LastApplyContext: phase2GAppliedAfterLogin ? "logged-in" : recorder.LastPhase2GApplyContext,
             AppliedAfterLogin: phase2GAppliedAfterLogin || recorder.Phase2GAppliedAfterLogin,
+            LastAppliedAfterLoginEventSeq: phase2GAppliedAfterLogin
+                ? Math.Max(1, recorder.LastPhase2GAppliedAfterLoginEventSeq)
+                : recorder.LastPhase2GAppliedAfterLoginEventSeq,
             AppliedAfterLeavingCharaSelect: recorder.Phase2GAppliedAfterLeavingCharaSelect,
             LastAllowedReason: recorder.LastPhase2GAllowedReason,
             LastSkippedReason: recorder.LastPhase2GSkippedReason),
@@ -1781,7 +2030,31 @@ TitleBackgroundTransitionSummaryInput BuildTransitionSummaryInput(
         recorder.SceneReadyLastRejectedReason,
         recorder.SceneReadyLastAcceptedSceneGeneration,
         recorder.AcceptedGenerations,
-        recorder.PostLoginSceneReadyAccepted);
+        sceneReadyAcceptedAfterLogin || recorder.PostLoginSceneReadyAccepted,
+        sceneReadyAcceptedAfterLogin
+            ? Math.Max(1, recorder.LastSceneReadyAcceptedAfterLoginEventSeq)
+            : recorder.LastSceneReadyAcceptedAfterLoginEventSeq);
+}
+
+TitleBackgroundTransitionDelta TrustedDelta(
+    int phase2ELookAtYCallCount,
+    int phase2FSetMidCallCount,
+    int phase2FLowHighCallCount,
+    int phase2GSetMidAttemptCount,
+    int phase2GLowHighAttemptCount,
+    int sceneReadyAcceptedCount,
+    int sceneReadyRawCallCount)
+{
+    return new TitleBackgroundTransitionDelta(
+        BaselineEstablished: true,
+        FirstReport: false,
+        phase2ELookAtYCallCount,
+        phase2FSetMidCallCount,
+        phase2FLowHighCallCount,
+        phase2GSetMidAttemptCount,
+        phase2GLowHighAttemptCount,
+        sceneReadyAcceptedCount,
+        sceneReadyRawCallCount);
 }
 
 if (failures.Count > 0)

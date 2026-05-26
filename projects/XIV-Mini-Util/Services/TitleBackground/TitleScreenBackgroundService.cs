@@ -52,6 +52,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private string _lastOverrideNewPath = string.Empty;
     private uint _lastOverrideTerritoryId;
     private uint _lastOverrideLayerFilterKey;
+    private bool _charaSelectTitleBackgroundSessionActive;
+    private int _activeCharaSelectSceneGeneration;
+    private bool _activeSceneOverride;
+    private GameLobbyType _activeSceneOverrideLobbyType = GameLobbyType.None;
+    private string _activeSceneOverridePath = string.Empty;
+    private string _lastHistoricalOverridePath = string.Empty;
+    private string _sceneOverrideCleanupReason = "none";
+    private bool _loggedInWorldTransitionRecorded;
     private Vector3? _lastObservedFixOnCamera;
     private Vector3? _lastObservedFixOnFocus;
     private float? _lastObservedFixOnFovY;
@@ -486,7 +494,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _sceneReadySignalAcceptedCount,
             _sceneReadySignalCallCount);
         var delta = _transitionDiagnostics.ComputeDeltaSinceLastDiagnostic(counters);
-        var currentLobbyMap = TryReadCurrentLobbyMap(out var currentMap)
+        var currentMapAvailableBeforeCleanup = TryReadCurrentLobbyMap(out var currentMap);
+        if (_clientState.IsLoggedIn || currentMapAvailableBeforeCleanup)
+        {
+            EndCharaSelectTitleBackgroundSessionIfNeeded(currentMap, "diagnostic");
+        }
+
+        var currentLobbyMap = TryReadCurrentLobbyMap(out currentMap)
             ? currentMap.ToString()
             : "unavailable";
         var isCharaSelectOrTitleBackground = IsCharaSelectOrTitleBackground(currentMap);
@@ -494,7 +508,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             && _charaSelectCameraAdapter.State is not TitleBackgroundCharaSelectCameraAdapterState.Inactive
             and not TitleBackgroundCharaSelectCameraAdapterState.Stopping;
         var staleCurrentLobbyMapAfterLogin = _clientState.IsLoggedIn && isCharaSelectOrTitleBackground;
-        var staleSceneOverrideAfterLogin = _clientState.IsLoggedIn && _lastOverrideApplied;
+        var staleSceneOverrideAfterLogin = _clientState.IsLoggedIn && _activeSceneOverride;
         _transitionDiagnostics.MarkPostLoginStaleState(
             BuildTransitionSnapshot("report-time"),
             staleAdapterAfterLogin,
@@ -509,10 +523,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 _clientState.TerritoryType.ToString(),
                 currentLobbyMap),
             new TitleBackgroundTransitionSceneOverrideState(
+                _activeSceneOverride,
                 _lastOverrideApplied,
-                _lastOverrideLobbyType.ToString(),
+                _activeSceneOverrideLobbyType.ToString(),
+                FormatNone(_activeSceneOverridePath),
+                FormatNone(_lastHistoricalOverridePath),
                 currentLobbyMap,
                 _lastCurrentLobbyMapResetReason,
+                _sceneOverrideCleanupReason,
                 _transitionDiagnostics.StaleSceneOverrideStateAfterLogin || staleSceneOverrideAfterLogin),
             new TitleBackgroundTransitionAdapterState(
                 _charaSelectCameraAdapter.State.ToString(),
@@ -522,6 +540,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             new TitleBackgroundTransitionPhase2GState(
                 _transitionDiagnostics.LastPhase2GApplyContext,
                 _transitionDiagnostics.Phase2GAppliedAfterLogin,
+                _transitionDiagnostics.LastPhase2GAppliedAfterLoginEventSeq,
                 _transitionDiagnostics.Phase2GAppliedAfterLeavingCharaSelect,
                 _transitionDiagnostics.LastPhase2GAllowedReason,
                 string.IsNullOrWhiteSpace(_transitionDiagnostics.LastPhase2GSkippedReason)
@@ -547,7 +566,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _transitionDiagnostics.SceneReadyLastRejectedReason,
             _transitionDiagnostics.SceneReadyLastAcceptedSceneGeneration,
             _transitionDiagnostics.AcceptedGenerations,
-            _transitionDiagnostics.PostLoginSceneReadyAccepted);
+            _transitionDiagnostics.PostLoginSceneReadyAccepted,
+            _transitionDiagnostics.LastSceneReadyAcceptedAfterLoginEventSeq);
         return TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(input);
     }
 
@@ -601,6 +621,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             ["overrideTerritoryId"] = _lastOverrideTerritoryId.ToString(),
             ["layerFilterKey"] = _lastOverrideLayerFilterKey.ToString(),
             ["lastOverrideApplied"] = _lastOverrideApplied.ToString(),
+            ["activeSceneOverride"] = _activeSceneOverride.ToString(),
+            ["activeCharaSelectSession"] = _charaSelectTitleBackgroundSessionActive.ToString(),
+            ["activeSceneGeneration"] = _activeCharaSelectSceneGeneration.ToString(),
             ["lastOverrideOriginalPath"] = FormatNone(_lastOverrideOriginalPath),
             ["lastOverrideNewPath"] = FormatNone(_lastOverrideNewPath),
             ["lastOverrideTerritoryId"] = _lastOverrideTerritoryId.ToString(),
@@ -629,7 +652,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private bool IsCharaSelectOrTitleBackground(GameLobbyType currentMap)
     {
         return !_clientState.IsLoggedIn
-            || currentMap == GameLobbyType.CharaSelect
+            || IsCharaSelectOrTitleBackgroundMap(currentMap);
+    }
+
+    private static bool IsCharaSelectOrTitleBackgroundMap(GameLobbyType currentMap)
+    {
+        return currentMap == GameLobbyType.CharaSelect
             || currentMap == GameLobbyType.Title;
     }
 
@@ -1666,6 +1694,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _loadingLobbyType = mapId;
         RecordCharaSelectRuntimeCameraStateBeforeSceneReload(mapId);
         _charaSelectCameraAdapter.NotifySceneLoadStarted(mapId);
+        if (TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(mapId))
+        {
+            _charaSelectTitleBackgroundSessionActive = true;
+            _activeCharaSelectSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+            _sceneOverrideCleanupReason = "none";
+            _loggedInWorldTransitionRecorded = false;
+        }
+
         RecordTransitionEvent("scene generation incremented", $"generation={_charaSelectCameraAdapter.RuntimeState.SceneGeneration}");
         RecordProbeLoadLobbyScene(mapId);
         _log.Debug("[XMU BG] LoadLobbyScene mapId={MapId}", mapId);
@@ -1764,6 +1800,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 _lastOverrideNewPath = _validatedTerritoryPath;
                 _lastOverrideTerritoryId = territoryId;
                 _lastOverrideLayerFilterKey = layerFilterKey;
+                _charaSelectTitleBackgroundSessionActive = true;
+                _activeCharaSelectSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+                _activeSceneOverride = true;
+                _activeSceneOverrideLobbyType = lobbyType;
+                _activeSceneOverridePath = _validatedTerritoryPath;
+                _lastHistoricalOverridePath = _validatedTerritoryPath;
+                _sceneOverrideCleanupReason = "none";
+                _loggedInWorldTransitionRecorded = false;
                 RecordTransitionEvent("CreateSceneDetour override applied", $"lobbyType={lobbyType}");
                 _log.Information("[XMU BG] Override CharaSelect scene lobbyType={LobbyType}, originalPath={OriginalPath}, newPath={NewPath}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", lobbyType, originalPath, _validatedTerritoryPath, territoryId, layerFilterKey);
             }
@@ -1805,6 +1849,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             if (!TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(mapId))
             {
                 RecordTransitionEvent("leaving title/character-select context if detectable", mapId.ToString());
+                EndCharaSelectTitleBackgroundSessionIfNeeded(mapId, "lobby-update");
             }
 
             if (!IsHookProbeMode() && ShouldResetCurrentMapForReload(mapId))
@@ -2131,13 +2176,21 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         out string skippedReason)
     {
         curve = default;
+        var currentMapAvailable = TryReadCurrentLobbyMap(out var currentMap);
+        var resolvedMap = ResolveSceneReadySignalLobbyMap();
         if (!TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
                 _state == TitleBackgroundServiceState.Ready,
                 IsHookProbeMode(),
                 IsSceneOverrideEnabled(),
                 _charaSelectCameraAdapter.IsArmed,
+                _clientState.IsLoggedIn,
+                _charaSelectTitleBackgroundSessionActive,
+                _activeCharaSelectSceneGeneration > 0
+                    && _charaSelectCameraAdapter.RuntimeState.SceneGeneration == _activeCharaSelectSceneGeneration,
                 _charaSelectCameraAdapter.State,
-                _charaSelectCameraAdapter.RuntimeState))
+                _charaSelectCameraAdapter.RuntimeState,
+                currentMapAvailable ? currentMap : GameLobbyType.None,
+                resolvedMap))
         {
             skippedReason = BuildPhase2GGenerationOverrideSkippedReason();
             return false;
@@ -2163,6 +2216,16 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         if (!IsSceneOverrideEnabled())
         {
             return "scene-override-disabled";
+        }
+
+        if (_clientState.IsLoggedIn)
+        {
+            return "logged-in-context";
+        }
+
+        if (!_charaSelectTitleBackgroundSessionActive)
+        {
+            return "inactive-chara-select-session";
         }
 
         if (!_charaSelectCameraAdapter.IsArmed)
@@ -2191,6 +2254,20 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             return "runtime-curve-empty";
         }
 
+        if (_activeCharaSelectSceneGeneration <= 0
+            || _charaSelectCameraAdapter.RuntimeState.SceneGeneration != _activeCharaSelectSceneGeneration)
+        {
+            return "scene-generation-mismatch";
+        }
+
+        var currentMapAvailable = TryReadCurrentLobbyMap(out var currentMap);
+        var resolvedMap = ResolveSceneReadySignalLobbyMap();
+        if (!(currentMapAvailable && TitleBackgroundCharaSelectCameraLogic.IsCharaSelectOrTitleBackgroundMap(currentMap))
+            && !TitleBackgroundCharaSelectCameraLogic.IsCharaSelectOrTitleBackgroundMap(resolvedMap))
+        {
+            return "not-chara-select-or-title-background";
+        }
+
         return "unknown";
     }
 
@@ -2213,6 +2290,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         if (_disposed)
         {
             return;
+        }
+
+        if (TryReadCurrentLobbyMap(out var currentMap))
+        {
+            EndCharaSelectTitleBackgroundSessionIfNeeded(currentMap, "framework-update");
         }
 
         CapturePhase2CTimelineOnFrameworkUpdate();
@@ -3924,7 +4006,56 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _lastOverrideNewPath = string.Empty;
         _lastOverrideTerritoryId = 0;
         _lastOverrideLayerFilterKey = 0;
+        _activeSceneOverride = false;
+        _activeSceneOverrideLobbyType = GameLobbyType.None;
+        _activeSceneOverridePath = string.Empty;
+        _charaSelectTitleBackgroundSessionActive = false;
+        _activeCharaSelectSceneGeneration = 0;
+        _sceneOverrideCleanupReason = "none";
         RecordTransitionEvent("adapter stopped/reset/cleared", "ResetSceneOverrideObservation");
+    }
+
+    private void EndCharaSelectTitleBackgroundSessionIfNeeded(GameLobbyType currentMap, string source)
+    {
+        if (!TitleBackgroundCharaSelectCameraLogic.ShouldEndCharaSelectTitleBackgroundSession(_clientState.IsLoggedIn, currentMap))
+        {
+            return;
+        }
+
+        var reason = _clientState.IsLoggedIn
+            ? "world-login-transition"
+            : "leaving-chara-select-context";
+        if (!_charaSelectTitleBackgroundSessionActive
+            && !_activeSceneOverride
+            && _sceneOverrideCleanupReason == reason)
+        {
+            return;
+        }
+
+        EndCharaSelectTitleBackgroundSession(reason, source);
+    }
+
+    private void EndCharaSelectTitleBackgroundSession(string reason, string source)
+    {
+        _cameraApplyPending = false;
+        _charaSelectTitleBackgroundSessionActive = false;
+        _activeCharaSelectSceneGeneration = 0;
+        _activeSceneOverride = false;
+        _activeSceneOverrideLobbyType = GameLobbyType.None;
+        _activeSceneOverridePath = string.Empty;
+        _sceneOverrideCleanupReason = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
+        if (_sceneOverrideCleanupReason == "world-login-transition" && !_loggedInWorldTransitionRecorded)
+        {
+            _loggedInWorldTransitionRecorded = true;
+            RecordTransitionEvent("entered logged-in world", source);
+        }
+
+        _charaSelectCameraAdapter.EndSession();
+        _currentMapWriteAttempted = true;
+        _lastCurrentMapWriteSucceeded = TryWriteCurrentLobbyMap(GameLobbyType.None);
+        _lastCurrentLobbyMapResetReason = _sceneOverrideCleanupReason;
+        RecordTransitionEvent("CharaSelect title background session cleanup executed", $"{_sceneOverrideCleanupReason}; source={source}");
+        RecordTransitionEvent("CurrentLobbyMap reset", _lastCurrentLobbyMapResetReason);
     }
 
     private void UpdateAutomaticProbeCounterState()

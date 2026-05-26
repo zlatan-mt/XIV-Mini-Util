@@ -1,5 +1,5 @@
 <!-- Path: docs/notes/title-background-character-select-camera-summary.md -->
-<!-- Description: Title Background character-select camera Phase 2G-2J summary -->
+<!-- Description: Title Background character-select camera Phase 2G-2L summary -->
 <!-- Reason: generated curve override を採用した理由と長期診断ポリシーを残すため -->
 
 # Title Background Character-Select Camera Summary
@@ -14,8 +14,11 @@ Title Background の character-select camera は、Phase 2G の post-original ge
 - `phase2G.generationOverride.lowHigh.appliedCount == phase2G.generationOverride.lowHigh.attemptCount`
 - `verdict.phase2G.generatedCurveOverrideEffective=observed`
 - `verdict.phase2G.finalLookAtYMatchesGeneratedCurve=observed`
+- `transition.verdict.loginTransitionSafety=safe`
 
-`verdict.phase2G.finalYawPitchDistanceMatchesPreset=not-observed` は想定済みで、非ブロック扱いにする。`verdict.phase2G.finalYawPitchDistanceMatchesPreset.blocking=False` を通常診断に出し、旧名の `verdict.phase2G.finalCameraStateMatchesPreset` は互換出力として当面残す。
+Phase 2G generated curve success だけでは完了扱いにしない。ログイン遷移後に CharaSelect の active scene override / adapter / session が残らず、Phase 2G apply や sceneReady accepted が発生していないことを必須条件にする。
+
+`verdict.phase2G.finalYawPitchDistanceMatchesPreset=not-observed` は、`transition.verdict.loginTransitionSafety=safe` の場合だけ非ブロック扱いにする。`verdict.phase2G.finalYawPitchDistanceMatchesPreset.blocking=False` を通常診断に出し、旧名の `verdict.phase2G.finalCameraStateMatchesPreset` は互換出力として当面残す。
 
 ## direct camera maintenance を採用しない理由
 
@@ -64,6 +67,12 @@ Phase 2G はこの決定源に合わせて、native generation の後に generat
 - `verdict.phase2G.finalYawPitchDistanceMatchesPreset`
 - `verdict.phase2G.finalYawPitchDistanceMatchesPreset.blocking=False`
 - `verdict.phase2G.finalCameraStateMatchesPreset`
+- `transition.sceneOverride.active`
+- `transition.phase2G.appliedAfterLogin`
+- `transition.verdict.postLoginPhase2GStillApplying`
+- `transition.verdict.postLoginSceneReadyAccepted`
+- `transition.verdict.staleCharaSelectStateAfterLogin`
+- `transition.verdict.loginTransitionSafety`
 
 詳細な timeline/call traces は failure-only diagnostics に残す。通常診断には出さない。
 
@@ -97,6 +106,11 @@ failure-only に残す主な項目:
   - normal diagnostics と failure-only diagnostics の境界をコメント化。
   - generated-curve success と yaw/pitch/distance mismatch 非ブロック方針を明文化。
 
+- Phase 2L login-transition cleanup and diagnostic correction
+  - active scene override と historical lastOverride diagnostics を分離。
+  - ログイン遷移後の active CharaSelect session cleanup と Phase 2G gate を強化。
+  - 初回 `/xmutbgdiag` の累積 delta では post-login leak verdict を立てない。
+
 ## 今後の判断基準
 
 今後の cleanup や不具合調査では、まず Phase 2G の成功条件を見る。
@@ -104,5 +118,7 @@ failure-only に残す主な項目:
 - generated curve override が attempt された分だけ applied されているか。
 - generated curve override が final curve に反映されているか。
 - final LookAtY が generated curve の native 計算結果に一致しているか。
+- ログイン後に active CharaSelect scene override / adapter / session が残っていないか。
+- ログイン後に Phase 2G apply や sceneReady accepted が発生していないか。
 
-Yaw/Pitch/Distance が preset と最終一致しないことだけでは blocker にしない。そこを直す場合も、direct `SceneCamera` write や per-frame correction に戻さず、native source と generation path の追加調査から始める。
+Yaw/Pitch/Distance が preset と最終一致しないことだけでは blocker にしない。ただし、これは `transition.verdict.loginTransitionSafety=safe` が確認できている場合に限る。そこを直す場合も、direct `SceneCamera` write や per-frame correction に戻さず、native source と generation path の追加調査から始める。

@@ -79,6 +79,17 @@ internal static class TitleBackgroundCharaSelectCameraLogic
         return map == GameLobbyType.CharaSelect;
     }
 
+    public static bool IsCharaSelectOrTitleBackgroundMap(GameLobbyType map)
+    {
+        return map is GameLobbyType.CharaSelect or GameLobbyType.Title;
+    }
+
+    public static bool ShouldEndCharaSelectTitleBackgroundSession(bool isLoggedIn, GameLobbyType currentMap)
+    {
+        return isLoggedIn
+            || (currentMap != GameLobbyType.None && !IsCharaSelectOrTitleBackgroundMap(currentMap));
+    }
+
     public static bool ShouldRestoreRuntimeCameraState(
         TitleBackgroundCharaSelectCameraAdapterState state,
         TitleBackgroundCharaSelectCameraRuntimeState runtimeState)
@@ -102,18 +113,27 @@ internal static class TitleBackgroundCharaSelectCameraLogic
         bool hookProbeMode,
         bool sceneOverrideEnabled,
         bool adapterArmed,
+        bool isLoggedIn,
+        bool activeCharaSelectSession,
+        bool sceneGenerationMatchesActiveSession,
         TitleBackgroundCharaSelectCameraAdapterState state,
-        TitleBackgroundCharaSelectCameraRuntimeState runtimeState)
+        TitleBackgroundCharaSelectCameraRuntimeState runtimeState,
+        GameLobbyType currentLobbyMap,
+        GameLobbyType resolvedLobbyMap)
     {
         return serviceReady
             && !hookProbeMode
             && sceneOverrideEnabled
             && adapterArmed
+            && !isLoggedIn
+            && activeCharaSelectSession
+            && sceneGenerationMatchesActiveSession
             && state is TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded
                 or TitleBackgroundCharaSelectCameraAdapterState.Active
             && runtimeState.SceneGeneration > 0
             && runtimeState.HasCameraPose
-            && runtimeState.CurveAtRecord.HasValue;
+            && runtimeState.CurveAtRecord.HasValue
+            && (IsCharaSelectOrTitleBackgroundMap(currentLobbyMap) || IsCharaSelectOrTitleBackgroundMap(resolvedLobbyMap));
     }
 
     public static bool ShouldApplyLookAtY(

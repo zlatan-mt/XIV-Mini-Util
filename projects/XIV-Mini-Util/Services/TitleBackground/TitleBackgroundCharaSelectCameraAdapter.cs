@@ -176,6 +176,15 @@ internal sealed class TitleBackgroundCharaSelectCameraAdapter
         LastLookAtYAppliedSceneGeneration = 0;
     }
 
+    public void EndSession()
+    {
+        ResetRuntimeCameraState();
+        if (State != TitleBackgroundCharaSelectCameraAdapterState.Inactive)
+        {
+            ApplyTransition(TitleBackgroundCharaSelectCameraAdapterEvent.StopRequested);
+        }
+    }
+
     public void Reset()
     {
         RuntimeState = TitleBackgroundCharaSelectCameraRuntimeState.Empty;
