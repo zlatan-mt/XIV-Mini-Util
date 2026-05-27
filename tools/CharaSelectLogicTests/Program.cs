@@ -1146,12 +1146,85 @@ Test("title background normal diagnostics exclude detailed failure-only lines", 
     return TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2C.timeline[60].activeCamera.DirH=1.2")
         && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2D.timeline[600].lobbyCamera.Distance=4.2")
         && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2F.timeline[600].expandedLobbyCamera.MidPoint.Value=0.834")
+        && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2M.placementFrame[60].actor.status=observed")
         && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.call[1].returnValue=0.834")
         && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2F.setCameraCurveMidPoint.call[1].status=original")
         && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2F.calculateCameraCurveLowAndHighPoint.interestingCall[1].status=phase2G=low-high-applied")
         && TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("transition.event[0].seq=1; name=CreateSceneDetour entered")
+        && !TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2M.actorDiagnostic.status=observed")
         && !TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2G.generationOverride.setMid.appliedCount=3")
         && !TitleBackgroundCameraProbeReport.IsDetailedFailureDiagnosticLine("phase2E.calculateLobbyCameraLookAtY.callCount=128");
+});
+
+Test("title background phase2m diagnostics retain scene-ready frames for post-login summary", () =>
+{
+    var frames = new[]
+    {
+        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
+        Phase2MFrame(30, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
+        Phase2MFrame(600, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
+    };
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(frames);
+
+    return TitleBackgroundPhase2MPlacementDiagnostic.ShouldCaptureFrame(0)
+        && TitleBackgroundPhase2MPlacementDiagnostic.ShouldCaptureFrame(30)
+        && TitleBackgroundPhase2MPlacementDiagnostic.ShouldCaptureFrame(600)
+        && !TitleBackgroundPhase2MPlacementDiagnostic.ShouldCaptureFrame(90)
+        && summary.ActorDiagnosticStatus == "observed"
+        && summary.ActorVisible == "observed";
+});
+
+Test("title background phase2m ambiguous actor candidates prevent write-capable conclusions", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.Ambiguous, candidateCount: 2),
+    ]);
+
+    return summary.ActorDiagnosticStatus == "ambiguous"
+        && summary.VisualPlacementSafety == "unsafe";
+});
+
+Test("title background phase2m ground height unavailable is unknown not failure", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true, groundStatus: "unavailable"),
+    ]);
+
+    return summary.ActorGroundAligned == "unknown"
+        && summary.CameraFramesActor == "observed"
+        && summary.VisualPlacementSafety == "unknown";
+});
+
+Test("title background phase2m visual placement is unsafe when actor is not observed", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.None, candidateCount: 0),
+    ]);
+
+    return summary.ActorDiagnosticStatus == "not-observed"
+        && summary.ActorVisible == "not-observed"
+        && summary.VisualPlacementSafety == "unsafe";
+});
+
+Test("title background phase2m visual placement safety is independent from login transition safety", () =>
+{
+    var recorder = new TitleBackgroundTransitionDiagnosticRecorder();
+    var transitionVerdicts = TitleBackgroundTransitionDiagnosticRecorder.BuildVerdicts(BuildTransitionSummaryInput(
+        recorder,
+        TrustedDelta(0, 0, 0, 0, 0, 0, 0),
+        isLoggedIn: true,
+        historicalLastOverrideApplied: true,
+        cleanupReason: "world-login-transition"));
+    var placementSummary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.None, candidateCount: 0),
+    ]);
+
+    return transitionVerdicts.LoginTransitionSafety == "safe"
+        && placementSummary.VisualPlacementSafety == "unsafe";
 });
 
 Test("title background normal diagnostics exclude obsolete direct look at y fields", () =>
@@ -1966,6 +2039,65 @@ Test("title background prologue hint does not verify unknown bytes", () =>
     byte[] bytes = [0x8B, 0xD9, 0xE8, 0x11, 0x22, 0x33, 0x44];
     return TitleBackgroundAddressResolver.ClassifyFunctionPrologue(bytes) == "unknown";
 });
+
+TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
+    int frame,
+    TitleBackgroundPhase2MActorMatchKind matchKind,
+    bool visibleHint = false,
+    bool withCameraDeltas = false,
+    string groundStatus = "unavailable",
+    int candidateCount = 1)
+{
+    var actor = matchKind == TitleBackgroundPhase2MActorMatchKind.Single
+        ? new TitleBackgroundPhase2MActorCandidate(
+            SourceIndex: 1,
+            Source: "test",
+            ObjectKind: "Pc",
+            Name: "candidate",
+            GameObjectId: 0x100,
+            EntityId: 0x200,
+            Address: new nint(0x300),
+            Position: new Vector3(1f, 2f, 3f),
+            Rotation: 0.5f,
+            PlayerLike: true,
+            BattleCharacterLike: true,
+            VisibleHint: visibleHint,
+            DistanceFromConfiguredCharacter: 0f,
+            DistanceFromActiveLookAt: withCameraDeltas ? 1f : null)
+        : (TitleBackgroundPhase2MActorCandidate?)null;
+
+    return new TitleBackgroundPhase2MPlacementFrame(
+        Frame: frame,
+        Reason: frame == 0 ? "scene-ready-accepted" : "timeline",
+        ActiveCameraCaptured: withCameraDeltas,
+        ActiveCameraPosition: withCameraDeltas ? Vector3.Zero : null,
+        ActiveCameraLookAt: withCameraDeltas ? new Vector3(1f, 2f, 2f) : null,
+        ActiveCameraYaw: withCameraDeltas ? 0f : null,
+        ActiveCameraPitch: withCameraDeltas ? 0f : null,
+        ActiveCameraDistance: withCameraDeltas ? 3f : null,
+        LobbyCameraCaptured: withCameraDeltas,
+        LobbyCameraLookAt: withCameraDeltas ? new Vector3(1f, 2f, 2f) : null,
+        LobbyDirH: withCameraDeltas ? 0f : null,
+        LobbyDirV: withCameraDeltas ? 0f : null,
+        LobbyDistance: withCameraDeltas ? 3f : null,
+        LobbyInterpDistance: withCameraDeltas ? 3f : null,
+        ActorMatchKind: matchKind,
+        Actor: actor,
+        CandidateCount: candidateCount,
+        ActorStatus: matchKind switch
+        {
+            TitleBackgroundPhase2MActorMatchKind.Single => "observed",
+            TitleBackgroundPhase2MActorMatchKind.Ambiguous => "ambiguous",
+            _ => "not-observed",
+        },
+        GroundHeightStatus: groundStatus,
+        GroundY: null,
+        ActorToCameraDistance: withCameraDeltas ? 3f : null,
+        ActorToLookAtDelta: withCameraDeltas ? new Vector3(0f, 0f, 1f) : null,
+        ActorYMinusPresetCharacterY: actor.HasValue ? 0f : null,
+        ActorYMinusFocusY: actor.HasValue ? 0f : null,
+        ActorYMinusNativeLookAtY: actor.HasValue ? 0f : null);
+}
 
 TitleBackgroundTransitionSummaryInput BuildTransitionSummaryInput(
     TitleBackgroundTransitionDiagnosticRecorder recorder,

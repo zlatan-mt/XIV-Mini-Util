@@ -333,6 +333,7 @@ internal static class TitleBackgroundCameraProbeReport
         return line.StartsWith("phase2C.timeline[", StringComparison.Ordinal)
             || line.StartsWith("phase2D.timeline[", StringComparison.Ordinal)
             || line.StartsWith("phase2F.timeline[", StringComparison.Ordinal)
+            || line.StartsWith("phase2M.placementFrame[", StringComparison.Ordinal)
             || line.StartsWith("phase2E.calculateLobbyCameraLookAtY.call[", StringComparison.Ordinal)
             || line.StartsWith("phase2F.setCameraCurveMidPoint.call[", StringComparison.Ordinal)
             || line.StartsWith("phase2F.setCameraCurveMidPoint.interestingCall[", StringComparison.Ordinal)
