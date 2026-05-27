@@ -740,6 +740,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var phase2GFinalLookAtYMatchesGeneratedCurve = BuildPhase2GFinalLookAtYMatchesGeneratedCurveVerdict(phase2DLatestSample);
         var phase2GFinalYawPitchDistanceMatchesPreset = BuildPhase2GFinalCameraStateMatchesPresetVerdict(phase2DLatestSample);
         var phase2MSummary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(_phase2MPlacementFrames.Values);
+        var phase2MObjectTableStats = GetLatestPhase2MObjectTableStats();
+        var phase2MActorCandidateStatus = GetLatestPhase2MActorCandidateStatus();
+        var phase2MActorCandidateReason = GetLatestPhase2MActorCandidateReason();
+        var phase2MActorSource = GetLatestPhase2MActorSource();
+        var phase2MNextNativeSourceToInspect = GetLatestPhase2MNextNativeSourceToInspect();
         if (!includeDetailedPhase2Diagnostics)
         {
             // Keep normal /xmutbgdiag as a long-term Phase 2G summary. Detailed timelines and call
@@ -776,6 +781,15 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 $"phase2M.actor.visible={phase2MSummary.ActorVisible}",
                 $"phase2M.actor.groundAligned={phase2MSummary.ActorGroundAligned}",
                 $"phase2M.camera.framesActor={phase2MSummary.CameraFramesActor}",
+                $"phase2M.objectTable.totalScanned={phase2MObjectTableStats.TotalScanned}",
+                $"phase2M.objectTable.namedCount={phase2MObjectTableStats.NamedCount}",
+                $"phase2M.objectTable.playerLikeCount={phase2MObjectTableStats.PlayerLikeCount}",
+                $"phase2M.objectTable.battleCharaCount={phase2MObjectTableStats.BattleCharaCount}",
+                $"phase2M.objectTable.eventNpcCount={phase2MObjectTableStats.EventNpcCount}",
+                $"phase2M.objectTable.nearCameraCount={phase2MObjectTableStats.NearCameraCount}",
+                $"phase2M.objectTable.nearConfiguredCharacterCount={phase2MObjectTableStats.NearConfiguredCharacterCount}",
+                $"phase2M.actorCandidate.status={phase2MActorCandidateStatus}",
+                $"phase2M.actorCandidate.reason={phase2MActorCandidateReason}",
                 $"verdict.phase2M.visualPlacementSafety={phase2MSummary.VisualPlacementSafety}",
                 $"transition.detailDump={FormatNone(string.IsNullOrWhiteSpace(transitionDetailPath) ? string.Empty : Path.GetFileName(transitionDetailPath))}",
                 ..transitionSummaryLines,
@@ -971,6 +985,17 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"phase2M.actor.visible={phase2MSummary.ActorVisible}",
             $"phase2M.actor.groundAligned={phase2MSummary.ActorGroundAligned}",
             $"phase2M.camera.framesActor={phase2MSummary.CameraFramesActor}",
+            $"phase2M.objectTable.totalScanned={phase2MObjectTableStats.TotalScanned}",
+            $"phase2M.objectTable.namedCount={phase2MObjectTableStats.NamedCount}",
+            $"phase2M.objectTable.playerLikeCount={phase2MObjectTableStats.PlayerLikeCount}",
+            $"phase2M.objectTable.battleCharaCount={phase2MObjectTableStats.BattleCharaCount}",
+            $"phase2M.objectTable.eventNpcCount={phase2MObjectTableStats.EventNpcCount}",
+            $"phase2M.objectTable.nearCameraCount={phase2MObjectTableStats.NearCameraCount}",
+            $"phase2M.objectTable.nearConfiguredCharacterCount={phase2MObjectTableStats.NearConfiguredCharacterCount}",
+            $"phase2M.actorCandidate.status={phase2MActorCandidateStatus}",
+            $"phase2M.actorCandidate.reason={phase2MActorCandidateReason}",
+            $"phase2M.actor.source={phase2MActorSource}",
+            $"phase2M.actor.nextNativeSourceToInspect={phase2MNextNativeSourceToInspect}",
             $"verdict.phase2M.visualPlacementSafety={phase2MSummary.VisualPlacementSafety}",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
@@ -2503,8 +2528,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 ? lobbyCamera.LastLookAtVector.Y
                 : (float?)null;
         var activeLookAt = activeCaptured ? activeCamera.LookAtVector : (Vector3?)null;
+        var activeCameraPosition = activeCaptured ? activeCamera.SceneCameraPosition : (Vector3?)null;
 
-        var actorResult = CapturePhase2MActorCandidate(configuredCharacterPosition, activeLookAt);
+        var actorResult = CapturePhase2MActorCandidate(configuredCharacterPosition, activeLookAt, activeCameraPosition);
         var actor = actorResult.Actor;
         var actorPosition = actor?.Position;
 
@@ -2525,8 +2551,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             lobbyCaptured ? lobbyCamera.InterpDistance : null,
             actorResult.MatchKind,
             actor,
+            actorResult.Candidates,
             actorResult.CandidateCount,
             actorResult.Status,
+            actorResult.ObjectTableStats,
+            actorResult.CandidateStatus,
+            actorResult.CandidateReason,
+            actorResult.ActorSource,
+            actorResult.NextNativeSourceToInspect,
             "unavailable",
             null,
             actorPosition.HasValue && activeCaptured
@@ -2546,60 +2578,249 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 : null);
     }
 
-    private TitleBackgroundPhase2MActorCandidateResult CapturePhase2MActorCandidate(Vector3 configuredCharacterPosition, Vector3? activeLookAt)
+    private TitleBackgroundPhase2MActorCandidateResult CapturePhase2MActorCandidate(
+        Vector3 configuredCharacterPosition,
+        Vector3? activeLookAt,
+        Vector3? activeCameraPosition)
     {
         try
         {
-            var candidates = new List<TitleBackgroundPhase2MActorCandidate>();
+            var scanned = new List<TitleBackgroundPhase2MActorCandidate>();
+            var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+            var length = Math.Max(0, _objectTable.Length);
+            for (var index = 0; index < length; index++)
+            {
+                AddPhase2MScannedObject(scanned, seenKeys, index, "ObjectTable", _objectTable[index], configuredCharacterPosition, activeLookAt, activeCameraPosition);
+            }
+
             var sourceIndex = 0;
+            foreach (var gameObject in _objectTable.PlayerObjects)
+            {
+                sourceIndex++;
+                AddPhase2MScannedObject(scanned, seenKeys, sourceIndex, "PlayerObjects", gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
+            }
+
+            sourceIndex = 0;
             foreach (var gameObject in _objectTable.CharacterManagerObjects)
             {
                 sourceIndex++;
-                var candidate = TryCreatePhase2MActorCandidate(sourceIndex, "CharacterManagerObjects", gameObject, configuredCharacterPosition, activeLookAt);
-                if (candidate.HasValue)
-                {
-                    candidates.Add(candidate.Value);
-                }
+                AddPhase2MScannedObject(scanned, seenKeys, sourceIndex, "CharacterManagerObjects", gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
             }
 
-            var matchingCandidates = candidates
-                .Where(candidate => candidate.BattleCharacterLike
-                    || candidate.DistanceFromConfiguredCharacter is <= 50f
-                    || candidate.DistanceFromActiveLookAt is <= 50f)
-                .OrderBy(candidate => candidate.DistanceFromConfiguredCharacter ?? float.MaxValue)
+            var stats = BuildPhase2MObjectTableStats(scanned);
+            var candidates = scanned
+                .Where(candidate => candidate.PlayerLike
+                    || candidate.BattleCharacterLike
+                    || candidate.EventNpcLike
+                    || candidate.CompanionLike
+                    || candidate.Named
+                    || candidate.NearConfiguredCharacter
+                    || candidate.NearCameraLookAt
+                    || candidate.NearCameraPosition)
+                .OrderByDescending(candidate => candidate.PlayerLike)
+                .ThenByDescending(candidate => candidate.BattleCharacterLike)
+                .ThenBy(candidate => candidate.DistanceFromConfiguredCharacter ?? float.MaxValue)
                 .ThenBy(candidate => candidate.DistanceFromActiveLookAt ?? float.MaxValue)
+                .Take(16)
+                .ToArray();
+            var matchingCandidates = candidates
+                .Where(candidate => candidate.PlayerLike
+                    || candidate.BattleCharacterLike
+                    || candidate.NearConfiguredCharacter
+                    || candidate.NearCameraLookAt)
                 .ToArray();
 
             if (matchingCandidates.Length == 0)
             {
+                var reason = candidates.Length == 0
+                    ? "objectTable-unavailable-or-not-exposed"
+                    : "no-player-or-near-focus-candidate";
                 return new TitleBackgroundPhase2MActorCandidateResult(
                     TitleBackgroundPhase2MActorMatchKind.None,
                     null,
-                    0,
-                    candidates.Count == 0 ? "object-table-empty" : "not-observed");
+                    candidates,
+                    candidates.Length,
+                    stats,
+                    "not-observed",
+                    "none",
+                    reason,
+                    "objectTable-unavailable-or-not-exposed",
+                    "native character-select actor manager or lobby UI character instance");
             }
 
-            var matchKind = matchingCandidates.Length == 1
-                ? TitleBackgroundPhase2MActorMatchKind.Single
-                : TitleBackgroundPhase2MActorMatchKind.Ambiguous;
-            var status = matchKind == TitleBackgroundPhase2MActorMatchKind.Single
-                ? "observed"
-                : "ambiguous";
+            var stableCandidates = FilterPhase2MStableCandidates(matchingCandidates);
+            if (stableCandidates.Length == 1)
+            {
+                return new TitleBackgroundPhase2MActorCandidateResult(
+                    TitleBackgroundPhase2MActorMatchKind.Single,
+                    stableCandidates[0],
+                    candidates,
+                    candidates.Length,
+                    stats,
+                    "observed",
+                    "single",
+                    "single-stable-candidate",
+                    stableCandidates[0].Source,
+                    "none");
+            }
+
+            if (matchingCandidates.Length == 1)
+            {
+                return new TitleBackgroundPhase2MActorCandidateResult(
+                    TitleBackgroundPhase2MActorMatchKind.Single,
+                    matchingCandidates[0],
+                    candidates,
+                    candidates.Length,
+                    stats,
+                    "observed",
+                    "single",
+                    "single-candidate",
+                    matchingCandidates[0].Source,
+                    "none");
+            }
 
             return new TitleBackgroundPhase2MActorCandidateResult(
-                matchKind,
+                TitleBackgroundPhase2MActorMatchKind.Ambiguous,
                 matchingCandidates[0],
-                matchingCandidates.Length,
-                status);
+                candidates,
+                candidates.Length,
+                stats,
+                "ambiguous",
+                "ambiguous",
+                $"multiple-candidates:{matchingCandidates.Length}",
+                "ambiguous",
+                "none");
         }
         catch (Exception ex)
         {
             return new TitleBackgroundPhase2MActorCandidateResult(
                 TitleBackgroundPhase2MActorMatchKind.None,
                 null,
+                [],
                 0,
-                $"error:{ex.GetType().Name}");
+                default,
+                "error",
+                "none",
+                $"error:{ex.GetType().Name}",
+                "objectTable-unavailable-or-not-exposed",
+                "native character-select actor manager or lobby UI character instance");
         }
+    }
+
+    private static void AddPhase2MScannedObject(
+        List<TitleBackgroundPhase2MActorCandidate> candidates,
+        HashSet<string> seenKeys,
+        int sourceIndex,
+        string source,
+        IGameObject? gameObject,
+        Vector3 configuredCharacterPosition,
+        Vector3? activeLookAt,
+        Vector3? activeCameraPosition)
+    {
+        if (gameObject == null)
+        {
+            return;
+        }
+
+        var candidate = TryCreatePhase2MActorCandidate(sourceIndex, source, gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
+        if (!candidate.HasValue)
+        {
+            return;
+        }
+
+        if (seenKeys.Add(BuildPhase2MCandidateKey(candidate.Value)))
+        {
+            candidates.Add(candidate.Value);
+        }
+    }
+
+    private TitleBackgroundPhase2MActorCandidate[] FilterPhase2MStableCandidates(TitleBackgroundPhase2MActorCandidate[] candidates)
+    {
+        return candidates.Where(IsStablePhase2MCandidate).ToArray();
+    }
+
+    private bool IsStablePhase2MCandidate(TitleBackgroundPhase2MActorCandidate candidate)
+    {
+        var key = BuildPhase2MCandidateKey(candidate);
+        var matched = _phase2MPlacementFrames.Values
+            .SelectMany(frame => frame.ObjectCandidates)
+            .Where(existing => BuildPhase2MCandidateKey(existing) == key)
+            .ToArray();
+        return matched.Length >= 2
+            && matched.All(existing => Vector3.Distance(existing.Position, candidate.Position) <= TitleBackgroundCameraProbeReport.StabilizationVectorTolerance);
+    }
+
+    private static string BuildPhase2MCandidateKey(TitleBackgroundPhase2MActorCandidate candidate)
+    {
+        if (candidate.GameObjectId != 0)
+        {
+            return $"gameObject:{candidate.GameObjectId:X}";
+        }
+
+        if (candidate.EntityId != 0)
+        {
+            return $"entity:{candidate.EntityId:X}";
+        }
+
+        if (candidate.Address != nint.Zero)
+        {
+            return $"address:{candidate.Address.ToInt64():X}";
+        }
+
+        return $"{candidate.Source}:{candidate.ObjectIndex}:{candidate.ObjectKind}:{candidate.Name}";
+    }
+
+    private static TitleBackgroundPhase2MObjectTableStats BuildPhase2MObjectTableStats(IReadOnlyCollection<TitleBackgroundPhase2MActorCandidate> candidates)
+    {
+        return new TitleBackgroundPhase2MObjectTableStats(
+            candidates.Count,
+            candidates.Count(candidate => candidate.Named),
+            candidates.Count(candidate => candidate.PlayerLike),
+            candidates.Count(candidate => candidate.BattleCharacterLike),
+            candidates.Count(candidate => candidate.EventNpcLike),
+            candidates.Count(candidate => candidate.CompanionLike),
+            candidates.Count(candidate => candidate.NearCameraLookAt || candidate.NearCameraPosition),
+            candidates.Count(candidate => candidate.NearConfiguredCharacter));
+    }
+
+    private TitleBackgroundPhase2MObjectTableStats GetLatestPhase2MObjectTableStats()
+    {
+        return _phase2MPlacementFrames.Values
+            .OrderByDescending(frame => frame.Frame)
+            .Select(frame => frame.ObjectTableStats)
+            .FirstOrDefault();
+    }
+
+    private string GetLatestPhase2MActorCandidateStatus()
+    {
+        return _phase2MPlacementFrames.Values
+            .OrderByDescending(frame => frame.Frame)
+            .Select(frame => frame.ActorCandidateStatus)
+            .FirstOrDefault() ?? "none";
+    }
+
+    private string GetLatestPhase2MActorCandidateReason()
+    {
+        return _phase2MPlacementFrames.Values
+            .OrderByDescending(frame => frame.Frame)
+            .Select(frame => frame.ActorCandidateReason)
+            .FirstOrDefault() ?? "none";
+    }
+
+    private string GetLatestPhase2MActorSource()
+    {
+        return _phase2MPlacementFrames.Values
+            .OrderByDescending(frame => frame.Frame)
+            .Select(frame => frame.ActorSource)
+            .FirstOrDefault() ?? "none";
+    }
+
+    private string GetLatestPhase2MNextNativeSourceToInspect()
+    {
+        return _phase2MPlacementFrames.Values
+            .OrderByDescending(frame => frame.Frame)
+            .Select(frame => frame.NextNativeSourceToInspect)
+            .FirstOrDefault() ?? "none";
     }
 
     private static TitleBackgroundPhase2MActorCandidate? TryCreatePhase2MActorCandidate(
@@ -2607,7 +2828,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         string source,
         IGameObject gameObject,
         Vector3 configuredCharacterPosition,
-        Vector3? activeLookAt)
+        Vector3? activeLookAt,
+        Vector3? activeCameraPosition)
     {
         var position = gameObject.Position;
         if (!TitleBackgroundCameraMath.IsFiniteVector(position))
@@ -2616,7 +2838,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
 
         var kind = gameObject.ObjectKind;
+        var name = gameObject.Name.ToString();
+        var named = !string.IsNullOrWhiteSpace(name);
         var playerLike = kind == ObjectKind.Pc;
+        var eventNpcLike = kind == ObjectKind.EventNpc;
+        var companionLike = kind == ObjectKind.Companion
+            || kind == ObjectKind.Mount
+            || kind == ObjectKind.Ornament;
         var battleCharacterLike = playerLike
             || kind == ObjectKind.BattleNpc
             || kind == ObjectKind.EventNpc;
@@ -2624,22 +2852,47 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var distanceFromActiveLookAt = activeLookAt.HasValue
             ? Vector3.Distance(position, activeLookAt.Value)
             : (float?)null;
+        var distanceFromActiveCameraPosition = activeCameraPosition.HasValue
+            ? Vector3.Distance(position, activeCameraPosition.Value)
+            : (float?)null;
+        var nearConfiguredCharacter = distanceFromConfiguredCharacter <= 100f;
+        var nearCameraLookAt = distanceFromActiveLookAt is <= 100f;
+        var nearCameraPosition = distanceFromActiveCameraPosition is <= 100f;
+        var categoryReasons = new List<string>();
+        if (playerLike) categoryReasons.Add("PlayerCharacter");
+        if (battleCharacterLike) categoryReasons.Add("BattleChara");
+        if (eventNpcLike) categoryReasons.Add("EventNpc");
+        if (companionLike) categoryReasons.Add("CompanionLike");
+        if (named) categoryReasons.Add("Named");
+        if (nearConfiguredCharacter) categoryReasons.Add("NearConfiguredCharacter");
+        if (nearCameraLookAt) categoryReasons.Add("NearCameraLookAt");
+        if (nearCameraPosition) categoryReasons.Add("NearCameraPosition");
 
         return new TitleBackgroundPhase2MActorCandidate(
             sourceIndex,
             source,
+            gameObject.ObjectIndex,
             kind.ToString(),
-            gameObject.Name.ToString(),
+            name,
             gameObject.GameObjectId,
             gameObject.EntityId,
             gameObject.Address,
             position,
             gameObject.Rotation,
+            named,
             playerLike,
             battleCharacterLike,
+            eventNpcLike,
+            companionLike,
             gameObject.IsTargetable,
             distanceFromConfiguredCharacter,
-            distanceFromActiveLookAt);
+            distanceFromActiveLookAt,
+            distanceFromActiveCameraPosition,
+            position.Y - configuredCharacterPosition.Y,
+            nearConfiguredCharacter,
+            nearCameraLookAt,
+            nearCameraPosition,
+            categoryReasons.Count == 0 ? "uncategorized" : string.Join(",", categoryReasons));
     }
 
     private void UpdateSelfTestOnFrameworkUpdate()
@@ -4771,15 +5024,28 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return history.Count == 0 ? "none" : string.Join(" | ", history);
     }
 
-    private static void AddPhase2MPlacementFrameLines(List<string> lines, TitleBackgroundPhase2MPlacementFrame frame)
+    private void AddPhase2MPlacementFrameLines(List<string> lines, TitleBackgroundPhase2MPlacementFrame frame)
     {
         var prefix = $"phase2M.placementFrame[{frame.Frame}]";
         lines.Add($"{prefix}.reason={frame.Reason}");
         lines.Add($"{prefix}.actor.status={frame.ActorStatus}");
         lines.Add($"{prefix}.actor.matchKind={frame.ActorMatchKind}");
         lines.Add($"{prefix}.actor.candidateCount={frame.CandidateCount}");
+        lines.Add($"{prefix}.actorCandidate.status={frame.ActorCandidateStatus}");
+        lines.Add($"{prefix}.actorCandidate.reason={frame.ActorCandidateReason}");
+        lines.Add($"{prefix}.actor.source={frame.ActorSource}");
+        lines.Add($"{prefix}.actor.nextNativeSourceToInspect={frame.NextNativeSourceToInspect}");
+        lines.Add($"{prefix}.objectTable.totalScanned={frame.ObjectTableStats.TotalScanned}");
+        lines.Add($"{prefix}.objectTable.namedCount={frame.ObjectTableStats.NamedCount}");
+        lines.Add($"{prefix}.objectTable.playerLikeCount={frame.ObjectTableStats.PlayerLikeCount}");
+        lines.Add($"{prefix}.objectTable.battleCharaCount={frame.ObjectTableStats.BattleCharaCount}");
+        lines.Add($"{prefix}.objectTable.eventNpcCount={frame.ObjectTableStats.EventNpcCount}");
+        lines.Add($"{prefix}.objectTable.companionLikeCount={frame.ObjectTableStats.CompanionLikeCount}");
+        lines.Add($"{prefix}.objectTable.nearCameraCount={frame.ObjectTableStats.NearCameraCount}");
+        lines.Add($"{prefix}.objectTable.nearConfiguredCharacterCount={frame.ObjectTableStats.NearConfiguredCharacterCount}");
         lines.Add($"{prefix}.actor.candidate.source={FormatNone(frame.Actor?.Source)}");
         lines.Add($"{prefix}.actor.candidate.sourceIndex={FormatFrame(frame.Actor?.SourceIndex)}");
+        lines.Add($"{prefix}.actor.candidate.objectIndex={FormatFrame(frame.Actor?.ObjectIndex)}");
         lines.Add($"{prefix}.actor.candidate.objectId={FormatObjectId(frame.Actor?.GameObjectId)}");
         lines.Add($"{prefix}.actor.candidate.entityId={FormatEntityId(frame.Actor?.EntityId)}");
         lines.Add($"{prefix}.actor.candidate.address={FormatAddress(frame.Actor?.Address ?? nint.Zero)}");
@@ -4787,11 +5053,21 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         lines.Add($"{prefix}.actor.candidate.name={FormatNone(frame.Actor?.Name)}");
         lines.Add($"{prefix}.actor.candidate.position={FormatVector(frame.Actor?.Position)}");
         lines.Add($"{prefix}.actor.candidate.rotation={FormatFloat(frame.Actor?.Rotation)}");
+        lines.Add($"{prefix}.actor.candidate.named={FormatBool(frame.Actor?.Named)}");
         lines.Add($"{prefix}.actor.candidate.playerLike={FormatBool(frame.Actor?.PlayerLike)}");
         lines.Add($"{prefix}.actor.candidate.battleCharacterLike={FormatBool(frame.Actor?.BattleCharacterLike)}");
+        lines.Add($"{prefix}.actor.candidate.eventNpcLike={FormatBool(frame.Actor?.EventNpcLike)}");
+        lines.Add($"{prefix}.actor.candidate.companionLike={FormatBool(frame.Actor?.CompanionLike)}");
         lines.Add($"{prefix}.actor.candidate.visibleHint={FormatBool(frame.Actor?.VisibleHint)}");
         lines.Add($"{prefix}.actor.candidate.distanceFromConfiguredCharacter={FormatFloat(frame.Actor?.DistanceFromConfiguredCharacter)}");
         lines.Add($"{prefix}.actor.candidate.distanceFromActiveLookAt={FormatFloat(frame.Actor?.DistanceFromActiveLookAt)}");
+        lines.Add($"{prefix}.actor.candidate.distanceFromActiveCameraPosition={FormatFloat(frame.Actor?.DistanceFromActiveCameraPosition)}");
+        lines.Add($"{prefix}.actor.candidate.yDeltaFromConfiguredCharacter={FormatFloat(frame.Actor?.YDeltaFromConfiguredCharacter)}");
+        lines.Add($"{prefix}.actor.candidate.nearConfiguredCharacter={FormatBool(frame.Actor?.NearConfiguredCharacter)}");
+        lines.Add($"{prefix}.actor.candidate.nearCameraLookAt={FormatBool(frame.Actor?.NearCameraLookAt)}");
+        lines.Add($"{prefix}.actor.candidate.nearCameraPosition={FormatBool(frame.Actor?.NearCameraPosition)}");
+        lines.Add($"{prefix}.actor.candidate.categoryReason={FormatNone(frame.Actor?.CategoryReason)}");
+        lines.Add($"{prefix}.actor.candidate.stableAcrossFrames={FormatBool(frame.Actor.HasValue ? IsStablePhase2MCandidate(frame.Actor.Value) : null)}");
         lines.Add($"{prefix}.activeCamera.captureStatus={(frame.ActiveCameraCaptured ? "success" : "failed")}");
         lines.Add($"{prefix}.activeCamera.position={FormatVector(frame.ActiveCameraPosition)}");
         lines.Add($"{prefix}.activeCamera.lookAt={FormatVector(frame.ActiveCameraLookAt)}");
@@ -4811,6 +5087,43 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         lines.Add($"{prefix}.delta.actorYMinusNativeLookAtY={FormatFloat(frame.ActorYMinusNativeLookAtY)}");
         lines.Add($"{prefix}.groundHeight.source={frame.GroundHeightStatus}");
         lines.Add($"{prefix}.groundHeight.y={FormatFloat(frame.GroundY)}");
+
+        for (var i = 0; i < frame.ObjectCandidates.Count; i++)
+        {
+            AddPhase2MObjectCandidateLines(lines, $"{prefix}.objectCandidate[{i}]", frame.ObjectCandidates[i]);
+        }
+    }
+
+    private void AddPhase2MObjectCandidateLines(
+        List<string> lines,
+        string prefix,
+        TitleBackgroundPhase2MActorCandidate candidate)
+    {
+        lines.Add($"{prefix}.source={FormatNone(candidate.Source)}");
+        lines.Add($"{prefix}.sourceIndex={candidate.SourceIndex}");
+        lines.Add($"{prefix}.objectIndex={candidate.ObjectIndex}");
+        lines.Add($"{prefix}.objectId={FormatObjectId(candidate.GameObjectId)}");
+        lines.Add($"{prefix}.entityId={FormatEntityId(candidate.EntityId)}");
+        lines.Add($"{prefix}.address={FormatAddress(candidate.Address)}");
+        lines.Add($"{prefix}.kind={FormatNone(candidate.ObjectKind)}");
+        lines.Add($"{prefix}.name={FormatNone(candidate.Name)}");
+        lines.Add($"{prefix}.position={FormatVector(candidate.Position)}");
+        lines.Add($"{prefix}.rotation={FormatFloat(candidate.Rotation)}");
+        lines.Add($"{prefix}.distanceFromConfiguredCharacter={FormatFloat(candidate.DistanceFromConfiguredCharacter)}");
+        lines.Add($"{prefix}.distanceFromActiveLookAt={FormatFloat(candidate.DistanceFromActiveLookAt)}");
+        lines.Add($"{prefix}.distanceFromActiveCameraPosition={FormatFloat(candidate.DistanceFromActiveCameraPosition)}");
+        lines.Add($"{prefix}.yDeltaFromConfiguredCharacter={FormatFloat(candidate.YDeltaFromConfiguredCharacter)}");
+        lines.Add($"{prefix}.named={FormatBool(candidate.Named)}");
+        lines.Add($"{prefix}.playerLike={FormatBool(candidate.PlayerLike)}");
+        lines.Add($"{prefix}.battleCharacterLike={FormatBool(candidate.BattleCharacterLike)}");
+        lines.Add($"{prefix}.eventNpcLike={FormatBool(candidate.EventNpcLike)}");
+        lines.Add($"{prefix}.companionLike={FormatBool(candidate.CompanionLike)}");
+        lines.Add($"{prefix}.visibleHint={FormatBool(candidate.VisibleHint)}");
+        lines.Add($"{prefix}.nearConfiguredCharacter={FormatBool(candidate.NearConfiguredCharacter)}");
+        lines.Add($"{prefix}.nearCameraLookAt={FormatBool(candidate.NearCameraLookAt)}");
+        lines.Add($"{prefix}.nearCameraPosition={FormatBool(candidate.NearCameraPosition)}");
+        lines.Add($"{prefix}.categoryReason={FormatNone(candidate.CategoryReason)}");
+        lines.Add($"{prefix}.stableAcrossFrames={FormatBool(IsStablePhase2MCandidate(candidate))}");
     }
 
     private static void AddGeneratedCurveCallLines(
@@ -4985,8 +5298,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private readonly record struct TitleBackgroundPhase2MActorCandidateResult(
         TitleBackgroundPhase2MActorMatchKind MatchKind,
         TitleBackgroundPhase2MActorCandidate? Actor,
+        IReadOnlyList<TitleBackgroundPhase2MActorCandidate> Candidates,
         int CandidateCount,
-        string Status);
+        TitleBackgroundPhase2MObjectTableStats ObjectTableStats,
+        string Status,
+        string CandidateStatus,
+        string CandidateReason,
+        string ActorSource,
+        string NextNativeSourceToInspect);
 
     private readonly record struct TitleBackgroundPhase2ECalculateLookAtYCall(
         int CallIndex,

@@ -15,6 +15,7 @@ internal enum TitleBackgroundPhase2MActorMatchKind
 internal readonly record struct TitleBackgroundPhase2MActorCandidate(
     int SourceIndex,
     string Source,
+    int ObjectIndex,
     string ObjectKind,
     string Name,
     ulong GameObjectId,
@@ -22,11 +23,30 @@ internal readonly record struct TitleBackgroundPhase2MActorCandidate(
     nint Address,
     Vector3 Position,
     float? Rotation,
+    bool Named,
     bool PlayerLike,
     bool BattleCharacterLike,
+    bool EventNpcLike,
+    bool CompanionLike,
     bool VisibleHint,
     float? DistanceFromConfiguredCharacter,
-    float? DistanceFromActiveLookAt);
+    float? DistanceFromActiveLookAt,
+    float? DistanceFromActiveCameraPosition,
+    float? YDeltaFromConfiguredCharacter,
+    bool NearConfiguredCharacter,
+    bool NearCameraLookAt,
+    bool NearCameraPosition,
+    string CategoryReason);
+
+internal readonly record struct TitleBackgroundPhase2MObjectTableStats(
+    int TotalScanned,
+    int NamedCount,
+    int PlayerLikeCount,
+    int BattleCharaCount,
+    int EventNpcCount,
+    int CompanionLikeCount,
+    int NearCameraCount,
+    int NearConfiguredCharacterCount);
 
 internal readonly record struct TitleBackgroundPhase2MPlacementFrame(
     int Frame,
@@ -45,8 +65,14 @@ internal readonly record struct TitleBackgroundPhase2MPlacementFrame(
     float? LobbyInterpDistance,
     TitleBackgroundPhase2MActorMatchKind ActorMatchKind,
     TitleBackgroundPhase2MActorCandidate? Actor,
+    IReadOnlyList<TitleBackgroundPhase2MActorCandidate> ObjectCandidates,
     int CandidateCount,
     string ActorStatus,
+    TitleBackgroundPhase2MObjectTableStats ObjectTableStats,
+    string ActorCandidateStatus,
+    string ActorCandidateReason,
+    string ActorSource,
+    string NextNativeSourceToInspect,
     string GroundHeightStatus,
     float? GroundY,
     float? ActorToCameraDistance,

@@ -1199,14 +1199,29 @@ Test("title background phase2m ground height unavailable is unknown not failure"
 
 Test("title background phase2m visual placement is unsafe when actor is not observed", () =>
 {
+    var frame = Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.None, candidateCount: 0);
     var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.None, candidateCount: 0),
+        frame,
     ]);
 
     return summary.ActorDiagnosticStatus == "not-observed"
         && summary.ActorVisible == "not-observed"
-        && summary.VisualPlacementSafety == "unsafe";
+        && summary.VisualPlacementSafety == "unsafe"
+        && frame.ActorCandidateStatus == "none"
+        && frame.ActorSource == "objectTable-unavailable-or-not-exposed";
+});
+
+Test("title background phase2m single stable candidate is observed but not automatically safe", () =>
+{
+    var frame = Phase2MFrame(60, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true);
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([frame]);
+
+    return summary.ActorDiagnosticStatus == "observed"
+        && frame.ActorCandidateStatus == "single"
+        && frame.ObjectTableStats.PlayerLikeCount == 1
+        && frame.ObjectCandidates.Count == 1
+        && summary.VisualPlacementSafety == "unknown";
 });
 
 Test("title background phase2m visual placement safety is independent from login transition safety", () =>
@@ -2052,6 +2067,7 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
         ? new TitleBackgroundPhase2MActorCandidate(
             SourceIndex: 1,
             Source: "test",
+            ObjectIndex: 1,
             ObjectKind: "Pc",
             Name: "candidate",
             GameObjectId: 0x100,
@@ -2059,12 +2075,24 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
             Address: new nint(0x300),
             Position: new Vector3(1f, 2f, 3f),
             Rotation: 0.5f,
+            Named: true,
             PlayerLike: true,
             BattleCharacterLike: true,
+            EventNpcLike: false,
+            CompanionLike: false,
             VisibleHint: visibleHint,
             DistanceFromConfiguredCharacter: 0f,
-            DistanceFromActiveLookAt: withCameraDeltas ? 1f : null)
+            DistanceFromActiveLookAt: withCameraDeltas ? 1f : null,
+            DistanceFromActiveCameraPosition: withCameraDeltas ? 3f : null,
+            YDeltaFromConfiguredCharacter: 0f,
+            NearConfiguredCharacter: true,
+            NearCameraLookAt: withCameraDeltas,
+            NearCameraPosition: withCameraDeltas,
+            CategoryReason: "PlayerCharacter,BattleChara,Named")
         : (TitleBackgroundPhase2MActorCandidate?)null;
+    var objectCandidates = actor.HasValue
+        ? new[] { actor.Value }
+        : Array.Empty<TitleBackgroundPhase2MActorCandidate>();
 
     return new TitleBackgroundPhase2MPlacementFrame(
         Frame: frame,
@@ -2083,6 +2111,7 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
         LobbyInterpDistance: withCameraDeltas ? 3f : null,
         ActorMatchKind: matchKind,
         Actor: actor,
+        ObjectCandidates: objectCandidates,
         CandidateCount: candidateCount,
         ActorStatus: matchKind switch
         {
@@ -2090,6 +2119,29 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
             TitleBackgroundPhase2MActorMatchKind.Ambiguous => "ambiguous",
             _ => "not-observed",
         },
+        ObjectTableStats: new TitleBackgroundPhase2MObjectTableStats(
+            TotalScanned: candidateCount,
+            NamedCount: actor.HasValue ? 1 : 0,
+            PlayerLikeCount: actor.HasValue ? 1 : 0,
+            BattleCharaCount: actor.HasValue ? 1 : 0,
+            EventNpcCount: 0,
+            CompanionLikeCount: 0,
+            NearCameraCount: withCameraDeltas && actor.HasValue ? 1 : 0,
+            NearConfiguredCharacterCount: actor.HasValue ? 1 : 0),
+        ActorCandidateStatus: matchKind switch
+        {
+            TitleBackgroundPhase2MActorMatchKind.Single => "single",
+            TitleBackgroundPhase2MActorMatchKind.Ambiguous => "ambiguous",
+            _ => "none",
+        },
+        ActorCandidateReason: matchKind switch
+        {
+            TitleBackgroundPhase2MActorMatchKind.Single => "single-candidate",
+            TitleBackgroundPhase2MActorMatchKind.Ambiguous => "multiple-candidates:2",
+            _ => "objectTable-unavailable-or-not-exposed",
+        },
+        ActorSource: matchKind == TitleBackgroundPhase2MActorMatchKind.Single ? "test" : "objectTable-unavailable-or-not-exposed",
+        NextNativeSourceToInspect: matchKind == TitleBackgroundPhase2MActorMatchKind.None ? "native character-select actor manager" : "none",
         GroundHeightStatus: groundStatus,
         GroundY: null,
         ActorToCameraDistance: withCameraDeltas ? 3f : null,
