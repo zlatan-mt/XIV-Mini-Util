@@ -81,6 +81,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool TitleBackgroundCameraOverrideEnabled { get; set; } = false;
     public string TitleBackgroundSelectedPresetId { get; set; } = string.Empty;
     public TitleBackgroundRuntimeMode TitleBackgroundRuntimeMode { get; set; } = TitleBackgroundRuntimeMode.ResolveOnly;
+    public TitleBackgroundPhase2MExperimentalApplyMode TitleBackgroundPhase2MExperimentalApplyMode { get; set; } = TitleBackgroundPhase2MExperimentalApplyMode.None;
     public TitleBackgroundResolverMode TitleBackgroundCreateSceneResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
     public TitleBackgroundResolverMode TitleBackgroundLobbyUpdateResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
     public string TitleBackgroundTerritoryPath { get; set; } = string.Empty;
@@ -277,6 +278,7 @@ public sealed class Configuration : IPluginConfiguration
         TitleBackgroundCameraOverrideEnabled = source.TitleBackgroundCameraOverrideEnabled;
         TitleBackgroundSelectedPresetId = TitleBackgroundBuiltInPresetCatalog.NormalizeId(source.TitleBackgroundSelectedPresetId);
         TitleBackgroundRuntimeMode = NormalizeTitleBackgroundRuntimeMode(source.TitleBackgroundRuntimeMode);
+        TitleBackgroundPhase2MExperimentalApplyMode = NormalizeTitleBackgroundPhase2MExperimentalApplyMode(source.TitleBackgroundPhase2MExperimentalApplyMode);
         TitleBackgroundCreateSceneResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundCreateSceneResolverMode);
         TitleBackgroundLobbyUpdateResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundLobbyUpdateResolverMode);
         TitleBackgroundTerritoryPath = NormalizeTitleBackgroundTerritoryPath(source.TitleBackgroundTerritoryPath);
@@ -548,6 +550,13 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedPhase2MExperimentalApplyMode = NormalizeTitleBackgroundPhase2MExperimentalApplyMode(TitleBackgroundPhase2MExperimentalApplyMode);
+        if (TitleBackgroundPhase2MExperimentalApplyMode != normalizedPhase2MExperimentalApplyMode)
+        {
+            TitleBackgroundPhase2MExperimentalApplyMode = normalizedPhase2MExperimentalApplyMode;
+            changed = true;
+        }
+
         var normalizedCreateSceneResolverMode = NormalizeTitleBackgroundResolverMode(TitleBackgroundCreateSceneResolverMode);
         var normalizedLobbyUpdateResolverMode = NormalizeTitleBackgroundResolverMode(TitleBackgroundLobbyUpdateResolverMode);
         if (TitleBackgroundCreateSceneResolverMode != normalizedCreateSceneResolverMode
@@ -695,6 +704,13 @@ public sealed class Configuration : IPluginConfiguration
         return Enum.IsDefined(typeof(TitleBackgroundResolverMode), mode)
             ? mode
             : TitleBackgroundResolverMode.AutoDiagnosticOnly;
+    }
+
+    private static TitleBackgroundPhase2MExperimentalApplyMode NormalizeTitleBackgroundPhase2MExperimentalApplyMode(TitleBackgroundPhase2MExperimentalApplyMode mode)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundPhase2MExperimentalApplyMode), mode)
+            ? mode
+            : TitleBackgroundPhase2MExperimentalApplyMode.None;
     }
 
     private static string NormalizeAssetPath(string? path)

@@ -1242,6 +1242,119 @@ Test("title background phase2m visual placement safety is independent from login
         && placementSummary.VisualPlacementSafety == "unsafe";
 });
 
+Test("title background phase2m resolves all zero candidates as stub only", () =>
+{
+    var candidates = Enumerable.Range(0, 8)
+        .Select(index => Phase2MCandidate(index, Vector3.Zero, named: false, drawObject: false, visible: false))
+        .ToArray();
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates(candidates)]);
+
+    return summary.Resolution == "stub-only"
+        && summary.TransformValidity == "all-zero-transform"
+        && summary.StubLikelihood == "high"
+        && (summary.IdentityConfidence == "none" || summary.IdentityConfidence == "weak")
+        && summary.NextAction == "inspect-native-source";
+});
+
+Test("title background phase2m resolves single valid visible draw object candidate", () =>
+{
+    var candidates = new[]
+    {
+        Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+    };
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates(candidates, TitleBackgroundPhase2MActorMatchKind.Single)]);
+
+    return summary.Resolution == "single"
+        && summary.TransformValidity == "valid-world-transform"
+        && summary.IdentityConfidence is "medium" or "strong"
+        && summary.BestScore > 0;
+});
+
+Test("title background phase2m resolves multiple non-zero candidates as ambiguous", () =>
+{
+    var candidates = new[]
+    {
+        Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+        Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: true, visible: true),
+    };
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates(candidates, TitleBackgroundPhase2MActorMatchKind.Ambiguous)]);
+
+    return summary.Resolution == "ambiguous";
+});
+
+Test("title background phase2m resolves unavailable source as source missing", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates([])]);
+    return summary.Resolution == "source-missing"
+        && summary.NextAction == "inspect-native-source";
+});
+
+Test("title background phase2m prelogin capture summary survives post-login style summary", () =>
+{
+    var frames = new[]
+    {
+        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
+        Phase2MFrame(1200, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
+    };
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(frames);
+
+    return TitleBackgroundPhase2MPlacementDiagnostic.ShouldCaptureFrame(1200)
+        && summary.ActorDiagnosticStatus == "observed";
+});
+
+Test("title background phase2m experimental mode none never writes", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.Single)]);
+    return TitleBackgroundPhase2MPlacementDiagnostic.EvaluateExperimentalApply(
+        TitleBackgroundPhase2MExperimentalApplyMode.None,
+        summary,
+        sceneGenerationMatches: true,
+        isCharaSelectActive: true,
+        isLoggedIn: false) == "skip:none-mode";
+});
+
+Test("title background phase2m actor placement one shot requires single valid transform", () =>
+{
+    var ambiguous = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates(
+        [
+            Phase2MCandidate(1, new Vector3(1f, 2f, 3f), named: true, drawObject: true, visible: true),
+            Phase2MCandidate(2, new Vector3(2f, 2f, 3f), named: true, drawObject: true, visible: true),
+        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+    ]);
+    var stub = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([Phase2MCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: false)]),
+    ]);
+
+    return TitleBackgroundPhase2MPlacementDiagnostic.EvaluateExperimentalApply(
+            TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot,
+            ambiguous,
+            sceneGenerationMatches: true,
+            isCharaSelectActive: true,
+            isLoggedIn: false).StartsWith("skip:resolution-", StringComparison.Ordinal)
+        && TitleBackgroundPhase2MPlacementDiagnostic.EvaluateExperimentalApply(
+            TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot,
+            stub,
+            sceneGenerationMatches: true,
+            isCharaSelectActive: true,
+            isLoggedIn: false).StartsWith("skip:resolution-", StringComparison.Ordinal);
+});
+
+Test("title background phase2m next action selects visibility probe for valid invisible actor", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates(
+        [
+            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: false),
+        ], TitleBackgroundPhase2MActorMatchKind.Single),
+    ]);
+
+    return summary.NextAction == "enable-visibility-probe" || summary.NextAction == "actor-placement-preview";
+});
+
 Test("title background normal diagnostics exclude obsolete direct look at y fields", () =>
 {
     return TitleBackgroundCameraProbeReport.IsObsoleteDirectLookAtYDiagnosticLine("lookAtYApply.attemptCount=1")
@@ -2075,6 +2188,21 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
             Address: new nint(0x300),
             Position: new Vector3(1f, 2f, 3f),
             Rotation: 0.5f,
+            Scale: 1f,
+            HitboxRadius: 0.5f,
+            CurrentHp: 100,
+            MaxHp: 100,
+            Targetable: visibleHint,
+            VisibilityHint: visibleHint ? "targetable" : "not-targetable",
+            SelectableHint: visibleHint ? "selectable-hint" : "unknown",
+            Flags: "none",
+            Customize: "none",
+            Model: "model",
+            DrawObject: "0x400",
+            DrawObjectNonNull: true,
+            ModelLikePointer: "model",
+            ModelLikeNonNull: true,
+            SafeReadError: "none",
             Named: true,
             PlayerLike: true,
             BattleCharacterLike: true,
@@ -2088,7 +2216,9 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
             NearConfiguredCharacter: true,
             NearCameraLookAt: withCameraDeltas,
             NearCameraPosition: withCameraDeltas,
-            CategoryReason: "PlayerCharacter,BattleChara,Named")
+            CategoryReason: "PlayerCharacter,BattleChara,Named",
+            Score: 100,
+            ScoreReason: "test")
         : (TitleBackgroundPhase2MActorCandidate?)null;
     var objectCandidates = actor.HasValue
         ? new[] { actor.Value }
@@ -2112,6 +2242,11 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
         ActorMatchKind: matchKind,
         Actor: actor,
         ObjectCandidates: objectCandidates,
+        SourceDiscovery:
+        [
+            new TitleBackgroundPhase2MSourceDiscovery("ObjectTable", true, candidateCount, objectCandidates.Length, string.Empty),
+            new TitleBackgroundPhase2MSourceDiscovery("CharacterManagerObjects", true, candidateCount, objectCandidates.Length, string.Empty),
+        ],
         CandidateCount: candidateCount,
         ActorStatus: matchKind switch
         {
@@ -2146,9 +2281,126 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
         GroundY: null,
         ActorToCameraDistance: withCameraDeltas ? 3f : null,
         ActorToLookAtDelta: withCameraDeltas ? new Vector3(0f, 0f, 1f) : null,
+        ConfiguredCharacterPosition: new Vector3(1f, 2f, 3f),
+        ConfiguredCharacterRotation: 0.5f,
+        CurveLow: 1f,
+        CurveMid: 2f,
+        CurveHigh: 3f,
         ActorYMinusPresetCharacterY: actor.HasValue ? 0f : null,
         ActorYMinusFocusY: actor.HasValue ? 0f : null,
         ActorYMinusNativeLookAtY: actor.HasValue ? 0f : null);
+}
+
+TitleBackgroundPhase2MActorCandidate Phase2MCandidate(
+    int index,
+    Vector3 position,
+    bool named,
+    bool drawObject,
+    bool visible)
+{
+    var zero = position == Vector3.Zero;
+    return new TitleBackgroundPhase2MActorCandidate(
+        SourceIndex: index,
+        Source: "ObjectTable",
+        ObjectIndex: 200 + index,
+        ObjectKind: "Pc",
+        Name: named ? $"candidate-{index}" : string.Empty,
+        GameObjectId: (ulong)(0x100 + index),
+        EntityId: visible ? (uint)(0x200 + index) : 0xE0000000,
+        Address: new nint(0x300 + index),
+        Position: position,
+        Rotation: 0f,
+        Scale: 1f,
+        HitboxRadius: 0.5f,
+        CurrentHp: visible ? 100u : null,
+        MaxHp: visible ? 100u : null,
+        Targetable: visible,
+        VisibilityHint: visible ? "targetable" : "not-targetable",
+        SelectableHint: visible ? "selectable-hint" : "unknown",
+        Flags: "none",
+        Customize: named ? "customize" : "none",
+        Model: drawObject ? "model" : "none",
+        DrawObject: drawObject ? "0x400" : "none",
+        DrawObjectNonNull: drawObject,
+        ModelLikePointer: drawObject ? "model" : "none",
+        ModelLikeNonNull: drawObject,
+        SafeReadError: "none",
+        Named: named,
+        PlayerLike: true,
+        BattleCharacterLike: true,
+        EventNpcLike: false,
+        CompanionLike: false,
+        VisibleHint: visible,
+        DistanceFromConfiguredCharacter: zero ? 551f : 1f,
+        DistanceFromActiveLookAt: zero ? 1f : 2f,
+        DistanceFromActiveCameraPosition: zero ? 1f : 3f,
+        YDeltaFromConfiguredCharacter: position.Y - 2f,
+        NearConfiguredCharacter: !zero,
+        NearCameraLookAt: true,
+        NearCameraPosition: true,
+        CategoryReason: "PlayerCharacter,BattleChara",
+        Score: zero ? -20 : 100,
+        ScoreReason: zero ? "all-zero-transform-penalty:-40" : "non-zero-world-position:+30");
+}
+
+TitleBackgroundPhase2MPlacementFrame Phase2MFrameFromCandidates(
+    IReadOnlyList<TitleBackgroundPhase2MActorCandidate> candidates,
+    TitleBackgroundPhase2MActorMatchKind matchKind = TitleBackgroundPhase2MActorMatchKind.Ambiguous)
+{
+    var actor = candidates.Count == 1
+        ? candidates[0]
+        : candidates.FirstOrDefault();
+    var hasActor = candidates.Count > 0;
+    return new TitleBackgroundPhase2MPlacementFrame(
+        Frame: 0,
+        Reason: "scene-ready-accepted",
+        ActiveCameraCaptured: true,
+        ActiveCameraPosition: Vector3.Zero,
+        ActiveCameraLookAt: new Vector3(0f, 0f, 0f),
+        ActiveCameraYaw: 0f,
+        ActiveCameraPitch: 0f,
+        ActiveCameraDistance: 3f,
+        LobbyCameraCaptured: true,
+        LobbyCameraLookAt: Vector3.Zero,
+        LobbyDirH: 0f,
+        LobbyDirV: 0f,
+        LobbyDistance: 3f,
+        LobbyInterpDistance: 3f,
+        ActorMatchKind: hasActor ? matchKind : TitleBackgroundPhase2MActorMatchKind.None,
+        Actor: hasActor ? actor : null,
+        ObjectCandidates: candidates,
+        SourceDiscovery:
+        [
+            new TitleBackgroundPhase2MSourceDiscovery("ObjectTable", true, candidates.Count, candidates.Count, string.Empty),
+            new TitleBackgroundPhase2MSourceDiscovery("CharacterManagerObjects", false, 0, 0, "not-exposed"),
+        ],
+        CandidateCount: candidates.Count,
+        ActorStatus: hasActor ? matchKind == TitleBackgroundPhase2MActorMatchKind.Single ? "observed" : "ambiguous" : "not-observed",
+        ObjectTableStats: new TitleBackgroundPhase2MObjectTableStats(
+            TotalScanned: candidates.Count,
+            NamedCount: candidates.Count(candidate => candidate.Named),
+            PlayerLikeCount: candidates.Count(candidate => candidate.PlayerLike),
+            BattleCharaCount: candidates.Count(candidate => candidate.BattleCharacterLike),
+            EventNpcCount: 0,
+            CompanionLikeCount: 0,
+            NearCameraCount: candidates.Count(candidate => candidate.NearCameraLookAt || candidate.NearCameraPosition),
+            NearConfiguredCharacterCount: candidates.Count(candidate => candidate.NearConfiguredCharacter)),
+        ActorCandidateStatus: hasActor ? matchKind == TitleBackgroundPhase2MActorMatchKind.Single ? "single" : "ambiguous" : "none",
+        ActorCandidateReason: hasActor ? $"multiple-candidates:{candidates.Count}" : "objectTable-unavailable-or-not-exposed",
+        ActorSource: hasActor ? "ObjectTable" : "objectTable-unavailable-or-not-exposed",
+        NextNativeSourceToInspect: hasActor ? "CharacterManager" : "native character-select actor manager",
+        GroundHeightStatus: "unavailable",
+        GroundY: null,
+        ActorToCameraDistance: hasActor ? Vector3.Distance(actor.Position, Vector3.Zero) : null,
+        ActorToLookAtDelta: hasActor ? actor.Position : null,
+        ConfiguredCharacterPosition: new Vector3(1f, 2f, 3f),
+        ConfiguredCharacterRotation: 0f,
+        CurveLow: 1f,
+        CurveMid: 2f,
+        CurveHigh: 3f,
+        ActorYMinusPresetCharacterY: hasActor ? actor.Position.Y - 2f : null,
+        ActorYMinusFocusY: hasActor ? actor.Position.Y - 2f : null,
+        ActorYMinusNativeLookAtY: hasActor ? actor.Position.Y : null);
 }
 
 TitleBackgroundTransitionSummaryInput BuildTransitionSummaryInput(
