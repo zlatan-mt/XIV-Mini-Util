@@ -81,6 +81,8 @@ public sealed class Configuration : IPluginConfiguration
     public bool TitleBackgroundCameraOverrideEnabled { get; set; } = false;
     public string TitleBackgroundSelectedPresetId { get; set; } = string.Empty;
     public TitleBackgroundRuntimeMode TitleBackgroundRuntimeMode { get; set; } = TitleBackgroundRuntimeMode.ResolveOnly;
+    public TitleBackgroundCharacterSelectBackgroundMode TitleBackgroundCharacterSelectBackgroundMode { get; set; } = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly;
+    public TitleBackgroundCharacterSelectLightingMode TitleBackgroundCharacterSelectLightingMode { get; set; } = TitleBackgroundCharacterSelectLightingMode.Default;
     public TitleBackgroundPhase2MExperimentalApplyMode TitleBackgroundPhase2MExperimentalApplyMode { get; set; } = TitleBackgroundPhase2MExperimentalApplyMode.None;
     public TitleBackgroundResolverMode TitleBackgroundCreateSceneResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
     public TitleBackgroundResolverMode TitleBackgroundLobbyUpdateResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
@@ -278,6 +280,8 @@ public sealed class Configuration : IPluginConfiguration
         TitleBackgroundCameraOverrideEnabled = source.TitleBackgroundCameraOverrideEnabled;
         TitleBackgroundSelectedPresetId = TitleBackgroundBuiltInPresetCatalog.NormalizeId(source.TitleBackgroundSelectedPresetId);
         TitleBackgroundRuntimeMode = NormalizeTitleBackgroundRuntimeMode(source.TitleBackgroundRuntimeMode);
+        TitleBackgroundCharacterSelectBackgroundMode = NormalizeTitleBackgroundCharacterSelectBackgroundMode(source.TitleBackgroundCharacterSelectBackgroundMode);
+        TitleBackgroundCharacterSelectLightingMode = NormalizeTitleBackgroundCharacterSelectLightingMode(source.TitleBackgroundCharacterSelectLightingMode);
         TitleBackgroundPhase2MExperimentalApplyMode = NormalizeTitleBackgroundPhase2MExperimentalApplyMode(source.TitleBackgroundPhase2MExperimentalApplyMode);
         TitleBackgroundCreateSceneResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundCreateSceneResolverMode);
         TitleBackgroundLobbyUpdateResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundLobbyUpdateResolverMode);
@@ -550,6 +554,20 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedCharaSelectBackgroundMode = NormalizeTitleBackgroundCharacterSelectBackgroundMode(TitleBackgroundCharacterSelectBackgroundMode);
+        if (TitleBackgroundCharacterSelectBackgroundMode != normalizedCharaSelectBackgroundMode)
+        {
+            TitleBackgroundCharacterSelectBackgroundMode = normalizedCharaSelectBackgroundMode;
+            changed = true;
+        }
+
+        var normalizedCharaSelectLightingMode = NormalizeTitleBackgroundCharacterSelectLightingMode(TitleBackgroundCharacterSelectLightingMode);
+        if (TitleBackgroundCharacterSelectLightingMode != normalizedCharaSelectLightingMode)
+        {
+            TitleBackgroundCharacterSelectLightingMode = normalizedCharaSelectLightingMode;
+            changed = true;
+        }
+
         var normalizedPhase2MExperimentalApplyMode = NormalizeTitleBackgroundPhase2MExperimentalApplyMode(TitleBackgroundPhase2MExperimentalApplyMode);
         if (TitleBackgroundPhase2MExperimentalApplyMode != normalizedPhase2MExperimentalApplyMode)
         {
@@ -697,6 +715,20 @@ public sealed class Configuration : IPluginConfiguration
         return TitleBackgroundRuntimeModeHelper.IsRuntimeModeSelectable(mode)
             ? mode
             : TitleBackgroundRuntimeMode.CharaSelectOnly;
+    }
+
+    private static TitleBackgroundCharacterSelectBackgroundMode NormalizeTitleBackgroundCharacterSelectBackgroundMode(TitleBackgroundCharacterSelectBackgroundMode mode)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundCharacterSelectBackgroundMode), mode)
+            ? mode
+            : TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly;
+    }
+
+    private static TitleBackgroundCharacterSelectLightingMode NormalizeTitleBackgroundCharacterSelectLightingMode(TitleBackgroundCharacterSelectLightingMode mode)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundCharacterSelectLightingMode), mode)
+            ? mode
+            : TitleBackgroundCharacterSelectLightingMode.Default;
     }
 
     private static TitleBackgroundResolverMode NormalizeTitleBackgroundResolverMode(TitleBackgroundResolverMode mode)

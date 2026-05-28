@@ -626,6 +626,27 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
     }
 
+    private string SavePhase2NDeliveryDiagnosticDump(TitleBackgroundPhase2NDeliverySummary summary)
+    {
+        try
+        {
+            Directory.CreateDirectory(_configDirectory);
+            var path = Path.Combine(_configDirectory, "title-background-deliverydiag.txt");
+            var lines = new List<string>
+            {
+                "Phase2N.delivery=character-select-background-mvp",
+            };
+            AddPhase2NDeliveryLines(lines, summary);
+            File.WriteAllText(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
+            return path;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "TitleBackground delivery diagnostic save failed.");
+            return string.Empty;
+        }
+    }
+
     private void RecordTransitionEvent(string eventName, string reason = "", string error = "")
     {
         _transitionDiagnostics.Record(eventName, BuildTransitionSnapshot(eventName), reason, error);
@@ -779,6 +800,28 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var phase2MActorCandidateReason = GetLatestPhase2MActorCandidateReason();
         var phase2MActorSource = GetLatestPhase2MActorSource();
         var phase2MNextNativeSourceToInspect = GetLatestPhase2MNextNativeSourceToInspect();
+        var phase2NDeliverySummary = TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
+            _configuration.TitleBackgroundCharacterSelectBackgroundMode,
+            _configuration.TitleBackgroundCharacterSelectLightingMode,
+            _configuration.TitleBackgroundSelectedPresetId,
+            _configuration.TitleBackgroundTerritoryPath,
+            GetEffectiveOverrideTerritoryId(),
+            _configuration.TitleBackgroundLayoutLayerFilterKey,
+            IsSceneOverrideEnabled(),
+            _lastOverrideApplied && _lastOverrideLobbyType == GameLobbyType.CharaSelect,
+            phase2MSummary.Resolution,
+            phase2MSummary.TransformValidity,
+            phase2MSummary.ActorVisible,
+            phase2MSummary.ZeroPositionCandidateCount,
+            phase2MSummary.NonZeroPositionCandidateCount,
+            phase2MSummary.DrawObjectNonNullCount,
+            phase2MSummary.ModelLikeNonNullCount,
+            phase2MSummary.BestCandidate,
+            GetLatestPhase2MSourceDiscovery(),
+            transitionSafety);
+        var deliveryDetailPath = !includeDetailedPhase2Diagnostics
+            ? SavePhase2NDeliveryDiagnosticDump(phase2NDeliverySummary)
+            : string.Empty;
         var placementDetailPath = !includeDetailedPhase2Diagnostics && _phase2MPlacementFrames.Count > 0
             ? SavePhase2MPlacementDiagnosticDump()
             : string.Empty;
@@ -860,8 +903,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 $"phase2M.experimental.writeCount={_phase2MExperimentalWriteCount}",
                 $"phase2M.experimental.skippedCount={_phase2MExperimentalSkippedCount}",
                 $"verdict.phase2M.visualPlacementSafety={phase2MSummary.VisualPlacementSafety}",
+                ..BuildPhase2NDeliveryLineList(phase2NDeliverySummary),
                 $"transition.detailDump={FormatNone(string.IsNullOrWhiteSpace(transitionDetailPath) ? string.Empty : Path.GetFileName(transitionDetailPath))}",
                 $"placement.detailDump={FormatNone(string.IsNullOrWhiteSpace(placementDetailPath) ? string.Empty : Path.GetFileName(placementDetailPath))}",
+                $"delivery.detailDump={FormatNone(string.IsNullOrWhiteSpace(deliveryDetailPath) ? string.Empty : Path.GetFileName(deliveryDetailPath))}",
                 ..transitionSummaryLines,
             ];
         }
@@ -1067,6 +1112,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"phase2M.actor.source={phase2MActorSource}",
             $"phase2M.actor.nextNativeSourceToInspect={phase2MNextNativeSourceToInspect}",
             $"verdict.phase2M.visualPlacementSafety={phase2MSummary.VisualPlacementSafety}",
+            $"phase2N.detailDump={FormatNone(string.IsNullOrWhiteSpace(deliveryDetailPath) ? string.Empty : Path.GetFileName(deliveryDetailPath))}",
             $"selectedPresetId={FormatNone(_configuration.TitleBackgroundSelectedPresetId)}",
             $"cameraOverrideApplyPending={_cameraApplyPending}",
             $"cameraCapture.lastStatus={_lastCameraCaptureResult.Status}",
@@ -1142,6 +1188,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             "Phase2M.placement=diagnostics-only; actor/object-table, camera delta, and ground-height availability are retained for post-login dump",
         };
 
+        AddPhase2NDeliveryLines(lines, phase2NDeliverySummary);
         lines.AddRange(transitionSummaryLines);
         lines.AddRange(_transitionDiagnostics.BuildTraceLines());
 
@@ -2993,6 +3040,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             .FirstOrDefault() ?? "none";
     }
 
+    private IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> GetLatestPhase2MSourceDiscovery()
+    {
+        return _phase2MPlacementFrames.Values
+            .OrderByDescending(frame => frame.Frame)
+            .Select(frame => frame.SourceDiscovery)
+            .FirstOrDefault() ?? [];
+    }
+
     private static TitleBackgroundPhase2MActorCandidate? TryCreatePhase2MActorCandidate(
         int sourceIndex,
         string source,
@@ -3158,7 +3213,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private void EvaluatePhase2MExperimentalApply(TitleBackgroundPhase2MSummary summary)
     {
         var mode = _configuration.TitleBackgroundPhase2MExperimentalApplyMode;
-        var status = TitleBackgroundPhase2MPlacementDiagnostic.EvaluateExperimentalApply(
+        var status = TitleBackgroundPhase2NDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
             mode,
             summary,
             _activeCharaSelectSceneGeneration > 0
@@ -4501,7 +4556,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private bool IsSceneOverrideEnabled()
     {
         return _configuration.TitleBackgroundOverrideEnabled
-            && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly;
+            && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
+            && TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(_configuration.TitleBackgroundCharacterSelectBackgroundMode);
     }
 
     private bool IsOverrideMutationBranchArmed()
@@ -4510,6 +4566,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             && !IsHookProbeMode()
             && _configuration.TitleBackgroundOverrideEnabled
             && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
+            && TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(_configuration.TitleBackgroundCharacterSelectBackgroundMode)
             && !string.IsNullOrWhiteSpace(_validatedTerritoryPath);
     }
 
@@ -4647,8 +4704,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
 
     private bool ShouldValidateSceneOverrideConfiguration()
     {
-        return TitleBackgroundRuntimeModeHelper.ShouldValidateSceneOverrideConfiguration(
-            _configuration.TitleBackgroundRuntimeMode);
+        return TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(_configuration.TitleBackgroundCharacterSelectBackgroundMode)
+            && TitleBackgroundRuntimeModeHelper.ShouldValidateSceneOverrideConfiguration(
+                _configuration.TitleBackgroundRuntimeMode);
     }
 
     private bool IsHookProbeMode()
@@ -5334,6 +5392,79 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2M.preLoginCapture.lastFrame={(frames.Length > 0 ? frames[^1].ToString() : "none")}");
         lines.Add($"phase2M.preLoginCapture.frameCount={frames.Length}");
         lines.Add($"phase2M.preLoginCapture.reason={FormatNone(_phase2MPlacementCaptureReason)}");
+    }
+
+    private static List<string> BuildPhase2NDeliveryLineList(TitleBackgroundPhase2NDeliverySummary summary)
+    {
+        var lines = new List<string>();
+        AddPhase2NDeliveryLines(lines, summary);
+        return lines;
+    }
+
+    private static void AddPhase2NDeliveryLines(List<string> lines, TitleBackgroundPhase2NDeliverySummary summary)
+    {
+        lines.Add($"phase2N.featureGoal={summary.FeatureGoal}");
+        lines.Add($"phase2N.backgroundMode={summary.BackgroundMode}");
+        lines.Add($"phase2N.backgroundMode.reason={FormatNone(summary.BackgroundModeReason)}");
+        lines.Add($"phase2N.characterVisibility.expected={FormatNone(summary.CharacterVisibilityExpected)}");
+        lines.Add($"phase2N.characterVisibility.observed={FormatNone(summary.CharacterVisibilityObserved)}");
+        lines.Add($"phase2N.characterVisibility.blocker={FormatNone(summary.CharacterVisibilityBlocker)}");
+        lines.Add($"phase2N.nativePreviewSource.searched={summary.NativePreviewSourceSearched}");
+        for (var i = 0; i < summary.NativePreviewSources.Count; i++)
+        {
+            var source = summary.NativePreviewSources[i];
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].name={FormatNone(source.Name)}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].available={source.Available}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].readStatus={FormatNone(source.ReadStatus)}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].candidateCount={source.CandidateCount}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].nonZeroTransformCount={source.NonZeroTransformCount}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].drawObjectNonNullCount={source.DrawObjectNonNullCount}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].modelLikeNonNullCount={source.ModelLikeNonNullCount}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].error={FormatNone(source.Error)}");
+        }
+
+        lines.Add($"phase2N.nativePreviewSource.bestSource={FormatNone(summary.NativePreviewSourceBestSource)}");
+        lines.Add($"phase2N.nativePreviewSource.bestCandidate={FormatNone(summary.NativePreviewSourceBestCandidate)}");
+        lines.Add($"phase2N.nativePreviewSource.resolution={FormatNone(summary.NativePreviewSourceResolution)}");
+        lines.Add($"phase2N.foregroundPreserve.available={summary.ForegroundPreserve.Available}");
+        lines.Add($"phase2N.foregroundPreserve.reason={FormatNone(summary.ForegroundPreserve.Reason)}");
+        lines.Add($"phase2N.foregroundPreserve.originalScenePath={FormatNone(summary.ForegroundPreserve.OriginalScenePath)}");
+        lines.Add($"phase2N.foregroundPreserve.overrideScenePath={FormatNone(summary.ForegroundPreserve.OverrideScenePath)}");
+        lines.Add($"phase2N.foregroundPreserve.canKeepOriginalCharaStage={summary.ForegroundPreserve.CanKeepOriginalCharaStage}");
+        lines.Add($"phase2N.foregroundPreserve.canOverrideBackgroundOnly={summary.ForegroundPreserve.CanOverrideBackgroundOnly}");
+        lines.Add($"phase2N.foregroundPreserve.blocker={FormatNone(summary.ForegroundPreserve.Blocker)}");
+        lines.Add($"phase2N.foregroundPreserve.hookPoint={FormatNone(summary.ForegroundPreserve.HookPoint)}");
+        lines.Add($"phase2N.foregroundPreserve.applied={summary.ForegroundPreserve.Applied}");
+        lines.Add($"phase2N.foregroundPreserve.skippedReason={FormatNone(summary.ForegroundPreserve.SkippedReason)}");
+        lines.Add($"phase2N.objectTableActorRejected={summary.ObjectTableActorRejected}");
+        lines.Add($"phase2N.objectTableActorRejected.reason={FormatNone(summary.ObjectTableActorRejectedReason)}");
+        lines.Add($"phase2N.actorPlacement.ready={summary.ActorPlacementReady}");
+        lines.Add($"phase2N.actorPlacement.blocker={FormatNone(summary.ActorPlacementBlocker)}");
+        lines.Add($"phase2N.presetCompatibility.currentPresetId={FormatNone(summary.PresetCompatibility.CurrentPresetId)}");
+        lines.Add($"phase2N.presetCompatibility.expectedCompatibility={summary.PresetCompatibility.ExpectedCompatibility}");
+        lines.Add($"phase2N.presetCompatibility.expectedBrightness={summary.PresetCompatibility.ExpectedBrightness}");
+        lines.Add($"phase2N.presetCompatibility.warning={FormatNone(summary.PresetCompatibility.Warning)}");
+        lines.Add($"phase2N.presetCompatibility.recommendedMode={summary.PresetCompatibility.RecommendedMode}");
+        lines.Add($"phase2N.presetCompatibility.knownIssue={FormatNone(summary.PresetCompatibility.KnownIssue)}");
+        lines.Add($"phase2N.presetCompatibility.safeToUse={summary.PresetCompatibility.SafeToUse}");
+        lines.Add($"phase2N.presetCompatibility.characterExpectedVisible={summary.PresetCompatibility.CharacterExpectedVisible}");
+        lines.Add($"phase2N.lighting.mode={summary.Lighting.Mode}");
+        lines.Add($"phase2N.lighting.diagnostic.available={summary.Lighting.Available}");
+        lines.Add($"phase2N.lighting.diagnostic.currentWeather={FormatNone(summary.Lighting.CurrentWeather)}");
+        lines.Add($"phase2N.lighting.diagnostic.currentTime={FormatNone(summary.Lighting.CurrentTime)}");
+        lines.Add($"phase2N.lighting.diagnostic.envSet={FormatNone(summary.Lighting.EnvSet)}");
+        lines.Add($"phase2N.lighting.diagnostic.fog={FormatNone(summary.Lighting.Fog)}");
+        lines.Add($"phase2N.lighting.diagnostic.exposure={FormatNone(summary.Lighting.Exposure)}");
+        lines.Add($"phase2N.lighting.diagnostic.overlay={FormatNone(summary.Lighting.Overlay)}");
+        lines.Add($"phase2N.lighting.diagnostic.layerFilterKey={summary.Lighting.LayerFilterKey}");
+        lines.Add($"phase2N.lighting.diagnostic.error={FormatNone(summary.Lighting.Error)}");
+        lines.Add($"phase2N.lighting.lastStatus={FormatNone(summary.Lighting.LastStatus)}");
+        lines.Add($"phase2N.lighting.lastSkippedReason={FormatNone(summary.Lighting.LastSkippedReason)}");
+        lines.Add($"phase2N.lighting.expectedBrightness={summary.Lighting.ExpectedBrightness}");
+        lines.Add($"phase2N.lighting.recommendedAction={FormatNone(summary.Lighting.RecommendedAction)}");
+        lines.Add($"phase2N.deliveryVerdict={FormatNone(summary.DeliveryVerdict)}");
+        lines.Add($"phase2N.nextAction={FormatNone(summary.NextAction)}");
+        lines.Add($"phase2N.nextAction.reason={FormatNone(summary.NextActionReason)}");
     }
 
     private void AddPhase2MSummaryLines(List<string> lines, TitleBackgroundPhase2MSummary summary)

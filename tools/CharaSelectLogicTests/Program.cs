@@ -1342,6 +1342,137 @@ Test("title background phase2m actor placement one shot requires single valid tr
             isLoggedIn: false).StartsWith("skip:resolution-", StringComparison.Ordinal);
 });
 
+Test("title background phase2n object table all zero is stub only", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates(
+        [
+            Phase2MCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: false),
+            Phase2MCandidate(2, Vector3.Zero, named: false, drawObject: false, visible: false),
+        ]),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return summary.Resolution == "stub-only"
+        && delivery.ObjectTableActorRejected
+        && delivery.ObjectTableActorRejectedReason == "zero-transform-stub-only";
+});
+
+Test("title background phase2n stub only blocks actor placement one shot", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([Phase2MCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: false)]),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return !delivery.ActorPlacementReady
+        && delivery.ActorPlacementBlocker == "stub-only-object-table"
+        && TitleBackgroundPhase2NDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
+            TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot,
+            summary,
+            sceneGenerationMatches: true,
+            isCharaSelectActive: true,
+            isLoggedIn: false) == "skip:stub-only-object-table";
+});
+
+Test("title background phase2n valid native single is ready", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates(
+        [
+            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+        ], TitleBackgroundPhase2MActorMatchKind.Single),
+    ]);
+    var delivery = Phase2N(summary, TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource);
+
+    return delivery.NativePreviewSourceResolution == "found-single"
+        && delivery.ActorPlacementReady
+        && delivery.NextAction == "try-native-preview-source";
+});
+
+Test("title background phase2n multiple valid native candidates are ambiguous", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates(
+        [
+            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: true, visible: true),
+        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+    ]);
+    var delivery = Phase2N(summary);
+
+    return delivery.NativePreviewSourceResolution == "found-ambiguous"
+        && !delivery.ActorPlacementReady;
+});
+
+Test("title background phase2n no native source falls back to background only", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return delivery.NativePreviewSourceResolution == "not-found"
+        && delivery.DeliveryVerdict == "working-background-only"
+        && delivery.NextAction == "use-background-only";
+});
+
+Test("title background phase2n dark n4f4 preset warns and recommends compatible mode", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return delivery.PresetCompatibility.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.CharacterHidden
+        && delivery.PresetCompatibility.ExpectedBrightness == TitleBackgroundCharacterSelectExpectedBrightness.Dark
+        && delivery.Lighting.RecommendedAction == "try-compatible-preset"
+        && delivery.PresetCompatibility.RecommendedMode == TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly;
+});
+
+Test("title background phase2n default mode does not enable actor or camera direct writes", () =>
+{
+    return TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly)
+        && !TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(TitleBackgroundCharacterSelectBackgroundMode.Disabled)
+        && !TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(TitleBackgroundCharacterSelectBackgroundMode.DiagnosticsOnly);
+});
+
+Test("title background phase2n login transition unsafe stops delivery", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true, transitionSafety: "unsafe");
+
+    return delivery.DeliveryVerdict == "unsafe"
+        && delivery.NextAction == "unsafe-stop";
+});
+
+Test("title background phase2n scene generation mismatch remains no-op for actor placement", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates(
+        [
+            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+        ], TitleBackgroundPhase2MActorMatchKind.Single),
+    ]);
+
+    return TitleBackgroundPhase2NDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
+        TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot,
+        summary,
+        sceneGenerationMatches: false,
+        isCharaSelectActive: true,
+        isLoggedIn: false) == "skip:scene-generation-mismatch";
+});
+
 Test("title background phase2m next action selects visibility probe for valid invisible actor", () =>
 {
     var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
@@ -2167,6 +2298,33 @@ Test("title background prologue hint does not verify unknown bytes", () =>
     byte[] bytes = [0x8B, 0xD9, 0xE8, 0x11, 0x22, 0x33, 0x44];
     return TitleBackgroundAddressResolver.ClassifyFunctionPrologue(bytes) == "unknown";
 });
+
+TitleBackgroundPhase2NDeliverySummary Phase2N(
+    TitleBackgroundPhase2MSummary summary,
+    TitleBackgroundCharacterSelectBackgroundMode backgroundMode = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly,
+    bool lastOverrideApplied = false,
+    string transitionSafety = "safe")
+{
+    return TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
+        backgroundMode,
+        TitleBackgroundCharacterSelectLightingMode.Default,
+        string.Empty,
+        "ex3/01_nvt_n4/fld/n4f4/level/n4f4",
+        816,
+        51,
+        sceneOverrideEnabled: true,
+        lastOverrideApplied,
+        summary.Resolution,
+        summary.TransformValidity,
+        summary.ActorVisible,
+        summary.ZeroPositionCandidateCount,
+        summary.NonZeroPositionCandidateCount,
+        summary.DrawObjectNonNullCount,
+        summary.ModelLikeNonNullCount,
+        summary.BestCandidate,
+        [new TitleBackgroundPhase2MSourceDiscovery("ObjectTable", true, summary.ZeroPositionCandidateCount + summary.NonZeroPositionCandidateCount, summary.ZeroPositionCandidateCount + summary.NonZeroPositionCandidateCount, string.Empty)],
+        transitionSafety);
+}
 
 TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
     int frame,

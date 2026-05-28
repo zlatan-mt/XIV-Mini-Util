@@ -716,6 +716,9 @@ public sealed class SettingsTab : ITabComponent
         ImGui.TextDisabled("手入力と現在値保存は debug 補助です。通常は built-in preset を選んで適用します。");
         ImGui.TextDisabled("CharacterPosition は将来のキャラクター配置用で、Camera Focus とは別の値です。");
 
+        DrawTitleBackgroundCharacterSelectDeliveryModes();
+        ImGui.Spacing();
+
         var territoryPath = _configuration.TitleBackgroundTerritoryPath;
         if (ImGui.InputTextWithHint("TerritoryPath##TitleBackgroundTerritoryPath", "ffxiv/.../level/...", ref territoryPath, 256))
         {
@@ -811,6 +814,51 @@ public sealed class SettingsTab : ITabComponent
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
         }
+    }
+
+    private void DrawTitleBackgroundCharacterSelectDeliveryModes()
+    {
+        var backgroundMode = _configuration.TitleBackgroundCharacterSelectBackgroundMode;
+        var lightingMode = _configuration.TitleBackgroundCharacterSelectLightingMode;
+        var changed = false;
+
+        if (ImGui.BeginCombo("背景配送モード##TitleBackgroundCharacterSelectBackgroundMode", GetTitleBackgroundCharacterSelectBackgroundModeLabel(backgroundMode)))
+        {
+            foreach (TitleBackgroundCharacterSelectBackgroundMode candidate in Enum.GetValues(typeof(TitleBackgroundCharacterSelectBackgroundMode)))
+            {
+                if (ImGui.Selectable(GetTitleBackgroundCharacterSelectBackgroundModeLabel(candidate), backgroundMode == candidate))
+                {
+                    backgroundMode = candidate;
+                    changed = true;
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        if (ImGui.BeginCombo("明るさ診断モード##TitleBackgroundCharacterSelectLightingMode", GetTitleBackgroundCharacterSelectLightingModeLabel(lightingMode)))
+        {
+            foreach (TitleBackgroundCharacterSelectLightingMode candidate in Enum.GetValues(typeof(TitleBackgroundCharacterSelectLightingMode)))
+            {
+                if (ImGui.Selectable(GetTitleBackgroundCharacterSelectLightingModeLabel(candidate), lightingMode == candidate))
+                {
+                    lightingMode = candidate;
+                    changed = true;
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        _configuration.TitleBackgroundCharacterSelectBackgroundMode = backgroundMode;
+        _configuration.TitleBackgroundCharacterSelectLightingMode = lightingMode;
+        _configuration.Save();
+        _titleScreenBackgroundService.ApplyFromConfiguration();
     }
 
     private void DrawTitleBackgroundCaptureResult()
@@ -1042,6 +1090,34 @@ public sealed class SettingsTab : ITabComponent
         };
     }
 
+    private static string GetTitleBackgroundCharacterSelectBackgroundModeLabel(TitleBackgroundCharacterSelectBackgroundMode mode)
+    {
+        return mode switch
+        {
+            TitleBackgroundCharacterSelectBackgroundMode.Disabled => "無効",
+            TitleBackgroundCharacterSelectBackgroundMode.DiagnosticsOnly => "診断のみ",
+            TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly => "scene override のみ",
+            TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground => "foreground保持を試行",
+            TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource => "native preview source",
+            TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly => "互換presetのみ",
+            _ => mode.ToString(),
+        };
+    }
+
+    private static string GetTitleBackgroundCharacterSelectLightingModeLabel(TitleBackgroundCharacterSelectLightingMode mode)
+    {
+        return mode switch
+        {
+            TitleBackgroundCharacterSelectLightingMode.Default => "既定",
+            TitleBackgroundCharacterSelectLightingMode.DiagnosticsOnly => "診断のみ",
+            TitleBackgroundCharacterSelectLightingMode.PreferBrightPreset => "明るいpreset推奨",
+            TitleBackgroundCharacterSelectLightingMode.PreferBrightLayer => "明るいlayer推奨",
+            TitleBackgroundCharacterSelectLightingMode.EnvironmentOverrideExperimental => "環境override（実験）",
+            TitleBackgroundCharacterSelectLightingMode.DisableDarkeningExperimental => "暗転抑制（実験）",
+            _ => mode.ToString(),
+        };
+    }
+
     private static string GetTitleBackgroundResolverModeLabel(TitleBackgroundResolverMode mode)
     {
         return mode switch
@@ -1082,6 +1158,8 @@ public sealed class SettingsTab : ITabComponent
         _configuration.TitleBackgroundSelectedPresetId = string.Empty;
         _titleBackgroundPendingPresetId = string.Empty;
         _configuration.TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.ResolveOnly;
+        _configuration.TitleBackgroundCharacterSelectBackgroundMode = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly;
+        _configuration.TitleBackgroundCharacterSelectLightingMode = TitleBackgroundCharacterSelectLightingMode.Default;
         _configuration.TitleBackgroundCreateSceneResolverMode = TitleBackgroundResolverMode.AutoDiagnosticOnly;
         _configuration.TitleBackgroundLobbyUpdateResolverMode = TitleBackgroundResolverMode.AutoDiagnosticOnly;
         _configuration.TitleBackgroundTerritoryPath = string.Empty;
