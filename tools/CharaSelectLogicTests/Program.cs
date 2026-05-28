@@ -1532,6 +1532,111 @@ Test("title background phase2n background only safe compatibility delivers backg
         && delivery.DeliveryVerdict == "working-background-only";
 });
 
+Test("title background phase2n post login current object table is ignored", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates(
+        [
+            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true, currentObjectTableValidForCharaSelect: false);
+
+    return delivery.NativePreviewSourceCurrentObjectTableIgnored
+        && delivery.NativePreviewSourceCurrentObjectTableIgnoredReason == "post-login-world-object-table-not-valid-for-chara-select"
+        && delivery.NativePreviewSourceResolution == "not-verifiable-post-login"
+        && delivery.CharacterVisibilityBlocker == "post-login-object-table-not-valid"
+        && delivery.ObjectTableActorRejected
+        && delivery.ObjectTableActorRejectedReason == "post-login-world-object-table-not-valid-for-chara-select";
+});
+
+Test("title background phase2n post login ambiguous object table never readies actor placement", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates(
+        [
+            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true, currentObjectTableValidForCharaSelect: false);
+
+    return !delivery.ActorPlacementReady
+        && delivery.ActorPlacementBlocker == "post-login-world-object-table-not-valid-for-chara-select"
+        && delivery.CharacterVisibilityObserved != "observed";
+});
+
+Test("title background phase2n draw object absent unstable ambiguous is not observed", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates(
+        [
+            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return summary.DrawObjectNonNullCount == 0
+        && summary.ModelLikeNonNullCount == 0
+        && !summary.BestCandidateStableAcrossFrames
+        && delivery.CharacterVisibilityObserved == "not-verifiable"
+        && !delivery.ActorPlacementReady;
+});
+
+Test("title background phase2n source local counts do not leak object table counts", () =>
+{
+    var sourceDiscovery = new[]
+    {
+        new TitleBackgroundPhase2MSourceDiscovery("ObjectTable", true, 16, 16, string.Empty, 16, 0, 0),
+        new TitleBackgroundPhase2MSourceDiscovery("PlayerObjects", true, 0, 0, string.Empty, 0, 0, 0),
+        new TitleBackgroundPhase2MSourceDiscovery("CharacterManagerObjects", true, 0, 0, string.Empty, 0, 0, 0),
+    };
+    var delivery = Phase2NFromRaw(
+        phase2MResolution: "ambiguous",
+        phase2MTransformValidity: "valid-world-transform",
+        phase2MActorVisible: "ambiguous",
+        zeroPositionCandidateCount: 0,
+        nonZeroPositionCandidateCount: 16,
+        drawObjectNonNullCount: 0,
+        modelLikeNonNullCount: 0,
+        sourceDiscovery,
+        lastOverrideApplied: true);
+    var playerObjects = delivery.NativePreviewSources.First(source => source.Name == "PlayerObjects");
+    var characterManagerObjects = delivery.NativePreviewSources.First(source => source.Name == "CharacterManagerObjects");
+
+    return playerObjects.CandidateCount == 0
+        && playerObjects.NonZeroTransformCount == 0
+        && characterManagerObjects.CandidateCount == 0
+        && characterManagerObjects.NonZeroTransformCount == 0;
+});
+
+Test("title background phase2n object table ambiguous candidate never enables one shot readiness", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates(
+        [
+            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: true, visible: true),
+        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return summary.Resolution == "ambiguous"
+        && !delivery.ActorPlacementReady
+        && TitleBackgroundPhase2NDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
+            TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot,
+            summary,
+            sceneGenerationMatches: true,
+            isCharaSelectActive: true,
+            isLoggedIn: false).StartsWith("skip:resolution-", StringComparison.Ordinal);
+});
+
 Test("title background phase2n default mode does not enable actor or camera direct writes", () =>
 {
     return TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly)
@@ -2401,7 +2506,8 @@ TitleBackgroundPhase2NDeliverySummary Phase2N(
     TitleBackgroundCharacterSelectLightingMode lightingMode = TitleBackgroundCharacterSelectLightingMode.Default,
     string selectedPresetId = "",
     bool lastOverrideApplied = false,
-    string transitionSafety = "safe")
+    string transitionSafety = "safe",
+    bool currentObjectTableValidForCharaSelect = true)
 {
     return TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
         backgroundMode,
@@ -2420,8 +2526,55 @@ TitleBackgroundPhase2NDeliverySummary Phase2N(
         summary.DrawObjectNonNullCount,
         summary.ModelLikeNonNullCount,
         summary.BestCandidate,
-        [new TitleBackgroundPhase2MSourceDiscovery("ObjectTable", true, summary.ZeroPositionCandidateCount + summary.NonZeroPositionCandidateCount, summary.ZeroPositionCandidateCount + summary.NonZeroPositionCandidateCount, string.Empty)],
-        transitionSafety);
+        [
+            new TitleBackgroundPhase2MSourceDiscovery(
+                "ObjectTable",
+                true,
+                summary.ZeroPositionCandidateCount + summary.NonZeroPositionCandidateCount,
+                summary.ZeroPositionCandidateCount + summary.NonZeroPositionCandidateCount,
+                string.Empty,
+                summary.NonZeroPositionCandidateCount,
+                summary.DrawObjectNonNullCount,
+                summary.ModelLikeNonNullCount),
+        ],
+        transitionSafety,
+        currentObjectTableValidForCharaSelect,
+        currentObjectTableValidForCharaSelect ? "none" : "post-login-world-object-table-not-valid-for-chara-select");
+}
+
+TitleBackgroundPhase2NDeliverySummary Phase2NFromRaw(
+    string phase2MResolution,
+    string phase2MTransformValidity,
+    string phase2MActorVisible,
+    int zeroPositionCandidateCount,
+    int nonZeroPositionCandidateCount,
+    int drawObjectNonNullCount,
+    int modelLikeNonNullCount,
+    IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> sourceDiscovery,
+    bool lastOverrideApplied = false,
+    bool currentObjectTableValidForCharaSelect = true)
+{
+    return TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
+        TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly,
+        TitleBackgroundCharacterSelectLightingMode.Default,
+        string.Empty,
+        "ex3/01_nvt_n4/fld/n4f4/level/n4f4",
+        816,
+        51,
+        sceneOverrideEnabled: true,
+        lastOverrideApplied,
+        phase2MResolution,
+        phase2MTransformValidity,
+        phase2MActorVisible,
+        zeroPositionCandidateCount,
+        nonZeroPositionCandidateCount,
+        drawObjectNonNullCount,
+        modelLikeNonNullCount,
+        "ObjectTable:1",
+        sourceDiscovery,
+        "safe",
+        currentObjectTableValidForCharaSelect,
+        currentObjectTableValidForCharaSelect ? "none" : "post-login-world-object-table-not-valid-for-chara-select");
 }
 
 TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
@@ -2500,8 +2653,16 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
         ObjectCandidates: objectCandidates,
         SourceDiscovery:
         [
-            new TitleBackgroundPhase2MSourceDiscovery("ObjectTable", true, candidateCount, objectCandidates.Length, string.Empty),
-            new TitleBackgroundPhase2MSourceDiscovery("CharacterManagerObjects", true, candidateCount, objectCandidates.Length, string.Empty),
+            new TitleBackgroundPhase2MSourceDiscovery(
+                "ObjectTable",
+                true,
+                candidateCount,
+                objectCandidates.Length,
+                string.Empty,
+                objectCandidates.Count(candidate => candidate.Position != Vector3.Zero),
+                objectCandidates.Count(candidate => candidate.DrawObjectNonNull),
+                objectCandidates.Count(candidate => candidate.ModelLikeNonNull)),
+            new TitleBackgroundPhase2MSourceDiscovery("CharacterManagerObjects", true, candidateCount, 0, string.Empty),
         ],
         CandidateCount: candidateCount,
         ActorStatus: matchKind switch
@@ -2627,7 +2788,15 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrameFromCandidates(
         ObjectCandidates: candidates,
         SourceDiscovery:
         [
-            new TitleBackgroundPhase2MSourceDiscovery("ObjectTable", true, candidates.Count, candidates.Count, string.Empty),
+            new TitleBackgroundPhase2MSourceDiscovery(
+                "ObjectTable",
+                true,
+                candidates.Count,
+                candidates.Count,
+                string.Empty,
+                candidates.Count(candidate => candidate.Position != Vector3.Zero),
+                candidates.Count(candidate => candidate.DrawObjectNonNull),
+                candidates.Count(candidate => candidate.ModelLikeNonNull)),
             new TitleBackgroundPhase2MSourceDiscovery("CharacterManagerObjects", false, 0, 0, "not-exposed"),
         ],
         CandidateCount: candidates.Count,

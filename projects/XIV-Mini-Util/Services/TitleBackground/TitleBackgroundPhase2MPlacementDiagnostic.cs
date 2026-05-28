@@ -60,7 +60,10 @@ internal readonly record struct TitleBackgroundPhase2MSourceDiscovery(
     bool Available,
     int Count,
     int CandidateCount,
-    string Error);
+    string Error,
+    int NonZeroTransformCount = 0,
+    int DrawObjectNonNullCount = 0,
+    int ModelLikeNonNullCount = 0);
 
 internal readonly record struct TitleBackgroundPhase2MObjectTableStats(
     int TotalScanned,

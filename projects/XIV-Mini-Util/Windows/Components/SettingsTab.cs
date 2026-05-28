@@ -850,6 +850,8 @@ public sealed class SettingsTab : ITabComponent
             ImGui.EndCombo();
         }
 
+        ImGui.TextWrapped("Character Select は background-only MVP です。custom override は selectedPresetId=none として扱い、キャラクター本体は表示されない想定です。");
+
         if (!changed)
         {
             return;

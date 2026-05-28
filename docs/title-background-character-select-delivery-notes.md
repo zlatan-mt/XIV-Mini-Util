@@ -5,7 +5,7 @@
 - `TitleScreenBackgroundService`: `CreateSceneDetour` は CharaSelect の full scene path / territory / layer を差し替える。背景は出せるが、foreground だけを残す境界は見つからない。
 - `TitleBackgroundCharaSelectCameraLogic`: Phase 2G の generated curve gate は維持。direct `SceneCamera` write や per-frame correction は使わない。
 - `LoadLobbySceneDetour` / `LobbyUpdateDetour` / `UpdateLobbyUIStage`: scene generation と ready signal の観測点。foreground-only background replace の安全な hook point にはならない。
-- `ObjectTable` / `PlayerObjects` / `CharacterManagerObjects`: Phase 2M の結果では zero-transform stub-only。actor source として採用しない。
+- `ObjectTable` / `PlayerObjects` / `CharacterManagerObjects`: 安定した CharaSelect preview model source は未確認。zero-transform stub や post-login world object は actor source として採用しない。
 - native / preview model source: `CharaSelectCharacterManager` / `UIStage` / DrawObject owner 方向は、公開 field または安全な signature source が未解決。
 
 ## 採用ルート
@@ -14,11 +14,12 @@
 - selected character が隠れる compatibility entry は background-only として warning する。
 - current custom n4f4 override target は `selectedPresetId=none` の custom override configuration であり、実 preset ではない。
 - `custom:n4f4` は Phase 2N の synthetic compatibility entry。background-only usable として `safeToUse=True`、`characterExpectedVisible=False`、`expectedCompatibility=BackgroundOnly`、`expectedBrightness=Dark` にする。
+- post-login `/xmutbgdiag` では現在ワールドの ObjectTable を Phase 2N native preview source 判定に使わず、pre-login capture / placement timeline の snapshot だけを信頼する。
 - `/xmutbgdiag` に `phase2N.deliveryVerdict` と `phase2N.nextAction` を追加し、1回で次の実機作業が分かるようにした。
 
 ## 捨てたルート
 
-- ObjectTable zero-transform candidate への actor placement: stub-only のため reject。
+- ObjectTable candidate への actor placement: 安定した CharaSelect preview model source として確認できないため reject。
 - foreground preserve: full scene replacement から original CharaSelect stage だけを残す safe hook point が未確認。
 - native preview model source write: source が未解決のため default-off でも write は未実装。
 - lighting/time/weather write: safe public one-shot API が未確認のため、今回は warning と recommendation のみ。
@@ -26,6 +27,7 @@
 ## 既知制限
 
 - Background-only mode では選択キャラクター本体は見えない可能性が高い。
+- post-login world ObjectTable は CharaSelect preview source として扱わない。
 - 暗い背景は custom override target / layer 互換性の問題として扱い、明るい custom override target または `PreferBrightLayer` の次アクションへ寄せる。
 - `EnvironmentOverrideExperimental` / `DisableDarkeningExperimental` は config enum のみで、safe API が見つかるまで write しない。
 
@@ -41,10 +43,14 @@
 
 ```text
 phase2N.characterVisibility.observed=not-observed
+phase2N.nativePreviewSource.currentObjectTableIgnored=True
+phase2N.nativePreviewSource.currentObjectTableIgnoredReason=post-login-world-object-table-not-valid-for-chara-select
 phase2N.overrideCompatibility.source=custom-override
 phase2N.overrideCompatibility.selectedPresetId=none
 phase2N.overrideCompatibility.currentOverrideId=custom:n4f4
 phase2N.overrideCompatibility.expectedCompatibility=BackgroundOnly
 phase2N.overrideCompatibility.expectedBrightness=Dark
+phase2N.overrideCompatibility.characterExpectedVisible=False
+phase2N.compatibility.characterExpectedVisible=False
 phase2N.lighting.recommendedAction=add-bright-override-candidate
 ```

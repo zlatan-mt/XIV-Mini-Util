@@ -800,6 +800,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var phase2MActorCandidateReason = GetLatestPhase2MActorCandidateReason();
         var phase2MActorSource = GetLatestPhase2MActorSource();
         var phase2MNextNativeSourceToInspect = GetLatestPhase2MNextNativeSourceToInspect();
+        var phase2NCurrentLobbyMapAvailable = TryReadCurrentLobbyMap(out var phase2NCurrentLobbyMap);
+        var phase2NCurrentObjectTableValid = !_clientState.IsLoggedIn
+            && phase2NCurrentLobbyMapAvailable
+            && phase2NCurrentLobbyMap != GameLobbyType.None
+            && IsCharaSelectOrTitleBackground(phase2NCurrentLobbyMap);
+        var phase2NCurrentObjectTableInvalidReason = phase2NCurrentObjectTableValid
+            ? "none"
+            : "post-login-world-object-table-not-valid-for-chara-select";
         var phase2NDeliverySummary = TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
             _configuration.TitleBackgroundCharacterSelectBackgroundMode,
             _configuration.TitleBackgroundCharacterSelectLightingMode,
@@ -818,7 +826,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             phase2MSummary.ModelLikeNonNullCount,
             phase2MSummary.BestCandidate,
             GetLatestPhase2MSourceDiscovery(),
-            transitionSafety);
+            transitionSafety,
+            phase2NCurrentObjectTableValid,
+            phase2NCurrentObjectTableInvalidReason);
         var deliveryDetailPath = !includeDetailedPhase2Diagnostics
             ? SavePhase2NDeliveryDiagnosticDump(phase2NDeliverySummary)
             : string.Empty;
@@ -2722,7 +2732,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             {
                 AddPhase2MScannedObject(scanned, seenKeys, index, "ObjectTable", _objectTable[index], configuredCharacterPosition, activeLookAt, activeCameraPosition);
             }
-            sources.Add(new TitleBackgroundPhase2MSourceDiscovery("ObjectTable", true, length, scanned.Count - beforeCount, string.Empty));
+            sources.Add(BuildPhase2MSourceDiscovery("ObjectTable", true, length, scanned, beforeCount, string.Empty));
 
             var sourceIndex = 0;
             beforeCount = scanned.Count;
@@ -2731,7 +2741,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 sourceIndex++;
                 AddPhase2MScannedObject(scanned, seenKeys, sourceIndex, "PlayerObjects", gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
             }
-            sources.Add(new TitleBackgroundPhase2MSourceDiscovery("PlayerObjects", true, sourceIndex, scanned.Count - beforeCount, string.Empty));
+            sources.Add(BuildPhase2MSourceDiscovery("PlayerObjects", true, sourceIndex, scanned, beforeCount, string.Empty));
 
             sourceIndex = 0;
             beforeCount = scanned.Count;
@@ -2740,7 +2750,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 sourceIndex++;
                 AddPhase2MScannedObject(scanned, seenKeys, sourceIndex, "CharacterManagerObjects", gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
             }
-            sources.Add(new TitleBackgroundPhase2MSourceDiscovery("CharacterManagerObjects", true, sourceIndex, scanned.Count - beforeCount, string.Empty));
+            sources.Add(BuildPhase2MSourceDiscovery("CharacterManagerObjects", true, sourceIndex, scanned, beforeCount, string.Empty));
             sources.Add(new TitleBackgroundPhase2MSourceDiscovery("ClientObjectManager", false, 0, 0, "not-exposed-through-managed-api"));
             sources.Add(new TitleBackgroundPhase2MSourceDiscovery("CharaSelectCharacterManager", false, 0, 0, "native-source-not-resolved"));
             sources.Add(new TitleBackgroundPhase2MSourceDiscovery("UIStage CharaSelect model source", false, 0, 0, "native-source-not-resolved"));
@@ -2878,6 +2888,29 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
     }
 
+    private static TitleBackgroundPhase2MSourceDiscovery BuildPhase2MSourceDiscovery(
+        string name,
+        bool available,
+        int count,
+        IReadOnlyList<TitleBackgroundPhase2MActorCandidate> scanned,
+        int startIndex,
+        string error)
+    {
+        var localCandidates = scanned
+            .Skip(startIndex)
+            .Where(candidate => candidate.Source == name)
+            .ToArray();
+        return new TitleBackgroundPhase2MSourceDiscovery(
+            name,
+            available,
+            count,
+            localCandidates.Length,
+            error,
+            localCandidates.Count(candidate => !IsZeroPhase2MPosition(candidate.Position)),
+            localCandidates.Count(candidate => candidate.DrawObjectNonNull),
+            localCandidates.Count(candidate => candidate.ModelLikeNonNull));
+    }
+
     private TitleBackgroundPhase2MActorCandidate[] FilterPhase2MStableCandidates(TitleBackgroundPhase2MActorCandidate[] candidates)
     {
         return candidates.Where(IsStablePhase2MCandidate).ToArray();
@@ -2912,6 +2945,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
 
         return $"{candidate.Source}:{candidate.ObjectIndex}:{candidate.ObjectKind}:{candidate.Name}";
+    }
+
+    private static bool IsZeroPhase2MPosition(Vector3 position)
+    {
+        return Math.Abs(position.X) <= 0.001f
+            && Math.Abs(position.Y) <= 0.001f
+            && Math.Abs(position.Z) <= 0.001f;
     }
 
     private static TitleBackgroundPhase2MObjectTableStats BuildPhase2MObjectTableStats(IReadOnlyCollection<TitleBackgroundPhase2MActorCandidate> candidates)
@@ -5426,6 +5466,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2N.nativePreviewSource.bestSource={FormatNone(summary.NativePreviewSourceBestSource)}");
         lines.Add($"phase2N.nativePreviewSource.bestCandidate={FormatNone(summary.NativePreviewSourceBestCandidate)}");
         lines.Add($"phase2N.nativePreviewSource.resolution={FormatNone(summary.NativePreviewSourceResolution)}");
+        lines.Add($"phase2N.nativePreviewSource.currentObjectTableIgnored={summary.NativePreviewSourceCurrentObjectTableIgnored}");
+        lines.Add($"phase2N.nativePreviewSource.currentObjectTableIgnoredReason={FormatNone(summary.NativePreviewSourceCurrentObjectTableIgnoredReason)}");
         lines.Add($"phase2N.foregroundPreserve.available={summary.ForegroundPreserve.Available}");
         lines.Add($"phase2N.foregroundPreserve.reason={FormatNone(summary.ForegroundPreserve.Reason)}");
         lines.Add($"phase2N.foregroundPreserve.originalScenePath={FormatNone(summary.ForegroundPreserve.OriginalScenePath)}");
@@ -5456,11 +5498,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2N.overrideCompatibility.layerFilterKey={summary.OverrideCompatibility.LayerFilterKey}");
         lines.Add($"phase2N.overrideCompatibility.expectedCompatibility={summary.OverrideCompatibility.ExpectedCompatibility}");
         lines.Add($"phase2N.overrideCompatibility.expectedBrightness={summary.OverrideCompatibility.ExpectedBrightness}");
+        lines.Add($"phase2N.overrideCompatibility.characterExpectedVisible={summary.OverrideCompatibility.CharacterExpectedVisible}");
         lines.Add($"phase2N.overrideCompatibility.warning={FormatNone(summary.OverrideCompatibility.Warning)}");
         lines.Add($"phase2N.compatibility.source={FormatNone(summary.OverrideCompatibility.Source)}");
         lines.Add($"phase2N.compatibility.id={FormatNone(summary.OverrideCompatibility.Id)}");
         lines.Add($"phase2N.compatibility.displayName={FormatNone(summary.OverrideCompatibility.DisplayName)}");
         lines.Add($"phase2N.compatibility.characterVisibility={FormatNone(summary.OverrideCompatibility.CharacterVisibility)}");
+        lines.Add($"phase2N.compatibility.characterExpectedVisible={summary.OverrideCompatibility.CharacterExpectedVisible}");
         lines.Add($"phase2N.compatibility.backgroundUsable={summary.OverrideCompatibility.BackgroundUsable}");
         lines.Add($"phase2N.compatibility.brightness={summary.OverrideCompatibility.ExpectedBrightness}");
         lines.Add($"phase2N.compatibility.recommendedAction={FormatNone(summary.OverrideCompatibility.RecommendedAction)}");

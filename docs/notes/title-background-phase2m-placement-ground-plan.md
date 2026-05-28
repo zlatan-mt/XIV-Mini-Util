@@ -101,14 +101,14 @@ If multiple candidates match, diagnostics should report `ambiguous` and Phase 2M
 
 Use Option D: hybrid curated anchors.
 
-1. For known curated maps such as Il Mheg/n4f4, use preset-based anchors:
+1. For known curated maps such as the current custom n4f4 override target, use override-based anchors:
    - `characterAnchorPosition`
    - `characterAnchorRotation`
    - `cameraFocusAnchor`
    - optional `cameraYaw`, `cameraPitch`, `cameraDistance`
    - optional `groundYOffset`
 2. Keep original behavior only for maps proven compatible with native CharaSelect placement.
-3. If no reliable actor placement control is found, explicitly mark that preset as background-only or unsupported for character framing.
+3. If no reliable actor placement control is found, explicitly mark that override target as background-only or unsupported for character framing.
 4. Do not rely on original CharaSelect actor coordinates for all target maps.
 
 This is more predictable than trying to make arbitrary terrain-derived placement work first. A generic terrain sampler can be added later if a reliable API or native helper is found.

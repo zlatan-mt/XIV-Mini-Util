@@ -326,6 +326,8 @@ phase2N.nativePreviewSource.source[*].error
 phase2N.nativePreviewSource.bestSource
 phase2N.nativePreviewSource.bestCandidate
 phase2N.nativePreviewSource.resolution
+phase2N.nativePreviewSource.currentObjectTableIgnored
+phase2N.nativePreviewSource.currentObjectTableIgnoredReason
 ```
 
 resolution:
@@ -422,7 +424,7 @@ current custom n4f4 override target は暫定で:
 ```text
 expectedCompatibility=BackgroundOnly
 expectedBrightness=Dark
-knownIssue=ObjectTable candidates are stub-only; selected character model not visible with full scene override
+knownIssue=ObjectTable candidates do not expose a stable CharaSelect preview model source; selected character model is not visible with full scene override
 recommendedMode=CompatiblePresetOnly or PreserveCharaSelectForeground if available
 safeToUse=True
 characterExpectedVisible=False
@@ -447,17 +449,32 @@ phase2N.overrideCompatibility.overrideTerritoryId
 phase2N.overrideCompatibility.layerFilterKey
 phase2N.overrideCompatibility.expectedCompatibility
 phase2N.overrideCompatibility.expectedBrightness
+phase2N.overrideCompatibility.characterExpectedVisible
 phase2N.overrideCompatibility.warning
 phase2N.compatibility.source
 phase2N.compatibility.id
 phase2N.compatibility.displayName
 phase2N.compatibility.characterVisibility
+phase2N.compatibility.characterExpectedVisible
 phase2N.compatibility.backgroundUsable
 phase2N.compatibility.brightness
 phase2N.compatibility.recommendedAction
 ```
 
 `presetCompatibility.currentPresetId=custom:n4f4` が出る場合でも、これは実 preset 選択ではない。`overrideCompatibility.source=custom-override` と `overrideCompatibility.selectedPresetId=none` を併記して誤読を避ける。
+
+post-login `/xmutbgdiag` では、現在ワールドの ObjectTable を CharaSelect preview source として使わない。`transition.currentContext.isLoggedIn=True`、`transition.currentContext.isCharaSelectOrTitleBackground=False`、または `transition.currentContext.currentLobbyMap=None` の場合は:
+
+```text
+phase2N.nativePreviewSource.currentObjectTableIgnored=True
+phase2N.nativePreviewSource.currentObjectTableIgnoredReason=post-login-world-object-table-not-valid-for-chara-select
+phase2N.nativePreviewSource.resolution=not-verifiable-post-login
+phase2N.characterVisibility.blocker=post-login-object-table-not-valid
+phase2N.actorPlacement.ready=False
+phase2N.actorPlacement.blocker=post-login-world-object-table-not-valid-for-chara-select
+```
+
+source summary は source-local count とする。`candidateCount=0` の source は `nonZeroTransformCount=0`、`drawObjectNonNullCount=0`、`modelLikeNonNullCount=0` とし、ObjectTable の集計を PlayerObjects / CharacterManagerObjects へ流用しない。
 
 ### 6.6 Lighting / brightness
 
@@ -515,6 +532,8 @@ phase2N.characterVisibility.blocker
 phase2N.nativePreviewSource.resolution
 phase2N.nativePreviewSource.bestSource
 phase2N.nativePreviewSource.bestCandidate
+phase2N.nativePreviewSource.currentObjectTableIgnored
+phase2N.nativePreviewSource.currentObjectTableIgnoredReason
 phase2N.foregroundPreserve.available
 phase2N.foregroundPreserve.reason
 phase2N.presetCompatibility.expectedCompatibility
@@ -524,6 +543,7 @@ phase2N.overrideCompatibility.selectedPresetId
 phase2N.overrideCompatibility.currentOverrideId
 phase2N.overrideCompatibility.expectedCompatibility
 phase2N.overrideCompatibility.expectedBrightness
+phase2N.overrideCompatibility.characterExpectedVisible
 phase2N.lighting.mode
 phase2N.lighting.recommendedAction
 phase2N.deliveryVerdict

@@ -124,6 +124,8 @@ internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
     string NativePreviewSourceBestSource,
     string NativePreviewSourceBestCandidate,
     string NativePreviewSourceResolution,
+    bool NativePreviewSourceCurrentObjectTableIgnored,
+    string NativePreviewSourceCurrentObjectTableIgnoredReason,
     TitleBackgroundPhase2NForegroundPreserveResult ForegroundPreserve,
     TitleBackgroundPhase2NPresetCompatibility PresetCompatibility,
     TitleBackgroundPhase2NOverrideCompatibility OverrideCompatibility,
@@ -174,8 +176,16 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         int modelLikeNonNullCount,
         string bestCandidate,
         IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> sourceDiscovery,
-        string transitionSafety)
+        string transitionSafety,
+        bool currentObjectTableValidForCharaSelect = true,
+        string currentObjectTableInvalidReason = "none")
     {
+        var currentObjectTableIgnored = !currentObjectTableValidForCharaSelect;
+        var currentObjectTableIgnoredReason = currentObjectTableIgnored
+            ? string.IsNullOrWhiteSpace(currentObjectTableInvalidReason)
+                ? "post-login-world-object-table-not-valid-for-chara-select"
+                : currentObjectTableInvalidReason
+            : "none";
         var presetCompatibility = BuildPresetCompatibility(
             selectedPresetId,
             overrideScenePath,
@@ -195,8 +205,11 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             nonZeroPositionCandidateCount,
             drawObjectNonNullCount,
             modelLikeNonNullCount);
-        var nativeResolution = BuildNativeResolution(phase2MResolution, phase2MTransformValidity, nativeSources);
-        var objectTableRejected = phase2MResolution == "stub-only"
+        var nativeResolution = currentObjectTableIgnored
+            ? "not-verifiable-post-login"
+            : BuildNativeResolution(phase2MResolution, phase2MTransformValidity, nativeSources);
+        var objectTableRejected = currentObjectTableIgnored
+            || phase2MResolution == "stub-only"
             || (zeroPositionCandidateCount > 0
                 && nonZeroPositionCandidateCount == 0
                 && drawObjectNonNullCount == 0
@@ -220,7 +233,9 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             nonZeroPositionCandidateCount,
             drawObjectNonNullCount,
             modelLikeNonNullCount);
-        var characterBlocker = objectTableRejected
+        var characterBlocker = currentObjectTableIgnored
+            ? "post-login-object-table-not-valid"
+            : objectTableRejected
             ? "stub-only-object-table"
             : nativeResolution == "not-found"
                 ? "native-preview-source-not-found"
@@ -249,14 +264,16 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             nativeResolution == "found-single" ? nativeSources.FirstOrDefault(source => source.NonZeroTransformCount > 0).Name ?? "none" : "none",
             nativeResolution == "found-single" ? bestCandidate : "none",
             nativeResolution,
+            currentObjectTableIgnored,
+            currentObjectTableIgnoredReason,
             foreground,
             presetCompatibility,
             overrideCompatibility,
             lighting,
             objectTableRejected,
-            objectTableRejected ? "zero-transform-stub-only" : "none",
+            currentObjectTableIgnored ? currentObjectTableIgnoredReason : objectTableRejected ? "zero-transform-stub-only" : "none",
             actorPlacementReady,
-            actorPlacementReady ? "none" : objectTableRejected ? "stub-only-object-table" : $"native-preview-source-{nativeResolution}",
+            actorPlacementReady ? "none" : currentObjectTableIgnored ? currentObjectTableIgnoredReason : objectTableRejected ? "stub-only-object-table" : $"native-preview-source-{nativeResolution}",
             verdict,
             nextAction,
             nextActionReason);
@@ -355,7 +372,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 backgroundMode == TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground
                     ? TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground
                     : TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly,
-                "ObjectTable candidates are stub-only; selected character model not visible with full scene override",
+                "ObjectTable candidates do not expose a stable CharaSelect preview model source; selected character model is not visible with full scene override",
                 true,
                 false);
         }
@@ -455,9 +472,9 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 source.Available,
                 source.Available ? "read" : "not-available",
                 source.CandidateCount,
-                objectTableLike ? nonZeroPositionCandidateCount : 0,
-                objectTableLike ? drawObjectNonNullCount : 0,
-                objectTableLike ? modelLikeNonNullCount : 0,
+                objectTableLike ? source.NonZeroTransformCount : 0,
+                objectTableLike ? source.DrawObjectNonNullCount : 0,
+                objectTableLike ? source.ModelLikeNonNullCount : 0,
                 string.IsNullOrWhiteSpace(source.Error) ? "none" : source.Error));
         }
 
