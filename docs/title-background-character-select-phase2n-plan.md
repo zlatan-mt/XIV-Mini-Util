@@ -415,13 +415,17 @@ recommendedMode
 notes
 ```
 
-n4f4 / Il Mheg 相当は暫定で:
+current custom n4f4 override target は実 preset ではなく、`selectedPresetId=none` の custom override configuration から作る `custom:n4f4` synthetic compatibility entry として扱う。
+
+current custom n4f4 override target は暫定で:
 
 ```text
-expectedCompatibility=CharacterHidden or BackgroundOnly
+expectedCompatibility=BackgroundOnly
 expectedBrightness=Dark
 knownIssue=ObjectTable candidates are stub-only; selected character model not visible with full scene override
 recommendedMode=CompatiblePresetOnly or PreserveCharaSelectForeground if available
+safeToUse=True
+characterExpectedVisible=False
 ```
 
 出力:
@@ -435,7 +439,25 @@ phase2N.presetCompatibility.recommendedMode
 phase2N.presetCompatibility.knownIssue
 phase2N.presetCompatibility.safeToUse
 phase2N.presetCompatibility.characterExpectedVisible
+phase2N.overrideCompatibility.source
+phase2N.overrideCompatibility.selectedPresetId
+phase2N.overrideCompatibility.currentOverrideId
+phase2N.overrideCompatibility.overrideTerritoryPath
+phase2N.overrideCompatibility.overrideTerritoryId
+phase2N.overrideCompatibility.layerFilterKey
+phase2N.overrideCompatibility.expectedCompatibility
+phase2N.overrideCompatibility.expectedBrightness
+phase2N.overrideCompatibility.warning
+phase2N.compatibility.source
+phase2N.compatibility.id
+phase2N.compatibility.displayName
+phase2N.compatibility.characterVisibility
+phase2N.compatibility.backgroundUsable
+phase2N.compatibility.brightness
+phase2N.compatibility.recommendedAction
 ```
+
+`presetCompatibility.currentPresetId=custom:n4f4` が出る場合でも、これは実 preset 選択ではない。`overrideCompatibility.source=custom-override` と `overrideCompatibility.selectedPresetId=none` を併記して誤読を避ける。
 
 ### 6.6 Lighting / brightness
 
@@ -468,11 +490,14 @@ phase2N.lighting.diagnostic.error
 phase2N.lighting.lastStatus
 phase2N.lighting.lastSkippedReason
 phase2N.lighting.expectedBrightness
+phase2N.lighting.currentLayerFilterKey
+phase2N.lighting.layerBrightnessKnown
+phase2N.lighting.brightLayerCandidates
 phase2N.lighting.recommendedAction
 ```
 
 safe write API がある場合だけ experimental one-shot。
-無ければ `PreferBrightPreset` / `PreferBrightLayer` の warning と recommendation を実装します。
+無ければ `add-bright-override-candidate` / `try-bright-layer` / `use-background-only` の warning と recommendation を実装します。
 
 ### 6.7 Delivery verdict
 
@@ -494,6 +519,11 @@ phase2N.foregroundPreserve.available
 phase2N.foregroundPreserve.reason
 phase2N.presetCompatibility.expectedCompatibility
 phase2N.presetCompatibility.expectedBrightness
+phase2N.overrideCompatibility.source
+phase2N.overrideCompatibility.selectedPresetId
+phase2N.overrideCompatibility.currentOverrideId
+phase2N.overrideCompatibility.expectedCompatibility
+phase2N.overrideCompatibility.expectedBrightness
 phase2N.lighting.mode
 phase2N.lighting.recommendedAction
 phase2N.deliveryVerdict
@@ -518,6 +548,7 @@ nextAction:
 ```text
 use-background-only
 try-compatible-preset
+add-bright-override-candidate
 try-preserve-foreground
 try-native-preview-source
 try-bright-layer

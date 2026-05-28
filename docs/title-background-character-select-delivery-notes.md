@@ -11,8 +11,9 @@
 ## 採用ルート
 
 - MVP は `SceneOverrideOnly` / `CompatiblePresetOnly` を background delivery route として扱う。
-- selected character が隠れる preset は background-only として warning する。
-- `n4f4` / Il Mheg 相当は暫定で `expectedCompatibility=CharacterHidden`、`expectedBrightness=Dark`。
+- selected character が隠れる compatibility entry は background-only として warning する。
+- current custom n4f4 override target は `selectedPresetId=none` の custom override configuration であり、実 preset ではない。
+- `custom:n4f4` は Phase 2N の synthetic compatibility entry。background-only usable として `safeToUse=True`、`characterExpectedVisible=False`、`expectedCompatibility=BackgroundOnly`、`expectedBrightness=Dark` にする。
 - `/xmutbgdiag` に `phase2N.deliveryVerdict` と `phase2N.nextAction` を追加し、1回で次の実機作業が分かるようにした。
 
 ## 捨てたルート
@@ -25,13 +26,25 @@
 ## 既知制限
 
 - Background-only mode では選択キャラクター本体は見えない可能性が高い。
-- 暗い背景は preset / layer 互換性の問題として扱い、`PreferBrightPreset` / `PreferBrightLayer` の次アクションへ寄せる。
+- 暗い背景は custom override target / layer 互換性の問題として扱い、明るい custom override target または `PreferBrightLayer` の次アクションへ寄せる。
 - `EnvironmentOverrideExperimental` / `DisableDarkeningExperimental` は config enum のみで、safe API が見つかるまで write しない。
 
 ## 次回実機確認
 
-1. Character Select で `n4f4` preset を有効化して `/xmutbgdiag` を実行する。
+1. Character Select で current custom n4f4 override target を有効化して `/xmutbgdiag` を実行する。
 2. `phase2N.deliveryVerdict` が `working-background-only` になるか確認する。
 3. `phase2N.objectTableActorRejected=True` と `phase2N.actorPlacement.ready=False` を確認する。
 4. `phase2N.lighting.expectedBrightness=Dark` と `phase2N.lighting.recommendedAction` を見る。
 5. `delivery.detailDump=title-background-deliverydiag.txt` が保存されるか確認する。
+
+期待 field:
+
+```text
+phase2N.characterVisibility.observed=not-observed
+phase2N.overrideCompatibility.source=custom-override
+phase2N.overrideCompatibility.selectedPresetId=none
+phase2N.overrideCompatibility.currentOverrideId=custom:n4f4
+phase2N.overrideCompatibility.expectedCompatibility=BackgroundOnly
+phase2N.overrideCompatibility.expectedBrightness=Dark
+phase2N.lighting.recommendedAction=add-bright-override-candidate
+```

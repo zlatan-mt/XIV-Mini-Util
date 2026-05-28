@@ -1422,7 +1422,7 @@ Test("title background phase2n no native source falls back to background only", 
         && delivery.NextAction == "use-background-only";
 });
 
-Test("title background phase2n dark n4f4 preset warns and recommends compatible mode", () =>
+Test("title background phase2n custom n4f4 override warns and recommends bright candidate", () =>
 {
     var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
     [
@@ -1430,10 +1430,105 @@ Test("title background phase2n dark n4f4 preset warns and recommends compatible 
     ]);
     var delivery = Phase2N(summary, lastOverrideApplied: true);
 
-    return delivery.PresetCompatibility.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.CharacterHidden
+    return delivery.PresetCompatibility.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
         && delivery.PresetCompatibility.ExpectedBrightness == TitleBackgroundCharacterSelectExpectedBrightness.Dark
-        && delivery.Lighting.RecommendedAction == "try-compatible-preset"
+        && delivery.Lighting.RecommendedAction == "add-bright-override-candidate"
         && delivery.PresetCompatibility.RecommendedMode == TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly;
+});
+
+Test("title background phase2n stub only never reports character observed", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([Phase2MCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: true)]),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return delivery.ObjectTableActorRejected
+        && delivery.NativePreviewSourceResolution == "not-found"
+        && delivery.CharacterVisibilityObserved != "observed"
+        && delivery.CharacterVisibilityObserved == "not-observed"
+        && delivery.CharacterVisibilityBlocker == "stub-only-object-table";
+});
+
+Test("title background phase2n native source not found never reports character observed", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return delivery.NativePreviewSourceResolution == "not-found"
+        && delivery.CharacterVisibilityObserved != "observed";
+});
+
+Test("title background phase2n background only keeps character expected hidden", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return delivery.DeliveryVerdict == "working-background-only"
+        && !delivery.PresetCompatibility.CharacterExpectedVisible
+        && !delivery.OverrideCompatibility.CharacterExpectedVisible;
+});
+
+Test("title background phase2n custom override source keeps selected preset none", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(summary, selectedPresetId: string.Empty, lastOverrideApplied: true);
+
+    return delivery.OverrideCompatibility.Source == "custom-override"
+        && delivery.OverrideCompatibility.SelectedPresetId == "none"
+        && delivery.OverrideCompatibility.CurrentOverrideId == "custom:n4f4";
+});
+
+Test("title background phase2n custom n4f4 synthetic entry is not selected preset", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(summary, selectedPresetId: string.Empty, lastOverrideApplied: true);
+
+    return delivery.PresetCompatibility.CurrentPresetId == "custom:n4f4"
+        && delivery.OverrideCompatibility.Id == "custom:n4f4"
+        && delivery.OverrideCompatibility.Source == "custom-override"
+        && delivery.OverrideCompatibility.SelectedPresetId != "custom:n4f4";
+});
+
+Test("title background phase2n custom n4f4 dark lighting has recommendation", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return delivery.OverrideCompatibility.ExpectedBrightness == TitleBackgroundCharacterSelectExpectedBrightness.Dark
+        && delivery.Lighting.CurrentLayerFilterKey == 51
+        && delivery.Lighting.LayerBrightnessKnown
+        && !string.IsNullOrEmpty(delivery.Lighting.RecommendedAction)
+        && delivery.Lighting.RecommendedAction != "none";
+});
+
+Test("title background phase2n background only safe compatibility delivers background only", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return delivery.PresetCompatibility.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
+        && delivery.PresetCompatibility.SafeToUse
+        && delivery.DeliveryVerdict == "working-background-only";
 });
 
 Test("title background phase2n default mode does not enable actor or camera direct writes", () =>
@@ -2302,13 +2397,15 @@ Test("title background prologue hint does not verify unknown bytes", () =>
 TitleBackgroundPhase2NDeliverySummary Phase2N(
     TitleBackgroundPhase2MSummary summary,
     TitleBackgroundCharacterSelectBackgroundMode backgroundMode = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly,
+    TitleBackgroundCharacterSelectLightingMode lightingMode = TitleBackgroundCharacterSelectLightingMode.Default,
+    string selectedPresetId = "",
     bool lastOverrideApplied = false,
     string transitionSafety = "safe")
 {
     return TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
         backgroundMode,
-        TitleBackgroundCharacterSelectLightingMode.Default,
-        string.Empty,
+        lightingMode,
+        selectedPresetId,
         "ex3/01_nvt_n4/fld/n4f4/level/n4f4",
         816,
         51,

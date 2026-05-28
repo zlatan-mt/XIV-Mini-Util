@@ -298,7 +298,7 @@ The final search must have no direct assignment hits. Diagnostic string output c
 Diagnostics-only Phase 2M-A:
 
 1. Restart game.
-2. Enable title background override with the Il Mheg/n4f4 preset.
+2. Enable title background override with the current custom n4f4 override target.
 3. Enter character-select flow and reproduce the broken visual.
 4. Log in.
 5. Run `/xmutbgdiag` once after login.

@@ -1099,7 +1099,7 @@ public sealed class SettingsTab : ITabComponent
             TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly => "scene override のみ",
             TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground => "foreground保持を試行",
             TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource => "native preview source",
-            TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly => "互換presetのみ",
+            TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly => "互換候補のみ",
             _ => mode.ToString(),
         };
     }
