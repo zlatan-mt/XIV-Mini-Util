@@ -1110,8 +1110,8 @@ public sealed class SettingsTab : ITabComponent
         {
             TitleBackgroundCharacterSelectLightingMode.Default => "既定",
             TitleBackgroundCharacterSelectLightingMode.DiagnosticsOnly => "診断のみ",
-            TitleBackgroundCharacterSelectLightingMode.PreferBrightPreset => "明るいpreset推奨",
-            TitleBackgroundCharacterSelectLightingMode.PreferBrightLayer => "明るいlayer推奨",
+            TitleBackgroundCharacterSelectLightingMode.PreferBrightPreset => "明るい候補推奨",
+            TitleBackgroundCharacterSelectLightingMode.PreferBrightLayer => "明るいレイヤー推奨",
             TitleBackgroundCharacterSelectLightingMode.EnvironmentOverrideExperimental => "環境override（実験）",
             TitleBackgroundCharacterSelectLightingMode.DisableDarkeningExperimental => "暗転抑制（実験）",
             _ => mode.ToString(),

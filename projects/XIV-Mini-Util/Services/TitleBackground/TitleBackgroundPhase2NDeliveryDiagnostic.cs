@@ -148,7 +148,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             or TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly;
     }
 
-    public static bool IsKnownDarkPreset(string territoryPath, uint territoryId, uint layerFilterKey)
+    public static bool IsKnownDarkOverrideTarget(string territoryPath, uint territoryId, uint layerFilterKey)
     {
         return territoryPath.Contains("/n4f4/", StringComparison.OrdinalIgnoreCase)
             || territoryPath.EndsWith("/n4f4", StringComparison.OrdinalIgnoreCase)
@@ -338,11 +338,11 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         var hasSelectedPreset = !string.IsNullOrWhiteSpace(selectedPresetId);
         var presetId = hasSelectedPreset
             ? selectedPresetId.Trim()
-            : IsKnownDarkPreset(territoryPath, territoryId, layerFilterKey) ? "custom:n4f4" : "custom";
-        var compatibility = IsKnownDarkPreset(territoryPath, territoryId, layerFilterKey)
+            : IsKnownDarkOverrideTarget(territoryPath, territoryId, layerFilterKey) ? "custom:n4f4" : "custom";
+        var compatibility = IsKnownDarkOverrideTarget(territoryPath, territoryId, layerFilterKey)
             ? TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
             : TitleBackgroundCharacterSelectCompatibility.Unknown;
-        if (IsKnownDarkPreset(territoryPath, territoryId, layerFilterKey))
+        if (IsKnownDarkOverrideTarget(territoryPath, territoryId, layerFilterKey))
         {
             var warning = hasSelectedPreset
                 ? "full scene override works as background-only; selected character is not expected to be visible"
@@ -398,9 +398,9 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 ? "add-bright-override-candidate"
                 : presetCompatibility.CharacterExpectedVisible ? "use-compatible-candidate" : "use-background-only";
         var backgroundUsable = presetCompatibility.SafeToUse
-            && presetCompatibility.ExpectedCompatibility is TitleBackgroundCharacterSelectCompatibility.Compatible
+            && (presetCompatibility.ExpectedCompatibility is TitleBackgroundCharacterSelectCompatibility.Compatible
                 or TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
-                or TitleBackgroundCharacterSelectCompatibility.CharacterHidden;
+                or TitleBackgroundCharacterSelectCompatibility.CharacterHidden);
 
         return new TitleBackgroundPhase2NOverrideCompatibility(
             source,

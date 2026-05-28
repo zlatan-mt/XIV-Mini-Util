@@ -1433,6 +1433,7 @@ Test("title background phase2n custom n4f4 override warns and recommends bright 
     return delivery.PresetCompatibility.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
         && delivery.PresetCompatibility.ExpectedBrightness == TitleBackgroundCharacterSelectExpectedBrightness.Dark
         && delivery.Lighting.RecommendedAction == "add-bright-override-candidate"
+        && delivery.OverrideCompatibility.BackgroundUsable
         && delivery.PresetCompatibility.RecommendedMode == TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly;
 });
 
