@@ -206,9 +206,19 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
         }
 
         var ordered = frames.OrderBy(frame => frame.Frame).ToArray();
+        var candidates = ordered
+            .SelectMany(frame => frame.ObjectCandidates)
+            .GroupBy(BuildCandidateKey)
+            .Select(group => group.OrderByDescending(candidate => candidate.Score).First())
+            .ToArray();
+        var summary = BuildCandidateResolution(candidates);
         var hasSingleActor = ordered.Any(frame => frame.ActorMatchKind == TitleBackgroundPhase2MActorMatchKind.Single);
         var hasAmbiguousActor = ordered.Any(frame => frame.ActorMatchKind == TitleBackgroundPhase2MActorMatchKind.Ambiguous);
-        var hasActorObserved = hasSingleActor;
+        var actorSourceResolved = summary.Resolution == "single";
+        var actorSourceHasModelEvidence = summary.BestCandidateStableAcrossFrames
+            || summary.DrawObjectNonNullCount > 0
+            || summary.ModelLikeNonNullCount > 0;
+        var hasActorObserved = hasSingleActor && actorSourceResolved && actorSourceHasModelEvidence;
         var hasActorVisibleHint = ordered.Any(frame => frame.ActorMatchKind == TitleBackgroundPhase2MActorMatchKind.Single && frame.Actor?.VisibleHint == true);
         var hasActorCameraDeltas = ordered.Any(frame =>
             frame.ActorMatchKind == TitleBackgroundPhase2MActorMatchKind.Single
@@ -217,33 +227,25 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
         var hasGroundUnavailable = ordered.Any(frame => string.Equals(frame.GroundHeightStatus, "unavailable", StringComparison.Ordinal));
         var hasGroundY = ordered.Any(frame => frame.GroundY.HasValue);
 
-        var status = hasSingleActor
+        var status = hasActorObserved
             ? "observed"
-            : hasAmbiguousActor
+            : hasAmbiguousActor || summary.Resolution == "ambiguous"
                 ? "ambiguous"
-                : "not-observed";
-        var visible = hasActorVisibleHint
-            ? "observed"
-            : hasActorObserved
-                ? "unknown"
-                : "not-observed";
+                : hasSingleActor
+                    ? "not-verifiable"
+                    : "not-observed";
+        var visible = hasActorObserved
+            ? hasActorVisibleHint ? "observed" : "unknown"
+            : status == "not-verifiable" ? "not-verifiable" : "not-observed";
         var groundAligned = hasGroundY
             ? "unknown"
             : hasGroundUnavailable
                 ? "unknown"
                 : "unknown";
-        var cameraFramesActor = hasActorCameraDeltas
-            ? "observed"
-            : hasActorObserved
-                ? "unknown"
-                : "not-observed";
+        var cameraFramesActor = hasActorObserved
+            ? hasActorCameraDeltas ? "observed" : "unknown"
+            : status == "not-verifiable" ? "not-verifiable" : "not-observed";
         var safety = BuildVisualPlacementSafety(status, visible, groundAligned, cameraFramesActor);
-        var candidates = ordered
-            .SelectMany(frame => frame.ObjectCandidates)
-            .GroupBy(BuildCandidateKey)
-            .Select(group => group.OrderByDescending(candidate => candidate.Score).First())
-            .ToArray();
-        var summary = BuildCandidateResolution(candidates);
         var sourceDiscovery = ordered
             .SelectMany(frame => frame.SourceDiscovery)
             .GroupBy(source => source.Name)

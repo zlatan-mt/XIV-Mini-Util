@@ -547,6 +547,9 @@ phase2N.overrideCompatibility.characterExpectedVisible
 phase2N.lighting.mode
 phase2N.lighting.recommendedAction
 phase2N.deliveryVerdict
+phase2N.mvpStatus
+phase2N.mvpBlockingIssue
+phase2N.mvpKnownLimitation
 phase2N.nextAction
 phase2N.nextAction.reason
 ```
@@ -576,6 +579,18 @@ inspect-titleedit-original
 stop-managed-diagnostics
 unsafe-stop
 ```
+
+background-only MVP summary:
+
+```text
+phase2N.mvpStatus=complete-background-only
+phase2N.mvpBlockingIssue=none
+phase2N.mvpKnownLimitation=selected-character-model-hidden
+```
+
+上記は `deliveryVerdict=working-background-only`、`backgroundUsable=True`、`characterExpectedVisible=False`、`actorPlacement.ready=False`、post-login ObjectTable 無効化または native source 未検出、`loginTransitionSafety=safe` の場合だけ出す。
+
+次フェーズでは bright custom override target / layer candidate を追加し、実機SS比較で明るさを確認する。`custom:n4f4` は Dark / BackgroundOnly の基準候補として維持する。
 
 ### 6.8 Optional delivery diag
 

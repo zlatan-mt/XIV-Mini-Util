@@ -5526,6 +5526,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2N.lighting.brightLayerCandidates={FormatNone(summary.Lighting.BrightLayerCandidates)}");
         lines.Add($"phase2N.lighting.recommendedAction={FormatNone(summary.Lighting.RecommendedAction)}");
         lines.Add($"phase2N.deliveryVerdict={FormatNone(summary.DeliveryVerdict)}");
+        lines.Add($"phase2N.mvpStatus={FormatNone(summary.MvpStatus)}");
+        lines.Add($"phase2N.mvpBlockingIssue={FormatNone(summary.MvpBlockingIssue)}");
+        lines.Add($"phase2N.mvpKnownLimitation={FormatNone(summary.MvpKnownLimitation)}");
         lines.Add($"phase2N.nextAction={FormatNone(summary.NextAction)}");
         lines.Add($"phase2N.nextAction.reason={FormatNone(summary.NextActionReason)}");
     }

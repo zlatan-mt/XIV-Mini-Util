@@ -16,6 +16,7 @@
 - `custom:n4f4` は Phase 2N の synthetic compatibility entry。background-only usable として `safeToUse=True`、`characterExpectedVisible=False`、`expectedCompatibility=BackgroundOnly`、`expectedBrightness=Dark` にする。
 - post-login `/xmutbgdiag` では現在ワールドの ObjectTable を Phase 2N native preview source 判定に使わず、pre-login capture / placement timeline の snapshot だけを信頼する。
 - `/xmutbgdiag` に `phase2N.deliveryVerdict` と `phase2N.nextAction` を追加し、1回で次の実機作業が分かるようにした。
+- `phase2N.mvpStatus=complete-background-only` は、背景が使えて transition が safe、かつ character model source が未検証または post-login ObjectTable 無効化済みの場合の MVP 完了判定として扱う。
 
 ## 捨てたルート
 
@@ -31,10 +32,16 @@
 - 暗い背景は custom override target / layer 互換性の問題として扱い、明るい custom override target または `PreferBrightLayer` の次アクションへ寄せる。
 - `EnvironmentOverrideExperimental` / `DisableDarkeningExperimental` は config enum のみで、safe API が見つかるまで write しない。
 
+## 次フェーズ候補
+
+- bright custom override target / layer candidate を追加する。
+- 実機SS比較で明るさを確認する。
+- `custom:n4f4` は Dark / BackgroundOnly の基準候補として維持する。
+
 ## 次回実機確認
 
 1. Character Select で current custom n4f4 override target を有効化して `/xmutbgdiag` を実行する。
-2. `phase2N.deliveryVerdict` が `working-background-only` になるか確認する。
+2. `phase2N.deliveryVerdict` が `working-background-only`、`phase2N.mvpStatus` が `complete-background-only` になるか確認する。
 3. `phase2N.objectTableActorRejected=True` と `phase2N.actorPlacement.ready=False` を確認する。
 4. `phase2N.lighting.expectedBrightness=Dark` と `phase2N.lighting.recommendedAction` を見る。
 5. `delivery.detailDump=title-background-deliverydiag.txt` が保存されるか確認する。
@@ -53,4 +60,7 @@ phase2N.overrideCompatibility.expectedBrightness=Dark
 phase2N.overrideCompatibility.characterExpectedVisible=False
 phase2N.compatibility.characterExpectedVisible=False
 phase2N.lighting.recommendedAction=add-bright-override-candidate
+phase2N.mvpStatus=complete-background-only
+phase2N.mvpBlockingIssue=none
+phase2N.mvpKnownLimitation=selected-character-model-hidden
 ```

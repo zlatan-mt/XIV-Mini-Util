@@ -1282,6 +1282,41 @@ Test("title background phase2m resolves multiple non-zero candidates as ambiguou
     return summary.Resolution == "ambiguous";
 });
 
+Test("title background phase2m ambiguous object table without model evidence is not observed", () =>
+{
+    var candidates = new[]
+    {
+        Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+        Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+    };
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates(candidates, TitleBackgroundPhase2MActorMatchKind.Ambiguous)]);
+
+    return summary.Resolution == "ambiguous"
+        && summary.DrawObjectNonNullCount == 0
+        && summary.ModelLikeNonNullCount == 0
+        && !summary.BestCandidateStableAcrossFrames
+        && summary.ActorDiagnosticStatus != "observed"
+        && summary.ActorVisible != "observed"
+        && summary.CameraFramesActor != "observed"
+        && summary.VisualPlacementSafety != "safe"
+        && summary.NextAction == "insufficient-data";
+});
+
+Test("title background phase2m post login style object table candidate does not mark actor visible", () =>
+{
+    var candidates = new[]
+    {
+        Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+        Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+    };
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates(candidates, TitleBackgroundPhase2MActorMatchKind.Ambiguous)]);
+
+    return summary.BestSource == "ObjectTable"
+        && summary.ActorVisible != "observed"
+        && summary.CameraFramesActor != "observed"
+        && summary.ActorDiagnosticStatus != "observed";
+});
+
 Test("title background phase2m resolves unavailable source as source missing", () =>
 {
     var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates([])]);
@@ -1549,7 +1584,31 @@ Test("title background phase2n post login current object table is ignored", () =
         && delivery.NativePreviewSourceResolution == "not-verifiable-post-login"
         && delivery.CharacterVisibilityBlocker == "post-login-object-table-not-valid"
         && delivery.ObjectTableActorRejected
+        && !delivery.ActorPlacementReady
+        && delivery.DeliveryVerdict == "working-background-only"
         && delivery.ObjectTableActorRejectedReason == "post-login-world-object-table-not-valid-for-chara-select";
+});
+
+Test("title background phase2n background only mvp is complete with known limitation", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates(
+        [
+            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true, currentObjectTableValidForCharaSelect: false);
+
+    return delivery.NativePreviewSourceCurrentObjectTableIgnored
+        && delivery.NativePreviewSourceResolution == "not-verifiable-post-login"
+        && delivery.ObjectTableActorRejected
+        && !delivery.ActorPlacementReady
+        && delivery.DeliveryVerdict == "working-background-only"
+        && delivery.MvpStatus == "complete-background-only"
+        && delivery.MvpBlockingIssue == "none"
+        && delivery.MvpKnownLimitation == "selected-character-model-hidden";
 });
 
 Test("title background phase2n post login ambiguous object table never readies actor placement", () =>

@@ -135,6 +135,9 @@ internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
     bool ActorPlacementReady,
     string ActorPlacementBlocker,
     string DeliveryVerdict,
+    string MvpStatus,
+    string MvpBlockingIssue,
+    string MvpKnownLimitation,
     string NextAction,
     string NextActionReason);
 
@@ -251,6 +254,16 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             foreground.Available,
             presetCompatibility,
             lighting);
+        var (mvpStatus, mvpBlockingIssue, mvpKnownLimitation) = BuildMvpSummary(
+            verdict,
+            transitionSafety,
+            overrideCompatibility.BackgroundUsable,
+            overrideCompatibility.CharacterExpectedVisible,
+            actorPlacementReady,
+            currentObjectTableIgnored,
+            nativeResolution,
+            nextAction,
+            characterBlocker);
 
         return new TitleBackgroundPhase2NDeliverySummary(
             "character-select-background",
@@ -275,8 +288,38 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             actorPlacementReady,
             actorPlacementReady ? "none" : currentObjectTableIgnored ? currentObjectTableIgnoredReason : objectTableRejected ? "stub-only-object-table" : $"native-preview-source-{nativeResolution}",
             verdict,
+            mvpStatus,
+            mvpBlockingIssue,
+            mvpKnownLimitation,
             nextAction,
             nextActionReason);
+    }
+
+    private static (string Status, string BlockingIssue, string KnownLimitation) BuildMvpSummary(
+        string deliveryVerdict,
+        string transitionSafety,
+        bool backgroundUsable,
+        bool characterExpectedVisible,
+        bool actorPlacementReady,
+        bool currentObjectTableIgnored,
+        string nativeResolution,
+        string nextAction,
+        string characterBlocker)
+    {
+        var nativeSourceAcceptableForBackgroundOnly = currentObjectTableIgnored
+            || nativeResolution is "not-found" or "not-verifiable-post-login";
+        if (deliveryVerdict == "working-background-only"
+            && backgroundUsable
+            && !characterExpectedVisible
+            && !actorPlacementReady
+            && nativeSourceAcceptableForBackgroundOnly
+            && transitionSafety == "safe")
+        {
+            return ("complete-background-only", "none", "selected-character-model-hidden");
+        }
+
+        var blockingIssue = characterBlocker != "none" ? characterBlocker : nextAction;
+        return ("incomplete", blockingIssue, characterExpectedVisible ? "none" : "selected-character-model-hidden");
     }
 
     private static string BuildCharacterVisibilityObserved(
