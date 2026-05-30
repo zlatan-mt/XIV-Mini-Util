@@ -1472,6 +1472,151 @@ Test("title background phase2n custom n4f4 override warns and recommends bright 
         && delivery.PresetCompatibility.RecommendedMode == TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly;
 });
 
+Test("title background phase2o custom n4f4 registry entry exists", () =>
+{
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.TryGet("custom:n4f4", out var candidate)
+        && candidate.Id == TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId
+        && candidate.DisplayName == "Custom n4f4 override target"
+        && candidate.TerritoryPath == "ex3/01_nvt_n4/fld/n4f4/level/n4f4"
+        && candidate.TerritoryId == 816
+        && candidate.LayerFilterKey == 51;
+});
+
+Test("title background phase2o custom n4f4 is background only", () =>
+{
+    var candidate = TitleBackgroundCharacterSelectOverrideCandidateRegistry.GetDefault();
+    return candidate.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
+        && candidate.BackgroundUsable
+        && !candidate.CharacterExpectedVisible;
+});
+
+Test("title background phase2o custom n4f4 is dark", () =>
+{
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.GetDefault().ExpectedBrightness
+        == TitleBackgroundCharacterSelectExpectedBrightness.Dark;
+});
+
+Test("title background phase2o custom n4f4 is verified in game", () =>
+{
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.GetDefault().VerifiedInGame;
+});
+
+Test("title background phase2o candidate registry keeps selected preset separate", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundSelectedPresetId = "built-in-test",
+    };
+    TitleBackgroundCharacterSelectOverrideCandidateRegistry.ApplyToConfiguration(
+        configuration,
+        TitleBackgroundCharacterSelectOverrideCandidateRegistry.GetDefault());
+
+    return configuration.TitleBackgroundSelectedPresetId == string.Empty
+        && configuration.TitleBackgroundCharacterSelectOverrideCandidateId == "custom:n4f4";
+});
+
+Test("title background phase2o selecting candidate updates override fields only", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundSelectedPresetId = "built-in-test",
+        TitleBackgroundTerritoryPath = "ffxiv/old/region/level/old",
+        TitleBackgroundTerritoryTypeId = 1,
+        TitleBackgroundLayoutTerritoryTypeId = 2,
+        TitleBackgroundLayoutLayerFilterKey = 3,
+    };
+    TitleBackgroundCharacterSelectOverrideCandidateRegistry.ApplyToConfiguration(
+        configuration,
+        TitleBackgroundCharacterSelectOverrideCandidateRegistry.GetDefault());
+
+    return configuration.TitleBackgroundSelectedPresetId == string.Empty
+        && configuration.TitleBackgroundTerritoryPath == "ex3/01_nvt_n4/fld/n4f4/level/n4f4"
+        && configuration.TitleBackgroundTerritoryTypeId == 816
+        && configuration.TitleBackgroundLayoutTerritoryTypeId == 816
+        && configuration.TitleBackgroundLayoutLayerFilterKey == 51;
+});
+
+Test("title background phase2o unknown custom override falls back to custom unknown", () =>
+{
+    var candidate = TitleBackgroundCharacterSelectOverrideCandidateRegistry.ResolveFromConfig(
+        string.Empty,
+        "ex5/01_xkt_x6/fld/x6f3/level/x6f3",
+        1234,
+        7);
+
+    return candidate.Id == "custom"
+        && candidate.DisplayName == "Custom override target"
+        && candidate.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.Unknown
+        && candidate.ExpectedBrightness == TitleBackgroundCharacterSelectExpectedBrightness.Unknown
+        && !candidate.VerifiedInGame;
+});
+
+Test("title background phase2o no bright candidate reports none", () =>
+{
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildBrightLayerCandidateList(
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.All) == "none"
+        && TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildLightingRecommendedAction(
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.All) == "add-bright-override-candidate";
+});
+
+Test("title background phase2o bright candidate list reports candidate id", () =>
+{
+    var candidates = new[]
+    {
+        TitleBackgroundCharacterSelectOverrideCandidateRegistry.GetDefault(),
+        TestBrightCandidate(),
+    };
+
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildBrightLayerCandidateList(candidates) == "custom:test-bright";
+});
+
+Test("title background phase2o bright candidate recommends trying custom target", () =>
+{
+    var candidates = new[]
+    {
+        TitleBackgroundCharacterSelectOverrideCandidateRegistry.GetDefault(),
+        TestBrightCandidate(),
+    };
+
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildLightingRecommendedAction(candidates) == "try-bright-custom-target";
+});
+
+Test("title background phase2o unverified bright candidate does not claim verified", () =>
+{
+    var candidate = TestBrightCandidate();
+    return candidate.ExpectedBrightness == TitleBackgroundCharacterSelectExpectedBrightness.Bright
+        && !candidate.VerifiedInGame;
+});
+
+Test("title background phase2o delivery exposes selected override candidate", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(summary, lastOverrideApplied: true);
+
+    return delivery.OverrideCandidate.Selected.Id == "custom:n4f4"
+        && delivery.OverrideCandidate.Selected.VerifiedInGame
+        && delivery.OverrideCandidate.Available.Count == 1
+        && delivery.OverrideCandidate.Available[0].Id == "custom:n4f4";
+});
+
+Test("title background phase2o docs and ui avoid n4f4 preset wording", () =>
+{
+    var root = FindRepositoryRoot();
+    var paths = new[]
+    {
+        Path.Combine(root, "docs", "title-background-character-select-bright-candidates.md"),
+        Path.Combine(root, "docs", "title-background-character-select-delivery-notes.md"),
+        Path.Combine(root, "docs", "title-background-character-select-phase2n-plan.md"),
+        Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"),
+    };
+
+    return paths.All(path => File.Exists(path)
+        && !File.ReadAllText(path).Contains("n4f4 preset", StringComparison.OrdinalIgnoreCase));
+});
+
 Test("title background phase2n stub only never reports character observed", () =>
 {
     var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
@@ -2558,6 +2703,40 @@ Test("title background prologue hint does not verify unknown bytes", () =>
     byte[] bytes = [0x8B, 0xD9, 0xE8, 0x11, 0x22, 0x33, 0x44];
     return TitleBackgroundAddressResolver.ClassifyFunctionPrologue(bytes) == "unknown";
 });
+
+TitleBackgroundCharacterSelectOverrideCandidate TestBrightCandidate()
+{
+    return new TitleBackgroundCharacterSelectOverrideCandidate(
+        "custom:test-bright",
+        "Test bright custom target",
+        "ex5/test/bright/level/bright",
+        999,
+        10,
+        TitleBackgroundCharacterSelectCompatibility.BackgroundOnly,
+        TitleBackgroundCharacterSelectExpectedBrightness.Bright,
+        true,
+        false,
+        false,
+        "test-only bright candidate",
+        "test-only",
+        "try-bright-custom-target");
+}
+
+string FindRepositoryRoot()
+{
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory != null)
+    {
+        if (File.Exists(Path.Combine(directory.FullName, "projects", "XIV-Mini-Util", "XivMiniUtil.csproj")))
+        {
+            return directory.FullName;
+        }
+
+        directory = directory.Parent;
+    }
+
+    return Directory.GetCurrentDirectory();
+}
 
 TitleBackgroundPhase2NDeliverySummary Phase2N(
     TitleBackgroundPhase2MSummary summary,

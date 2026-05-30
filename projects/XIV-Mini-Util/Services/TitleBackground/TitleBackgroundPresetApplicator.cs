@@ -89,6 +89,7 @@ internal static class TitleBackgroundPresetApplicator
     private static void ApplyPresetFields(Configuration configuration, TitleBackgroundPreset normalized, string selectedPresetId)
     {
         configuration.TitleBackgroundSelectedPresetId = selectedPresetId;
+        configuration.TitleBackgroundCharacterSelectOverrideCandidateId = string.Empty;
         configuration.TitleBackgroundTerritoryPath = normalized.TerritoryPath;
         configuration.TitleBackgroundTerritoryTypeId = normalized.TerritoryTypeId;
         configuration.TitleBackgroundLayoutTerritoryTypeId = normalized.LayoutTerritoryTypeId;

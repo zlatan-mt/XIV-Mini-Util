@@ -590,7 +590,7 @@ phase2N.mvpKnownLimitation=selected-character-model-hidden
 
 上記は `deliveryVerdict=working-background-only`、`backgroundUsable=True`、`characterExpectedVisible=False`、`actorPlacement.ready=False`、post-login ObjectTable 無効化または native source 未検出、`loginTransitionSafety=safe` の場合だけ出す。
 
-次フェーズでは bright custom override target / layer candidate を追加し、実機SS比較で明るさを確認する。`custom:n4f4` は Dark / BackgroundOnly の基準候補として維持する。
+次フェーズでは bright custom override target / layer candidate を追加し、実機SS比較で明るさを確認する。`custom:n4f4` は Dark / BackgroundOnly の基準候補として維持する。候補追加手順は [title-background-character-select-bright-candidates.md](title-background-character-select-bright-candidates.md) に分離する。
 
 ### 6.8 Optional delivery diag
 

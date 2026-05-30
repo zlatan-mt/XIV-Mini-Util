@@ -718,11 +718,14 @@ public sealed class SettingsTab : ITabComponent
 
         DrawTitleBackgroundCharacterSelectDeliveryModes();
         ImGui.Spacing();
+        DrawTitleBackgroundOverrideCandidateSelector();
+        ImGui.Spacing();
 
         var territoryPath = _configuration.TitleBackgroundTerritoryPath;
         if (ImGui.InputTextWithHint("TerritoryPath##TitleBackgroundTerritoryPath", "ffxiv/.../level/...", ref territoryPath, 256))
         {
             ClearTitleBackgroundSelectedPreset();
+            _configuration.TitleBackgroundCharacterSelectOverrideCandidateId = string.Empty;
             _configuration.TitleBackgroundTerritoryPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(territoryPath);
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
@@ -863,6 +866,40 @@ public sealed class SettingsTab : ITabComponent
         _titleScreenBackgroundService.ApplyFromConfiguration();
     }
 
+    private void DrawTitleBackgroundOverrideCandidateSelector()
+    {
+        var selectedCandidate = TitleBackgroundCharacterSelectOverrideCandidateRegistry.ResolveFromConfig(
+            _configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
+            _configuration.TitleBackgroundTerritoryPath,
+            _configuration.TitleBackgroundTerritoryTypeId,
+            _configuration.TitleBackgroundLayoutLayerFilterKey);
+        var selectedLabel = GetTitleBackgroundOverrideCandidateLabel(selectedCandidate);
+
+        if (ImGui.BeginCombo("Character Select background candidate##TitleBackgroundOverrideCandidate", selectedLabel))
+        {
+            foreach (var candidate in TitleBackgroundCharacterSelectOverrideCandidateRegistry.All)
+            {
+                if (ImGui.Selectable(GetTitleBackgroundOverrideCandidateLabel(candidate), selectedCandidate.Id == candidate.Id))
+                {
+                    ApplyTitleBackgroundOverrideCandidate(candidate);
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.TextWrapped("背景のみモードではロビーシーン全体を差し替えます。選択キャラクター本体は表示されない想定です。明るい候補を選ぶと見栄えを改善できます。");
+    }
+
+    private void ApplyTitleBackgroundOverrideCandidate(TitleBackgroundCharacterSelectOverrideCandidate candidate)
+    {
+        _configuration.TitleBackgroundSelectedPresetId = string.Empty;
+        _titleBackgroundPendingPresetId = string.Empty;
+        TitleBackgroundCharacterSelectOverrideCandidateRegistry.ApplyToConfiguration(_configuration, candidate);
+        _configuration.Save();
+        _titleScreenBackgroundService.ApplyFromConfiguration();
+    }
+
     private void DrawTitleBackgroundCaptureResult()
     {
         var result = _titleScreenBackgroundService.LastCameraCaptureResult;
@@ -895,6 +932,7 @@ public sealed class SettingsTab : ITabComponent
         if (ImGui.InputInt("TerritoryTypeId##TitleBackgroundTerritoryTypeId", ref territoryTypeId))
         {
             ClearTitleBackgroundSelectedPreset();
+            _configuration.TitleBackgroundCharacterSelectOverrideCandidateId = string.Empty;
             _configuration.TitleBackgroundTerritoryTypeId = (uint)Math.Clamp(territoryTypeId, 0, int.MaxValue);
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
@@ -905,6 +943,7 @@ public sealed class SettingsTab : ITabComponent
         if (ImGui.InputInt("LayoutTerritoryTypeId##TitleBackgroundLayoutTerritoryTypeId", ref layoutTerritoryTypeId))
         {
             ClearTitleBackgroundSelectedPreset();
+            _configuration.TitleBackgroundCharacterSelectOverrideCandidateId = string.Empty;
             _configuration.TitleBackgroundLayoutTerritoryTypeId = (uint)Math.Clamp(layoutTerritoryTypeId, 0, int.MaxValue);
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
@@ -915,6 +954,7 @@ public sealed class SettingsTab : ITabComponent
         if (ImGui.InputInt("LayoutLayerFilterKey##TitleBackgroundLayoutLayerFilterKey", ref layerFilterKey))
         {
             ClearTitleBackgroundSelectedPreset();
+            _configuration.TitleBackgroundCharacterSelectOverrideCandidateId = string.Empty;
             _configuration.TitleBackgroundLayoutLayerFilterKey = (uint)Math.Clamp(layerFilterKey, 0, int.MaxValue);
             _configuration.Save();
             _titleScreenBackgroundService.ApplyFromConfiguration();
@@ -1120,6 +1160,15 @@ public sealed class SettingsTab : ITabComponent
         };
     }
 
+    private static string GetTitleBackgroundOverrideCandidateLabel(TitleBackgroundCharacterSelectOverrideCandidate candidate)
+    {
+        var verified = candidate.VerifiedInGame ? "Verified" : "Unverified";
+        var compatibility = candidate.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
+            ? "Background-only"
+            : candidate.ExpectedCompatibility.ToString();
+        return $"{candidate.DisplayName} [{verified} / {candidate.ExpectedBrightness} / {compatibility}]";
+    }
+
     private static string GetTitleBackgroundResolverModeLabel(TitleBackgroundResolverMode mode)
     {
         return mode switch
@@ -1158,6 +1207,7 @@ public sealed class SettingsTab : ITabComponent
         _configuration.TitleBackgroundOverrideEnabled = false;
         _configuration.TitleBackgroundCameraOverrideEnabled = false;
         _configuration.TitleBackgroundSelectedPresetId = string.Empty;
+        _configuration.TitleBackgroundCharacterSelectOverrideCandidateId = string.Empty;
         _titleBackgroundPendingPresetId = string.Empty;
         _configuration.TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.ResolveOnly;
         _configuration.TitleBackgroundCharacterSelectBackgroundMode = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly;

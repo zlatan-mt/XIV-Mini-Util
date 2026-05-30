@@ -80,6 +80,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool TitleBackgroundOverrideEnabled { get; set; } = false;
     public bool TitleBackgroundCameraOverrideEnabled { get; set; } = false;
     public string TitleBackgroundSelectedPresetId { get; set; } = string.Empty;
+    public string TitleBackgroundCharacterSelectOverrideCandidateId { get; set; } = string.Empty;
     public TitleBackgroundRuntimeMode TitleBackgroundRuntimeMode { get; set; } = TitleBackgroundRuntimeMode.ResolveOnly;
     public TitleBackgroundCharacterSelectBackgroundMode TitleBackgroundCharacterSelectBackgroundMode { get; set; } = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly;
     public TitleBackgroundCharacterSelectLightingMode TitleBackgroundCharacterSelectLightingMode { get; set; } = TitleBackgroundCharacterSelectLightingMode.Default;
@@ -279,6 +280,7 @@ public sealed class Configuration : IPluginConfiguration
         TitleBackgroundOverrideEnabled = source.TitleBackgroundOverrideEnabled;
         TitleBackgroundCameraOverrideEnabled = source.TitleBackgroundCameraOverrideEnabled;
         TitleBackgroundSelectedPresetId = TitleBackgroundBuiltInPresetCatalog.NormalizeId(source.TitleBackgroundSelectedPresetId);
+        TitleBackgroundCharacterSelectOverrideCandidateId = NormalizeTitleBackgroundCharacterSelectOverrideCandidateId(source.TitleBackgroundCharacterSelectOverrideCandidateId);
         TitleBackgroundRuntimeMode = NormalizeTitleBackgroundRuntimeMode(source.TitleBackgroundRuntimeMode);
         TitleBackgroundCharacterSelectBackgroundMode = NormalizeTitleBackgroundCharacterSelectBackgroundMode(source.TitleBackgroundCharacterSelectBackgroundMode);
         TitleBackgroundCharacterSelectLightingMode = NormalizeTitleBackgroundCharacterSelectLightingMode(source.TitleBackgroundCharacterSelectLightingMode);
@@ -547,6 +549,13 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedOverrideCandidateId = NormalizeTitleBackgroundCharacterSelectOverrideCandidateId(TitleBackgroundCharacterSelectOverrideCandidateId);
+        if (TitleBackgroundCharacterSelectOverrideCandidateId != normalizedOverrideCandidateId)
+        {
+            TitleBackgroundCharacterSelectOverrideCandidateId = normalizedOverrideCandidateId;
+            changed = true;
+        }
+
         var normalizedTitleRuntimeMode = NormalizeTitleBackgroundRuntimeMode(TitleBackgroundRuntimeMode);
         if (TitleBackgroundRuntimeMode != normalizedTitleRuntimeMode)
         {
@@ -748,6 +757,11 @@ public sealed class Configuration : IPluginConfiguration
     private static string NormalizeAssetPath(string? path)
     {
         return (path ?? string.Empty).Trim().Replace('\\', '/');
+    }
+
+    private static string NormalizeTitleBackgroundCharacterSelectOverrideCandidateId(string? id)
+    {
+        return TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(id);
     }
 
     private static string NormalizeSignature(string? signature)

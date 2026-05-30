@@ -37,6 +37,7 @@
 - bright custom override target / layer candidate を追加する。
 - 実機SS比較で明るさを確認する。
 - `custom:n4f4` は Dark / BackgroundOnly の基準候補として維持する。
+- 候補追加の手順と比較観点は [title-background-character-select-bright-candidates.md](title-background-character-select-bright-candidates.md) を参照する。
 
 ## 次回実機確認
 

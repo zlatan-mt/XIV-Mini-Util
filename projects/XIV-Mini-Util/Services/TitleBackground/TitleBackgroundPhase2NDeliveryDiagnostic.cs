@@ -112,6 +112,10 @@ internal readonly record struct TitleBackgroundPhase2NOverrideCompatibility(
     string RecommendedAction,
     string Warning);
 
+internal readonly record struct TitleBackgroundPhase2NOverrideCandidateDiagnostic(
+    TitleBackgroundCharacterSelectOverrideCandidate Selected,
+    IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> Available);
+
 internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
     string FeatureGoal,
     TitleBackgroundCharacterSelectBackgroundMode BackgroundMode,
@@ -129,6 +133,7 @@ internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
     TitleBackgroundPhase2NForegroundPreserveResult ForegroundPreserve,
     TitleBackgroundPhase2NPresetCompatibility PresetCompatibility,
     TitleBackgroundPhase2NOverrideCompatibility OverrideCompatibility,
+    TitleBackgroundPhase2NOverrideCandidateDiagnostic OverrideCandidate,
     TitleBackgroundPhase2NLightingDiagnostic Lighting,
     bool ObjectTableActorRejected,
     string ObjectTableActorRejectedReason,
@@ -155,10 +160,10 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
 
     public static bool IsKnownDarkOverrideTarget(string territoryPath, uint territoryId, uint layerFilterKey)
     {
-        return territoryPath.Contains("/n4f4/", StringComparison.OrdinalIgnoreCase)
-            || territoryPath.EndsWith("/n4f4", StringComparison.OrdinalIgnoreCase)
-            || territoryId == 816
-            || layerFilterKey == 51;
+        return TitleBackgroundCharacterSelectOverrideCandidateRegistry.IsDefaultCandidateTarget(
+            territoryPath,
+            territoryId,
+            layerFilterKey);
     }
 
     public static TitleBackgroundPhase2NDeliverySummary BuildSummary(
@@ -181,8 +186,17 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> sourceDiscovery,
         string transitionSafety,
         bool currentObjectTableValidForCharaSelect = true,
-        string currentObjectTableInvalidReason = "none")
+        string currentObjectTableInvalidReason = "none",
+        string selectedOverrideCandidateId = "")
     {
+        var overrideCandidate = TitleBackgroundCharacterSelectOverrideCandidateRegistry.ResolveFromConfig(
+            selectedOverrideCandidateId,
+            overrideScenePath,
+            overrideTerritoryId,
+            layerFilterKey);
+        var overrideCandidateDiagnostic = new TitleBackgroundPhase2NOverrideCandidateDiagnostic(
+            overrideCandidate,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.All);
         var currentObjectTableIgnored = !currentObjectTableValidForCharaSelect;
         var currentObjectTableIgnoredReason = currentObjectTableIgnored
             ? string.IsNullOrWhiteSpace(currentObjectTableInvalidReason)
@@ -194,13 +208,15 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             overrideScenePath,
             overrideTerritoryId,
             layerFilterKey,
-            backgroundMode);
+            backgroundMode,
+            overrideCandidate);
         var overrideCompatibility = BuildOverrideCompatibility(
             selectedPresetId,
             overrideScenePath,
             overrideTerritoryId,
             layerFilterKey,
-            presetCompatibility);
+            presetCompatibility,
+            overrideCandidate);
         var foreground = BuildForegroundPreserve(backgroundMode, overrideScenePath);
         var nativeSources = BuildNativeSourceProbes(
             sourceDiscovery,
@@ -218,7 +234,11 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 && drawObjectNonNullCount == 0
                 && modelLikeNonNullCount == 0);
         var actorPlacementReady = nativeResolution == "found-single" && !objectTableRejected;
-        var lighting = BuildLightingDiagnostic(lightingMode, presetCompatibility.ExpectedBrightness, layerFilterKey);
+        var lighting = BuildLightingDiagnostic(
+            lightingMode,
+            presetCompatibility.ExpectedBrightness,
+            layerFilterKey,
+            overrideCandidateDiagnostic.Available);
         var characterExpected = backgroundMode switch
         {
             TitleBackgroundCharacterSelectBackgroundMode.Disabled => "native",
@@ -282,6 +302,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             foreground,
             presetCompatibility,
             overrideCompatibility,
+            overrideCandidateDiagnostic,
             lighting,
             objectTableRejected,
             currentObjectTableIgnored ? currentObjectTableIgnoredReason : objectTableRejected ? "zero-transform-stub-only" : "none",
@@ -393,31 +414,31 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         string territoryPath,
         uint territoryId,
         uint layerFilterKey,
-        TitleBackgroundCharacterSelectBackgroundMode backgroundMode)
+        TitleBackgroundCharacterSelectBackgroundMode backgroundMode,
+        TitleBackgroundCharacterSelectOverrideCandidate overrideCandidate)
     {
         var hasSelectedPreset = !string.IsNullOrWhiteSpace(selectedPresetId);
         var presetId = hasSelectedPreset
             ? selectedPresetId.Trim()
-            : IsKnownDarkOverrideTarget(territoryPath, territoryId, layerFilterKey) ? "custom:n4f4" : "custom";
-        var compatibility = IsKnownDarkOverrideTarget(territoryPath, territoryId, layerFilterKey)
-            ? TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
-            : TitleBackgroundCharacterSelectCompatibility.Unknown;
-        if (IsKnownDarkOverrideTarget(territoryPath, territoryId, layerFilterKey))
+            : overrideCandidate.Id;
+        if (overrideCandidate.ExpectedCompatibility != TitleBackgroundCharacterSelectCompatibility.Unknown)
         {
             var warning = hasSelectedPreset
-                ? "full scene override works as background-only; selected character is not expected to be visible"
-                : "synthetic custom override compatibility entry; full scene override works as background-only and selected character is not expected to be visible";
+                ? overrideCandidate.Warning
+                : overrideCandidate.Id == TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId
+                    ? "synthetic custom override compatibility entry; full scene override works as background-only and selected character is not expected to be visible"
+                    : overrideCandidate.Warning;
             return new TitleBackgroundPhase2NPresetCompatibility(
                 presetId,
-                compatibility,
-                TitleBackgroundCharacterSelectExpectedBrightness.Dark,
+                overrideCandidate.ExpectedCompatibility,
+                overrideCandidate.ExpectedBrightness,
                 warning,
                 backgroundMode == TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground
                     ? TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground
                     : TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly,
-                "ObjectTable candidates do not expose a stable CharaSelect preview model source; selected character model is not visible with full scene override",
-                true,
-                false);
+                overrideCandidate.KnownIssue,
+                overrideCandidate.BackgroundUsable,
+                overrideCandidate.CharacterExpectedVisible);
         }
 
         return new TitleBackgroundPhase2NPresetCompatibility(
@@ -438,15 +459,14 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         string territoryPath,
         uint territoryId,
         uint layerFilterKey,
-        TitleBackgroundPhase2NPresetCompatibility presetCompatibility)
+        TitleBackgroundPhase2NPresetCompatibility presetCompatibility,
+        TitleBackgroundCharacterSelectOverrideCandidate overrideCandidate)
     {
         var hasSelectedPreset = !string.IsNullOrWhiteSpace(selectedPresetId);
         var source = hasSelectedPreset ? "selected-preset" : "custom-override";
         var normalizedSelectedPresetId = hasSelectedPreset ? selectedPresetId.Trim() : "none";
         var id = presetCompatibility.CurrentPresetId;
-        var displayName = source == "custom-override" && id == "custom:n4f4"
-            ? "Custom n4f4 override target"
-            : id;
+        var displayName = source == "custom-override" ? overrideCandidate.DisplayName : id;
         var characterVisibility = presetCompatibility.CharacterExpectedVisible
             ? "visible"
             : presetCompatibility.ExpectedCompatibility is TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
@@ -565,13 +585,13 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
     private static TitleBackgroundPhase2NLightingDiagnostic BuildLightingDiagnostic(
         TitleBackgroundCharacterSelectLightingMode mode,
         TitleBackgroundCharacterSelectExpectedBrightness expectedBrightness,
-        uint layerFilterKey)
+        uint layerFilterKey,
+        IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> availableCandidates)
     {
         var isDark = expectedBrightness is TitleBackgroundCharacterSelectExpectedBrightness.Dark or TitleBackgroundCharacterSelectExpectedBrightness.TooDark;
+        var brightCandidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildBrightLayerCandidateList(availableCandidates);
         var recommended = isDark
-            ? mode == TitleBackgroundCharacterSelectLightingMode.PreferBrightLayer
-                ? "try-bright-layer"
-                : "add-bright-override-candidate"
+            ? TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildLightingRecommendedAction(availableCandidates)
             : "none";
         var lastSkipped = mode is TitleBackgroundCharacterSelectLightingMode.EnvironmentOverrideExperimental
             or TitleBackgroundCharacterSelectLightingMode.DisableDarkeningExperimental
@@ -593,8 +613,8 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             lastSkipped,
             expectedBrightness,
             layerFilterKey,
-            isDark,
-            isDark ? "none" : "not-needed",
+            expectedBrightness != TitleBackgroundCharacterSelectExpectedBrightness.Unknown,
+            isDark ? brightCandidates : "not-needed",
             recommended);
     }
 
@@ -650,9 +670,9 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             return ("needs-one-more-experimental-run", "try-native-preview-source", "native preview source candidate is ready but default-off");
         }
 
-        if (lighting.RecommendedAction == "try-bright-layer")
+        if (lighting.RecommendedAction is "try-bright-layer" or "try-bright-custom-target")
         {
-            return ("working-background-only", "try-bright-layer", "background is available but brightness is dark");
+            return ("working-background-only", lighting.RecommendedAction, "background is available but brightness is dark");
         }
 
         if (lastOverrideApplied)
