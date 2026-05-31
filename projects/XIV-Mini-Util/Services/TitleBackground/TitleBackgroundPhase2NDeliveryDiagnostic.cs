@@ -122,6 +122,19 @@ internal readonly record struct TitleBackgroundPhase2NOverrideCandidateDiagnosti
     int RegistryBrightCount,
     string RegistryDefaultId);
 
+internal readonly record struct TitleBackgroundPhase2NBackgroundApplicationDiagnostic(
+    bool Observed,
+    bool LastHistoricalOverrideApplied,
+    string LastHistoricalOverridePath,
+    string CurrentCandidateId,
+    bool VisualConfirmationRequired,
+    string UserVerdict);
+
+internal readonly record struct TitleBackgroundPhase2NSafetyDiagnostic(
+    string Verdict,
+    string Reason,
+    bool BlocksBackgroundCandidatePromotion);
+
 internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
     string FeatureGoal,
     TitleBackgroundCharacterSelectBackgroundMode BackgroundMode,
@@ -146,6 +159,16 @@ internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
     bool ActorPlacementReady,
     string ActorPlacementBlocker,
     string DeliveryVerdict,
+    TitleBackgroundPhase2NBackgroundApplicationDiagnostic BackgroundApplication,
+    TitleBackgroundPhase2NSafetyDiagnostic Safety,
+    string BackgroundDeliveryVerdict,
+    string TransitionSafetyVerdict,
+    string PostLoginLeakVerdict,
+    string UserMessage,
+    string UserNextAction,
+    string CandidateHumanName,
+    string CandidateHumanStatus,
+    string TransitionUserMessage,
     string MvpStatus,
     string MvpBlockingIssue,
     string MvpKnownLimitation,
@@ -194,7 +217,12 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         bool currentObjectTableValidForCharaSelect = true,
         string currentObjectTableInvalidReason = "none",
         string selectedOverrideCandidateId = "",
-        IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot>? manualCandidateSlots = null)
+        IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot>? manualCandidateSlots = null,
+        bool historicalLastOverrideApplied = false,
+        string historicalLastOverridePath = "",
+        bool sceneReadyAcceptedMultipleTimes = false,
+        bool activeAfterLoginDetected = false,
+        bool phase2GAppliedAfterLogin = false)
     {
         var normalizedManualSlots = manualCandidateSlots ?? [];
         var availableCandidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates(normalizedManualSlots);
@@ -290,6 +318,31 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             foreground.Available,
             presetCompatibility,
             lighting);
+        var backgroundApplication = BuildBackgroundApplication(
+            lastOverrideApplied,
+            historicalLastOverrideApplied,
+            historicalLastOverridePath,
+            overrideCandidate.Id);
+        var safety = BuildSafety(
+            transitionSafety,
+            sceneReadyAcceptedMultipleTimes,
+            activeAfterLoginDetected,
+            phase2GAppliedAfterLogin);
+        var backgroundDeliveryVerdict = backgroundApplication.Observed && overrideCompatibility.BackgroundUsable
+            ? "working-background-only-observed"
+            : "not-observed";
+        var transitionSafetyVerdict = BuildTransitionSafetyVerdict(safety, sceneReadyAcceptedMultipleTimes);
+        var postLoginLeakVerdict = BuildPostLoginLeakVerdict(activeAfterLoginDetected, phase2GAppliedAfterLogin);
+        var candidateHumanStatus = BuildCandidateHumanStatus(overrideCandidate);
+        var userMessage = backgroundApplication.Observed && !overrideCompatibility.CharacterExpectedVisible
+            ? "Background was applied as background-only. Selected character model is expected to remain hidden."
+            : "Background application still requires Character Select screenshot confirmation.";
+        var userNextAction = "Take screenshot in Character Select, then run /xmutbgdiag after login.";
+        var transitionUserMessage = postLoginLeakVerdict == "not-observed" && sceneReadyAcceptedMultipleTimes
+            ? "No post-login scene override leak observed, but sceneReady was accepted multiple times in this session."
+            : postLoginLeakVerdict == "not-observed"
+                ? "No post-login scene override leak observed."
+                : "Post-login scene override leak was observed; do not promote this candidate.";
         var (mvpStatus, mvpBlockingIssue, mvpKnownLimitation) = BuildMvpSummary(
             verdict,
             transitionSafety,
@@ -325,11 +378,99 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             actorPlacementReady,
             actorPlacementReady ? "none" : currentObjectTableIgnored ? currentObjectTableIgnoredReason : objectTableRejected ? "stub-only-object-table" : $"native-preview-source-{nativeResolution}",
             verdict,
+            backgroundApplication,
+            safety,
+            backgroundDeliveryVerdict,
+            transitionSafetyVerdict,
+            postLoginLeakVerdict,
+            userMessage,
+            userNextAction,
+            overrideCandidate.DisplayName,
+            candidateHumanStatus,
+            transitionUserMessage,
             mvpStatus,
             mvpBlockingIssue,
             mvpKnownLimitation,
             nextAction,
             nextActionReason);
+    }
+
+    private static TitleBackgroundPhase2NBackgroundApplicationDiagnostic BuildBackgroundApplication(
+        bool lastOverrideApplied,
+        bool historicalLastOverrideApplied,
+        string historicalLastOverridePath,
+        string currentCandidateId)
+    {
+        var historicalPath = string.IsNullOrWhiteSpace(historicalLastOverridePath)
+            ? "none"
+            : historicalLastOverridePath;
+        var observed = lastOverrideApplied || historicalLastOverrideApplied;
+        return new TitleBackgroundPhase2NBackgroundApplicationDiagnostic(
+            observed,
+            historicalLastOverrideApplied,
+            historicalPath,
+            string.IsNullOrWhiteSpace(currentCandidateId) ? "custom" : currentCandidateId,
+            true,
+            observed ? "background-applied-character-hidden" : "not-confirmed");
+    }
+
+    private static TitleBackgroundPhase2NSafetyDiagnostic BuildSafety(
+        string transitionSafety,
+        bool sceneReadyAcceptedMultipleTimes,
+        bool activeAfterLoginDetected,
+        bool phase2GAppliedAfterLogin)
+    {
+        if (activeAfterLoginDetected || phase2GAppliedAfterLogin)
+        {
+            return new TitleBackgroundPhase2NSafetyDiagnostic(
+                "unsafe",
+                activeAfterLoginDetected ? "scene-override-active-after-login" : "phase2g-applied-after-login",
+                true);
+        }
+
+        if (sceneReadyAcceptedMultipleTimes || transitionSafety == "unsafe")
+        {
+            return new TitleBackgroundPhase2NSafetyDiagnostic(
+                "warning",
+                sceneReadyAcceptedMultipleTimes ? "scene-ready-accepted-multiple-times" : "login-transition-safety-unsafe",
+                true);
+        }
+
+        return new TitleBackgroundPhase2NSafetyDiagnostic("safe", "none", false);
+    }
+
+    private static string BuildTransitionSafetyVerdict(
+        TitleBackgroundPhase2NSafetyDiagnostic safety,
+        bool sceneReadyAcceptedMultipleTimes)
+    {
+        if (sceneReadyAcceptedMultipleTimes)
+        {
+            return "warning-scene-ready-accepted-multiple-times";
+        }
+
+        return safety.Verdict switch
+        {
+            "safe" => "safe",
+            "warning" => $"warning-{safety.Reason}",
+            "unsafe" => $"unsafe-{safety.Reason}",
+            _ => "unknown",
+        };
+    }
+
+    private static string BuildPostLoginLeakVerdict(bool activeAfterLoginDetected, bool phase2GAppliedAfterLogin)
+    {
+        return activeAfterLoginDetected || phase2GAppliedAfterLogin
+            ? "observed"
+            : "not-observed";
+    }
+
+    private static string BuildCandidateHumanStatus(TitleBackgroundCharacterSelectOverrideCandidate candidate)
+    {
+        var verification = candidate.VerifiedInGame ? "Verified" : "Observed / Unverified";
+        var compatibility = candidate.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
+            ? "Background-only"
+            : candidate.ExpectedCompatibility.ToString();
+        return $"{verification} / {compatibility}";
     }
 
     private static (string Status, string BlockingIssue, string KnownLimitation) BuildMvpSummary(

@@ -1501,6 +1501,33 @@ Test("title background phase2o custom n4f4 is verified in game", () =>
     return TitleBackgroundCharacterSelectOverrideCandidateRegistry.GetDefault().VerifiedInGame;
 });
 
+Test("title background phase2q old sharlayan observed candidate exists", () =>
+{
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.TryGet("custom:old-sharlayan-k5t1", out var candidate)
+        && candidate.DisplayName == "Old Sharlayan outdoor test"
+        && candidate.TerritoryPath == "ex4/03_kld_k5/twn/k5t1/level/k5t1"
+        && candidate.TerritoryId == 962
+        && candidate.LayerFilterKey == 8
+        && candidate.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
+        && candidate.ExpectedBrightness == TitleBackgroundCharacterSelectExpectedBrightness.Unknown
+        && candidate.BackgroundUsable
+        && !candidate.CharacterExpectedVisible
+        && !candidate.VerifiedInGame
+        && candidate.Source == "registry-observed";
+});
+
+Test("title background phase2q old sharlayan does not replace default", () =>
+{
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.GetDefault().Id == "custom:n4f4"
+        && TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId == "custom:n4f4";
+});
+
+Test("title background phase2q old sharlayan dropdown label is unverified unknown background only", () =>
+{
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.TryGet("custom:old-sharlayan-k5t1", out var candidate)
+        && CandidateLabel(candidate) == "Old Sharlayan outdoor test [Unverified / Unknown / Background-only]";
+});
+
 Test("title background phase2o candidate registry keeps selected preset separate", () =>
 {
     var configuration = new Configuration
@@ -1571,6 +1598,93 @@ Test("title background phase2o no bright candidate reports none", () =>
             TitleBackgroundCharacterSelectOverrideCandidateRegistry.All) == "none"
         && TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildLightingRecommendedAction(
             TitleBackgroundCharacterSelectOverrideCandidateRegistry.All) == "add-bright-override-candidate";
+});
+
+Test("title background phase2q old sharlayan delivery exposes observed unverified background only", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(
+        summary,
+        lastOverrideApplied: true,
+        selectedOverrideCandidateId: "custom:old-sharlayan-k5t1",
+        overrideTerritoryPath: "ex4/03_kld_k5/twn/k5t1/level/k5t1",
+        overrideTerritoryId: 962,
+        overrideLayerFilterKey: 8,
+        historicalLastOverrideApplied: true,
+        historicalLastOverridePath: "ex4/03_kld_k5/twn/k5t1/level/k5t1");
+
+    return delivery.OverrideCandidate.Selected.Id == "custom:old-sharlayan-k5t1"
+        && delivery.OverrideCandidate.Selected.ExpectedBrightness == TitleBackgroundCharacterSelectExpectedBrightness.Unknown
+        && !delivery.OverrideCandidate.Selected.VerifiedInGame
+        && delivery.BackgroundApplication.Observed
+        && delivery.BackgroundApplication.LastHistoricalOverrideApplied
+        && delivery.BackgroundApplication.LastHistoricalOverridePath == "ex4/03_kld_k5/twn/k5t1/level/k5t1"
+        && delivery.BackgroundApplication.CurrentCandidateId == "custom:old-sharlayan-k5t1"
+        && delivery.BackgroundApplication.VisualConfirmationRequired
+        && delivery.BackgroundApplication.UserVerdict == "background-applied-character-hidden"
+        && delivery.BackgroundDeliveryVerdict == "working-background-only-observed"
+        && delivery.CandidateHumanName == "Old Sharlayan outdoor test"
+        && delivery.CandidateHumanStatus == "Observed / Unverified / Background-only"
+        && delivery.UserMessage == "Background was applied as background-only. Selected character model is expected to remain hidden."
+        && delivery.UserNextAction == "Take screenshot in Character Select, then run /xmutbgdiag after login.";
+});
+
+Test("title background phase2q background application survives transition safety warning", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(
+        summary,
+        lastOverrideApplied: true,
+        transitionSafety: "unsafe",
+        sceneReadyAcceptedMultipleTimes: true);
+
+    return delivery.DeliveryVerdict == "unsafe"
+        && delivery.BackgroundApplication.Observed
+        && delivery.BackgroundDeliveryVerdict == "working-background-only-observed"
+        && delivery.Safety.Verdict == "warning"
+        && delivery.Safety.Reason == "scene-ready-accepted-multiple-times"
+        && delivery.Safety.BlocksBackgroundCandidatePromotion
+        && delivery.TransitionSafetyVerdict == "warning-scene-ready-accepted-multiple-times";
+});
+
+Test("title background phase2q post login leak not observed without active override or phase2g", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(
+        summary,
+        lastOverrideApplied: true,
+        transitionSafety: "unsafe",
+        sceneReadyAcceptedMultipleTimes: true,
+        activeAfterLoginDetected: false,
+        phase2GAppliedAfterLogin: false);
+
+    return delivery.PostLoginLeakVerdict == "not-observed"
+        && delivery.TransitionUserMessage == "No post-login scene override leak observed, but sceneReady was accepted multiple times in this session.";
+});
+
+Test("title background phase2q leak blocks candidate promotion", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var delivery = Phase2N(
+        summary,
+        lastOverrideApplied: true,
+        activeAfterLoginDetected: true);
+
+    return delivery.PostLoginLeakVerdict == "observed"
+        && delivery.Safety.Verdict == "unsafe"
+        && delivery.Safety.BlocksBackgroundCandidatePromotion;
 });
 
 Test("title background phase2p manual candidate disabled is not available", () =>
@@ -1745,11 +1859,47 @@ Test("title background phase2o delivery exposes selected override candidate", ()
 
     return delivery.OverrideCandidate.Selected.Id == "custom:n4f4"
         && delivery.OverrideCandidate.Selected.VerifiedInGame
-        && delivery.OverrideCandidate.Available.Count == 1
+        && delivery.OverrideCandidate.Available.Count == 2
         && delivery.OverrideCandidate.Available[0].Id == "custom:n4f4";
 });
 
-Test("title background phase2o docs and ui avoid n4f4 preset wording", () =>
+Test("title background phase2q docs mention xmutbgdiag after login", () =>
+{
+    var root = FindRepositoryRoot();
+    var text = File.ReadAllText(Path.Combine(root, "docs", "title-background-character-select-bright-candidates.md"));
+
+    return text.Contains("`/xmutbgdiag` cannot be run from Character Select", StringComparison.Ordinal)
+        && text.Contains("Run `/xmutbgdiag` after login", StringComparison.Ordinal)
+        && text.Contains("Capture a screenshot in Character Select", StringComparison.Ordinal);
+});
+
+Test("title background phase2q implementation avoids prohibited write paths", () =>
+{
+    var root = FindRepositoryRoot();
+    var changedFiles = new[]
+    {
+        Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundCharacterSelectOverrideCandidateRegistry.cs"),
+        Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundPhase2NDeliveryDiagnostic.cs"),
+        Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"),
+    };
+    var titleBackgroundText = string.Join(
+        "\n",
+        changedFiles.Select(File.ReadAllText));
+    var docs = File.ReadAllText(Path.Combine(root, "docs", "title-background-character-select-bright-candidates.md"));
+
+    return !titleBackgroundText.Contains("SceneCamera.Position", StringComparison.Ordinal)
+        && !titleBackgroundText.Contains("SceneCamera.LookAtVector", StringComparison.Ordinal)
+        && !titleBackgroundText.Contains("SceneCamera.FoV", StringComparison.Ordinal)
+        && !titleBackgroundText.Contains("Framework.Update", StringComparison.Ordinal)
+        && !titleBackgroundText.Contains(".Position =", StringComparison.Ordinal)
+        && !titleBackgroundText.Contains(".Rotation =", StringComparison.Ordinal)
+        && !titleBackgroundText.Contains("light write", StringComparison.OrdinalIgnoreCase)
+        && !titleBackgroundText.Contains("environment write", StringComparison.OrdinalIgnoreCase)
+        && !docs.Contains("automatic map cycling", StringComparison.OrdinalIgnoreCase)
+        && !docs.Contains("n4f4 " + "preset", StringComparison.OrdinalIgnoreCase);
+});
+
+Test("title background phase2o docs and ui avoid n4f4 synthetic preset wording", () =>
 {
     var root = FindRepositoryRoot();
     var paths = new[]
@@ -1761,7 +1911,7 @@ Test("title background phase2o docs and ui avoid n4f4 preset wording", () =>
     };
 
     return paths.All(path => File.Exists(path)
-        && !File.ReadAllText(path).Contains("n4f4 preset", StringComparison.OrdinalIgnoreCase));
+        && !File.ReadAllText(path).Contains("n4f4 " + "preset", StringComparison.OrdinalIgnoreCase));
 });
 
 Test("title background phase2n stub only never reports character observed", () =>
@@ -2887,6 +3037,16 @@ TitleBackgroundCharacterSelectManualCandidateSlot ManualSlot(
         brightness);
 }
 
+string CandidateLabel(TitleBackgroundCharacterSelectOverrideCandidate candidate)
+{
+    var verified = candidate.VerifiedInGame ? "Verified" : "Unverified";
+    var source = candidate.Source == "manual" ? "Manual / " : string.Empty;
+    var compatibility = candidate.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
+        ? "Background-only"
+        : candidate.ExpectedCompatibility.ToString();
+    return $"{candidate.DisplayName} [{source}{verified} / {candidate.ExpectedBrightness} / {compatibility}]";
+}
+
 string FindRepositoryRoot()
 {
     var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -2915,7 +3075,12 @@ TitleBackgroundPhase2NDeliverySummary Phase2N(
     string overrideTerritoryPath = "ex3/01_nvt_n4/fld/n4f4/level/n4f4",
     uint overrideTerritoryId = 816,
     uint overrideLayerFilterKey = 51,
-    IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot>? manualCandidateSlots = null)
+    IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot>? manualCandidateSlots = null,
+    bool historicalLastOverrideApplied = false,
+    string historicalLastOverridePath = "",
+    bool sceneReadyAcceptedMultipleTimes = false,
+    bool activeAfterLoginDetected = false,
+    bool phase2GAppliedAfterLogin = false)
 {
     return TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
         backgroundMode,
@@ -2949,7 +3114,12 @@ TitleBackgroundPhase2NDeliverySummary Phase2N(
         currentObjectTableValidForCharaSelect,
         currentObjectTableValidForCharaSelect ? "none" : "post-login-world-object-table-not-valid-for-chara-select",
         selectedOverrideCandidateId,
-        manualCandidateSlots);
+        manualCandidateSlots,
+        historicalLastOverrideApplied,
+        historicalLastOverridePath,
+        sceneReadyAcceptedMultipleTimes,
+        activeAfterLoginDetected,
+        phase2GAppliedAfterLogin);
 }
 
 TitleBackgroundPhase2NDeliverySummary Phase2NFromRaw(

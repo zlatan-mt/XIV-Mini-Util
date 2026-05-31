@@ -891,7 +891,7 @@ public sealed class SettingsTab : ITabComponent
             ImGui.EndCombo();
         }
 
-        ImGui.TextWrapped("背景のみモードではロビーシーン全体を差し替えます。選択キャラクター本体は表示されない想定です。手動候補は未検証のため、/xmutbgdiag とスクリーンショットで確認してください。");
+        ImGui.TextWrapped("背景のみモードではロビーシーン全体を差し替えます。選択キャラクター本体は表示されない想定です。Character Select ではスクリーンショットで背景だけ確認し、ログイン後に /xmutbgdiag を実行してください。");
         DrawTitleBackgroundManualCandidateSlot1(manualSlots[0]);
     }
 

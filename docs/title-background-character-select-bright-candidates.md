@@ -55,14 +55,56 @@ Do not invent `territoryPath`, `territoryId`, or `layerFilterKey` from visual gu
 
 1. Select the candidate from `Character Select background candidate`.
 2. Keep `selectedPresetId=none` for custom candidates.
-3. Enter Character Select and run `/xmutbgdiag`.
-4. Confirm `phase2N.mvpStatus=complete-background-only`.
-5. Confirm `phase2N.deliveryVerdict=working-background-only`.
-6. Confirm `phase2N.overrideCandidate.selectedId=<candidate id>`.
-7. Confirm `phase2N.overrideCandidate.verifiedInGame` matches the candidate metadata.
-8. Confirm `phase2N.compatibility.backgroundUsable=True`.
-9. Confirm `phase2N.compatibility.characterExpectedVisible=False`.
-10. Confirm login transition safety remains safe.
+3. Enter Character Select and capture a screenshot. `/xmutbgdiag` cannot be run from Character Select.
+4. Login to the game world.
+5. Run `/xmutbgdiag` after login.
+6. Confirm `phase2N.backgroundApplication.observed=True`.
+7. Confirm `phase2N.backgroundDeliveryVerdict=working-background-only-observed`.
+8. Confirm `phase2N.overrideCandidate.selectedId=<candidate id>`.
+9. Confirm `phase2N.overrideCandidate.verifiedInGame` matches the candidate metadata.
+10. Confirm `phase2N.compatibility.backgroundUsable=True`.
+11. Confirm `phase2N.compatibility.characterExpectedVisible=False`.
+12. Confirm `phase2N.postLoginLeakVerdict=not-observed`.
+13. Read `phase2N.safety.*` separately from background application. A transition warning can block promotion without making the background application fail.
+
+## Observed unverified candidate
+
+Old Sharlayan is available as an observed, unverified background-only candidate. It is not the default and must not be promoted until repeated screenshots are stable.
+
+```text
+id=custom:old-sharlayan-k5t1
+displayName=Old Sharlayan outdoor test
+territoryPath=ex4/03_kld_k5/twn/k5t1/level/k5t1
+territoryId=962
+layerFilterKey=8
+expectedCompatibility=BackgroundOnly
+expectedBrightness=Unknown
+backgroundUsable=True
+characterExpectedVisible=False
+verifiedInGame=False
+source=registry-observed
+warning=observed as background-only in Character Select; not yet promoted to verified candidate
+knownIssue=selected character model is hidden with full scene override
+recommendedAction=compare-screenshot-and-promote-if-stable
+```
+
+UI label:
+
+```text
+Old Sharlayan outdoor test [Unverified / Unknown / Background-only]
+```
+
+Expected user-facing diagnostics after screenshot and login:
+
+```text
+phase2N.userMessage=Background was applied as background-only. Selected character model is expected to remain hidden.
+phase2N.userNextAction=Take screenshot in Character Select, then run /xmutbgdiag after login.
+phase2N.candidateHumanName=Old Sharlayan outdoor test
+phase2N.candidateHumanStatus=Observed / Unverified / Background-only
+transition.userMessage=No post-login scene override leak observed, but sceneReady was accepted multiple times in this session.
+```
+
+If `transition.sceneOverride.activeAfterLoginDetected=False` and `transition.phase2G.appliedAfterLogin=False`, treat the post-login leak as not observed even when `transition.verdict.sceneReadyAcceptedMultipleTimes=True`.
 
 ## Screenshot comparison
 
@@ -164,8 +206,9 @@ No safe production bright candidate is currently present in this repository, so 
 4. Set `Expected brightness` to `Unknown`, `Dark`, or `Bright`.
 5. Select `Manual candidate slot 1` in `Character Select background candidate`.
 6. Re-enter Character Select if needed.
-7. Run `/xmutbgdiag`.
-8. Capture a screenshot.
+7. Capture a screenshot in Character Select.
+8. Login to the game world.
+9. Run `/xmutbgdiag` after login.
 
 Manual candidates are always unverified by default. If a manual candidate is good, promote it to the production registry in a later code change after human confirmation.
 
@@ -177,9 +220,10 @@ Manual candidates are always unverified by default. If a manual candidate is goo
 3. Enter territoryPath / territoryId / layerFilterKey.
 4. Select manual candidate.
 5. Re-enter Character Select if needed.
-6. Run /xmutbgdiag.
-7. Capture SS.
-8. Check:
+6. Capture SS in Character Select.
+7. Login to the game world.
+8. Run /xmutbgdiag after login.
+9. Check:
    - background appears
    - UI appears
    - selected character remains hidden

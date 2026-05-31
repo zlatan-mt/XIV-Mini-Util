@@ -809,6 +809,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var phase2NCurrentObjectTableInvalidReason = phase2NCurrentObjectTableValid
             ? "none"
             : "post-login-world-object-table-not-valid-for-chara-select";
+        var phase2NSceneOverrideActiveAfterLoginDetected = _transitionDiagnostics.StaleSceneOverrideStateAfterLogin
+            || (_clientState.IsLoggedIn && _activeSceneOverride);
         var phase2NDeliverySummary = TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
             _configuration.TitleBackgroundCharacterSelectBackgroundMode,
             _configuration.TitleBackgroundCharacterSelectLightingMode,
@@ -831,7 +833,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             phase2NCurrentObjectTableValid,
             phase2NCurrentObjectTableInvalidReason,
             _configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
-            BuildPhase2PManualCandidateSlots());
+            BuildPhase2PManualCandidateSlots(),
+            _lastOverrideApplied,
+            _lastHistoricalOverridePath,
+            _sceneReadySignalAcceptedCount > 1,
+            phase2NSceneOverrideActiveAfterLoginDetected,
+            _transitionDiagnostics.Phase2GAppliedAfterLogin);
         var deliveryDetailPath = !includeDetailedPhase2Diagnostics
             ? SavePhase2NDeliveryDiagnosticDump(phase2NDeliverySummary)
             : string.Empty;
@@ -5500,6 +5507,15 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2N.objectTableActorRejected.reason={FormatNone(summary.ObjectTableActorRejectedReason)}");
         lines.Add($"phase2N.actorPlacement.ready={summary.ActorPlacementReady}");
         lines.Add($"phase2N.actorPlacement.blocker={FormatNone(summary.ActorPlacementBlocker)}");
+        lines.Add($"phase2N.backgroundApplication.observed={summary.BackgroundApplication.Observed}");
+        lines.Add($"phase2N.backgroundApplication.lastHistoricalOverrideApplied={summary.BackgroundApplication.LastHistoricalOverrideApplied}");
+        lines.Add($"phase2N.backgroundApplication.lastHistoricalOverridePath={FormatNone(summary.BackgroundApplication.LastHistoricalOverridePath)}");
+        lines.Add($"phase2N.backgroundApplication.currentCandidateId={FormatNone(summary.BackgroundApplication.CurrentCandidateId)}");
+        lines.Add($"phase2N.backgroundApplication.visualConfirmationRequired={summary.BackgroundApplication.VisualConfirmationRequired}");
+        lines.Add($"phase2N.backgroundApplication.userVerdict={FormatNone(summary.BackgroundApplication.UserVerdict)}");
+        lines.Add($"phase2N.safety.verdict={FormatNone(summary.Safety.Verdict)}");
+        lines.Add($"phase2N.safety.reason={FormatNone(summary.Safety.Reason)}");
+        lines.Add($"phase2N.safety.blocksBackgroundCandidatePromotion={summary.Safety.BlocksBackgroundCandidatePromotion}");
         lines.Add($"phase2N.presetCompatibility.currentPresetId={FormatNone(summary.PresetCompatibility.CurrentPresetId)}");
         lines.Add($"phase2N.presetCompatibility.expectedCompatibility={summary.PresetCompatibility.ExpectedCompatibility}");
         lines.Add($"phase2N.presetCompatibility.expectedBrightness={summary.PresetCompatibility.ExpectedBrightness}");
@@ -5583,6 +5599,14 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2N.lighting.brightLayerCandidates={FormatNone(summary.Lighting.BrightLayerCandidates)}");
         lines.Add($"phase2N.lighting.recommendedAction={FormatNone(summary.Lighting.RecommendedAction)}");
         lines.Add($"phase2N.deliveryVerdict={FormatNone(summary.DeliveryVerdict)}");
+        lines.Add($"phase2N.backgroundDeliveryVerdict={FormatNone(summary.BackgroundDeliveryVerdict)}");
+        lines.Add($"phase2N.transitionSafetyVerdict={FormatNone(summary.TransitionSafetyVerdict)}");
+        lines.Add($"phase2N.postLoginLeakVerdict={FormatNone(summary.PostLoginLeakVerdict)}");
+        lines.Add($"phase2N.userMessage={FormatNone(summary.UserMessage)}");
+        lines.Add($"phase2N.userNextAction={FormatNone(summary.UserNextAction)}");
+        lines.Add($"phase2N.candidateHumanName={FormatNone(summary.CandidateHumanName)}");
+        lines.Add($"phase2N.candidateHumanStatus={FormatNone(summary.CandidateHumanStatus)}");
+        lines.Add($"transition.userMessage={FormatNone(summary.TransitionUserMessage)}");
         lines.Add($"phase2N.mvpStatus={FormatNone(summary.MvpStatus)}");
         lines.Add($"phase2N.mvpBlockingIssue={FormatNone(summary.MvpBlockingIssue)}");
         lines.Add($"phase2N.mvpKnownLimitation={FormatNone(summary.MvpKnownLimitation)}");

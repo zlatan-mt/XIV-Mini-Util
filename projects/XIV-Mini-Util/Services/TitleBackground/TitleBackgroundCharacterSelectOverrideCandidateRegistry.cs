@@ -52,9 +52,26 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
         "selected character model is hidden with full scene override",
         "add-bright-override-candidate or use-background-only");
 
+    private static readonly TitleBackgroundCharacterSelectOverrideCandidate OldSharlayanOutdoorTest = new(
+        "custom:old-sharlayan-k5t1",
+        "Old Sharlayan outdoor test",
+        "ex4/03_kld_k5/twn/k5t1/level/k5t1",
+        962,
+        8,
+        TitleBackgroundCharacterSelectCompatibility.BackgroundOnly,
+        TitleBackgroundCharacterSelectExpectedBrightness.Unknown,
+        true,
+        false,
+        false,
+        "registry-observed",
+        "observed as background-only in Character Select; not yet promoted to verified candidate",
+        "selected character model is hidden with full scene override",
+        "compare-screenshot-and-promote-if-stable");
+
     public static IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> All { get; } =
     [
         CustomN4F4,
+        OldSharlayanOutdoorTest,
     ];
 
     public static bool TryGet(string? id, out TitleBackgroundCharacterSelectOverrideCandidate candidate)
