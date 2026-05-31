@@ -1551,6 +1551,20 @@ Test("title background phase2o unknown custom override falls back to custom unkn
         && !candidate.VerifiedInGame;
 });
 
+Test("title background phase2o stale candidate id does not override custom values", () =>
+{
+    var candidate = TitleBackgroundCharacterSelectOverrideCandidateRegistry.ResolveFromConfig(
+        "custom:n4f4",
+        "ex5/01_xkt_x6/fld/x6f3/level/x6f3",
+        1234,
+        7);
+
+    return candidate.Id == "custom"
+        && candidate.DisplayName == "Custom override target"
+        && candidate.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.Unknown
+        && !candidate.VerifiedInGame;
+});
+
 Test("title background phase2o no bright candidate reports none", () =>
 {
     return TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildBrightLayerCandidateList(

@@ -69,12 +69,13 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
         uint overrideTerritoryId,
         uint layerFilterKey)
     {
-        if (TryGet(selectedCandidateId, out var selected))
+        var normalizedPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(overrideTerritoryPath);
+        if (TryGet(selectedCandidateId, out var selected)
+            && Matches(selected, normalizedPath, overrideTerritoryId, layerFilterKey))
         {
             return selected;
         }
 
-        var normalizedPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(overrideTerritoryPath);
         foreach (var candidate in All)
         {
             if (Matches(candidate, normalizedPath, overrideTerritoryId, layerFilterKey))
