@@ -868,16 +868,19 @@ public sealed class SettingsTab : ITabComponent
 
     private void DrawTitleBackgroundOverrideCandidateSelector()
     {
+        var manualSlots = BuildTitleBackgroundManualCandidateSlots();
+        var availableCandidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates(manualSlots);
         var selectedCandidate = TitleBackgroundCharacterSelectOverrideCandidateRegistry.ResolveFromConfig(
             _configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
             _configuration.TitleBackgroundTerritoryPath,
             _configuration.TitleBackgroundTerritoryTypeId,
-            _configuration.TitleBackgroundLayoutLayerFilterKey);
+            _configuration.TitleBackgroundLayoutLayerFilterKey,
+            availableCandidates);
         var selectedLabel = GetTitleBackgroundOverrideCandidateLabel(selectedCandidate);
 
         if (ImGui.BeginCombo("Character Select background candidate##TitleBackgroundOverrideCandidate", selectedLabel))
         {
-            foreach (var candidate in TitleBackgroundCharacterSelectOverrideCandidateRegistry.All)
+            foreach (var candidate in availableCandidates)
             {
                 if (ImGui.Selectable(GetTitleBackgroundOverrideCandidateLabel(candidate), selectedCandidate.Id == candidate.Id))
                 {
@@ -888,7 +891,8 @@ public sealed class SettingsTab : ITabComponent
             ImGui.EndCombo();
         }
 
-        ImGui.TextWrapped("背景のみモードではロビーシーン全体を差し替えます。選択キャラクター本体は表示されない想定です。明るい候補を選ぶと見栄えを改善できます。");
+        ImGui.TextWrapped("背景のみモードではロビーシーン全体を差し替えます。選択キャラクター本体は表示されない想定です。手動候補は未検証のため、/xmutbgdiag とスクリーンショットで確認してください。");
+        DrawTitleBackgroundManualCandidateSlot1(manualSlots[0]);
     }
 
     private void ApplyTitleBackgroundOverrideCandidate(TitleBackgroundCharacterSelectOverrideCandidate candidate)
@@ -898,6 +902,99 @@ public sealed class SettingsTab : ITabComponent
         TitleBackgroundCharacterSelectOverrideCandidateRegistry.ApplyToConfiguration(_configuration, candidate);
         _configuration.Save();
         _titleScreenBackgroundService.ApplyFromConfiguration();
+    }
+
+    private IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot> BuildTitleBackgroundManualCandidateSlots()
+    {
+        return
+        [
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildManualSlot(
+                1,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1Enabled,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1DisplayName,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1TerritoryPath,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1TerritoryId,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1ExpectedBrightness),
+        ];
+    }
+
+    private void DrawTitleBackgroundManualCandidateSlot1(TitleBackgroundCharacterSelectManualCandidateSlot slot)
+    {
+        if (!ImGui.TreeNode("Manual candidate slot 1##TitleBackgroundManualCandidate1"))
+        {
+            return;
+        }
+
+        var changed = false;
+        var enabled = _configuration.TitleBackgroundCharacterSelectManualCandidate1Enabled;
+        if (ImGui.Checkbox("Enable manual candidate slot 1##TitleBackgroundManualCandidate1Enabled", ref enabled))
+        {
+            _configuration.TitleBackgroundCharacterSelectManualCandidate1Enabled = enabled;
+            changed = true;
+        }
+
+        var displayName = _configuration.TitleBackgroundCharacterSelectManualCandidate1DisplayName;
+        if (ImGui.InputTextWithHint("Display name##TitleBackgroundManualCandidate1DisplayName", "Manual candidate slot 1", ref displayName, 128))
+        {
+            _configuration.TitleBackgroundCharacterSelectManualCandidate1DisplayName = displayName.Trim();
+            changed = true;
+        }
+
+        var territoryPath = _configuration.TitleBackgroundCharacterSelectManualCandidate1TerritoryPath;
+        if (ImGui.InputTextWithHint("Territory path##TitleBackgroundManualCandidate1TerritoryPath", "ex5/.../level/...", ref territoryPath, 256))
+        {
+            _configuration.TitleBackgroundCharacterSelectManualCandidate1TerritoryPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(territoryPath);
+            changed = true;
+        }
+
+        var territoryId = (int)_configuration.TitleBackgroundCharacterSelectManualCandidate1TerritoryId;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("Territory id##TitleBackgroundManualCandidate1TerritoryId", ref territoryId))
+        {
+            _configuration.TitleBackgroundCharacterSelectManualCandidate1TerritoryId = (uint)Math.Clamp(territoryId, 0, int.MaxValue);
+            changed = true;
+        }
+
+        var layerFilterKey = (int)_configuration.TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("Layer filter key##TitleBackgroundManualCandidate1LayerFilterKey", ref layerFilterKey))
+        {
+            _configuration.TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey = (uint)Math.Clamp(layerFilterKey, 0, int.MaxValue);
+            changed = true;
+        }
+
+        var expectedBrightness = _configuration.TitleBackgroundCharacterSelectManualCandidate1ExpectedBrightness;
+        if (ImGui.BeginCombo("Expected brightness##TitleBackgroundManualCandidate1ExpectedBrightness", expectedBrightness.ToString()))
+        {
+            foreach (TitleBackgroundCharacterSelectExpectedBrightness candidate in Enum.GetValues(typeof(TitleBackgroundCharacterSelectExpectedBrightness)))
+            {
+                if (ImGui.Selectable(candidate.ToString(), expectedBrightness == candidate))
+                {
+                    _configuration.TitleBackgroundCharacterSelectManualCandidate1ExpectedBrightness = candidate;
+                    changed = true;
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.TextDisabled($"Manual slot status: {(slot.Valid ? "valid" : slot.ValidationError)}");
+
+        if (changed)
+        {
+            var updatedSlot = BuildTitleBackgroundManualCandidateSlots()[0];
+            if (_configuration.TitleBackgroundCharacterSelectOverrideCandidateId == TitleBackgroundCharacterSelectOverrideCandidateRegistry.ManualSlot1CandidateId
+                && TitleBackgroundCharacterSelectOverrideCandidateRegistry.TryCreateManualCandidate(updatedSlot, out var candidate))
+            {
+                TitleBackgroundCharacterSelectOverrideCandidateRegistry.ApplyToConfiguration(_configuration, candidate);
+            }
+
+            _configuration.Save();
+            _titleScreenBackgroundService.ApplyFromConfiguration();
+        }
+
+        ImGui.TreePop();
     }
 
     private void DrawTitleBackgroundCaptureResult()
@@ -1163,10 +1260,11 @@ public sealed class SettingsTab : ITabComponent
     private static string GetTitleBackgroundOverrideCandidateLabel(TitleBackgroundCharacterSelectOverrideCandidate candidate)
     {
         var verified = candidate.VerifiedInGame ? "Verified" : "Unverified";
+        var source = candidate.Source == "manual" ? "Manual / " : string.Empty;
         var compatibility = candidate.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
             ? "Background-only"
             : candidate.ExpectedCompatibility.ToString();
-        return $"{candidate.DisplayName} [{verified} / {candidate.ExpectedBrightness} / {compatibility}]";
+        return $"{candidate.DisplayName} [{source}{verified} / {candidate.ExpectedBrightness} / {compatibility}]";
     }
 
     private static string GetTitleBackgroundResolverModeLabel(TitleBackgroundResolverMode mode)
@@ -1208,6 +1306,12 @@ public sealed class SettingsTab : ITabComponent
         _configuration.TitleBackgroundCameraOverrideEnabled = false;
         _configuration.TitleBackgroundSelectedPresetId = string.Empty;
         _configuration.TitleBackgroundCharacterSelectOverrideCandidateId = string.Empty;
+        _configuration.TitleBackgroundCharacterSelectManualCandidate1Enabled = false;
+        _configuration.TitleBackgroundCharacterSelectManualCandidate1DisplayName = string.Empty;
+        _configuration.TitleBackgroundCharacterSelectManualCandidate1TerritoryPath = string.Empty;
+        _configuration.TitleBackgroundCharacterSelectManualCandidate1TerritoryId = 0;
+        _configuration.TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey = 0;
+        _configuration.TitleBackgroundCharacterSelectManualCandidate1ExpectedBrightness = TitleBackgroundCharacterSelectExpectedBrightness.Unknown;
         _titleBackgroundPendingPresetId = string.Empty;
         _configuration.TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.ResolveOnly;
         _configuration.TitleBackgroundCharacterSelectBackgroundMode = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly;

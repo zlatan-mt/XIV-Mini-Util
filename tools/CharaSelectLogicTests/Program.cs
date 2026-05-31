@@ -1573,6 +1573,139 @@ Test("title background phase2o no bright candidate reports none", () =>
             TitleBackgroundCharacterSelectOverrideCandidateRegistry.All) == "add-bright-override-candidate";
 });
 
+Test("title background phase2p manual candidate disabled is not available", () =>
+{
+    var slot = ManualSlot(enabled: false);
+    var candidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates([slot]);
+
+    return !slot.Valid
+        && slot.ValidationError == "disabled"
+        && candidates.All(candidate => candidate.Id != "manual:slot1");
+});
+
+Test("title background phase2p manual candidate invalid path is rejected", () =>
+{
+    var slot = ManualSlot(path: "bad/path", territoryId: 900, enabled: true);
+    var candidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates([slot]);
+
+    return !slot.Valid
+        && slot.ValidationError == "territory-path-invalid"
+        && candidates.All(candidate => candidate.Id != "manual:slot1");
+});
+
+Test("title background phase2p manual candidate territory id zero is rejected", () =>
+{
+    var slot = ManualSlot(territoryId: 0, enabled: true);
+    var candidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates([slot]);
+
+    return !slot.Valid
+        && slot.ValidationError == "territory-id-zero"
+        && candidates.All(candidate => candidate.Id != "manual:slot1");
+});
+
+Test("title background phase2p valid manual candidate is available", () =>
+{
+    var slot = ManualSlot(enabled: true);
+    var candidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates([slot]);
+    var manual = candidates.FirstOrDefault(candidate => candidate.Id == "manual:slot1");
+
+    return slot.Valid
+        && manual.Id == "manual:slot1"
+        && manual.Source == "manual"
+        && manual.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly;
+});
+
+Test("title background phase2p manual candidate is never verified by default", () =>
+{
+    var slot = ManualSlot(enabled: true);
+    var candidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates([slot]);
+    var manual = candidates.First(candidate => candidate.Id == "manual:slot1");
+
+    return !manual.VerifiedInGame
+        && manual.Warning.Contains("unverified", StringComparison.OrdinalIgnoreCase);
+});
+
+Test("title background phase2p manual bright candidate contributes to bright list", () =>
+{
+    var candidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates(
+        [ManualSlot(enabled: true, brightness: TitleBackgroundCharacterSelectExpectedBrightness.Bright)]);
+
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildBrightLayerCandidateList(candidates) == "manual:slot1";
+});
+
+Test("title background phase2p manual bright candidate recommends verification", () =>
+{
+    var candidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates(
+        [ManualSlot(enabled: true, brightness: TitleBackgroundCharacterSelectExpectedBrightness.Bright)]);
+
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildLightingRecommendedAction(candidates) == "verify-manual-bright-candidate";
+});
+
+Test("title background phase2p selecting manual candidate updates override fields", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundSelectedPresetId = "built-in-test",
+    };
+    var slot = ManualSlot(enabled: true, brightness: TitleBackgroundCharacterSelectExpectedBrightness.Bright);
+    var candidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates([slot]);
+    var manual = candidates.First(candidate => candidate.Id == "manual:slot1");
+
+    TitleBackgroundCharacterSelectOverrideCandidateRegistry.ApplyToConfiguration(configuration, manual);
+
+    return configuration.TitleBackgroundSelectedPresetId == string.Empty
+        && configuration.TitleBackgroundCharacterSelectOverrideCandidateId == "manual:slot1"
+        && configuration.TitleBackgroundTerritoryPath == manual.TerritoryPath
+        && configuration.TitleBackgroundTerritoryTypeId == manual.TerritoryId
+        && configuration.TitleBackgroundLayoutTerritoryTypeId == manual.TerritoryId
+        && configuration.TitleBackgroundLayoutLayerFilterKey == manual.LayerFilterKey;
+});
+
+Test("title background phase2p delivery selects valid manual candidate", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var slot = ManualSlot(enabled: true, brightness: TitleBackgroundCharacterSelectExpectedBrightness.Bright);
+    var delivery = Phase2N(
+        summary,
+        lastOverrideApplied: true,
+        selectedOverrideCandidateId: "manual:slot1",
+        overrideTerritoryPath: slot.TerritoryPath,
+        overrideTerritoryId: slot.TerritoryId,
+        overrideLayerFilterKey: slot.LayerFilterKey,
+        manualCandidateSlots: [slot]);
+
+    return delivery.OverrideCandidate.Selected.Id == "manual:slot1"
+        && delivery.OverrideCandidate.Selected.Source == "manual"
+        && !delivery.OverrideCandidate.Selected.VerifiedInGame
+        && delivery.OverrideCandidate.ManualSlots[0].Valid
+        && delivery.Lighting.BrightLayerCandidates == "manual:slot1"
+        && delivery.Lighting.RecommendedAction == "verify-manual-bright-candidate";
+});
+
+Test("title background phase2p invalid manual candidate falls back safely", () =>
+{
+    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    [
+        Phase2MFrameFromCandidates([]),
+    ]);
+    var slot = ManualSlot(path: "bad/path", territoryId: 900, enabled: true);
+    var delivery = Phase2N(
+        summary,
+        lastOverrideApplied: true,
+        selectedOverrideCandidateId: "manual:slot1",
+        overrideTerritoryPath: "ex3/01_nvt_n4/fld/n4f4/level/n4f4",
+        overrideTerritoryId: 816,
+        overrideLayerFilterKey: 51,
+        manualCandidateSlots: [slot]);
+
+    return delivery.OverrideCandidate.Selected.Id == "custom:n4f4"
+        && delivery.OverrideCandidate.ManualSlots[0].ValidationError == "territory-path-invalid"
+        && delivery.MvpStatus == "complete-background-only";
+});
+
 Test("title background phase2o bright candidate list reports candidate id", () =>
 {
     var candidates = new[]
@@ -2731,9 +2864,27 @@ TitleBackgroundCharacterSelectOverrideCandidate TestBrightCandidate()
         true,
         false,
         false,
+        "registry",
         "test-only bright candidate",
         "test-only",
         "try-bright-custom-target");
+}
+
+TitleBackgroundCharacterSelectManualCandidateSlot ManualSlot(
+    bool enabled = true,
+    string path = "ex5/01_xkt_x6/fld/x6f3/level/x6f3",
+    uint territoryId = 1234,
+    uint layerFilterKey = 7,
+    TitleBackgroundCharacterSelectExpectedBrightness brightness = TitleBackgroundCharacterSelectExpectedBrightness.Unknown)
+{
+    return TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildManualSlot(
+        1,
+        enabled,
+        "Manual test candidate",
+        path,
+        territoryId,
+        layerFilterKey,
+        brightness);
 }
 
 string FindRepositoryRoot()
@@ -2759,15 +2910,20 @@ TitleBackgroundPhase2NDeliverySummary Phase2N(
     string selectedPresetId = "",
     bool lastOverrideApplied = false,
     string transitionSafety = "safe",
-    bool currentObjectTableValidForCharaSelect = true)
+    bool currentObjectTableValidForCharaSelect = true,
+    string selectedOverrideCandidateId = "",
+    string overrideTerritoryPath = "ex3/01_nvt_n4/fld/n4f4/level/n4f4",
+    uint overrideTerritoryId = 816,
+    uint overrideLayerFilterKey = 51,
+    IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot>? manualCandidateSlots = null)
 {
     return TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
         backgroundMode,
         lightingMode,
         selectedPresetId,
-        "ex3/01_nvt_n4/fld/n4f4/level/n4f4",
-        816,
-        51,
+        overrideTerritoryPath,
+        overrideTerritoryId,
+        overrideLayerFilterKey,
         sceneOverrideEnabled: true,
         lastOverrideApplied,
         summary.Resolution,
@@ -2791,7 +2947,9 @@ TitleBackgroundPhase2NDeliverySummary Phase2N(
         ],
         transitionSafety,
         currentObjectTableValidForCharaSelect,
-        currentObjectTableValidForCharaSelect ? "none" : "post-login-world-object-table-not-valid-for-chara-select");
+        currentObjectTableValidForCharaSelect ? "none" : "post-login-world-object-table-not-valid-for-chara-select",
+        selectedOverrideCandidateId,
+        manualCandidateSlots);
 }
 
 TitleBackgroundPhase2NDeliverySummary Phase2NFromRaw(

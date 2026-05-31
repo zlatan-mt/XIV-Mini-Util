@@ -114,7 +114,13 @@ internal readonly record struct TitleBackgroundPhase2NOverrideCompatibility(
 
 internal readonly record struct TitleBackgroundPhase2NOverrideCandidateDiagnostic(
     TitleBackgroundCharacterSelectOverrideCandidate Selected,
-    IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> Available);
+    IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> Available,
+    IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot> ManualSlots,
+    int RegistryCount,
+    int RegistryVerifiedCount,
+    int RegistryUnverifiedCount,
+    int RegistryBrightCount,
+    string RegistryDefaultId);
 
 internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
     string FeatureGoal,
@@ -187,16 +193,26 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         string transitionSafety,
         bool currentObjectTableValidForCharaSelect = true,
         string currentObjectTableInvalidReason = "none",
-        string selectedOverrideCandidateId = "")
+        string selectedOverrideCandidateId = "",
+        IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot>? manualCandidateSlots = null)
     {
+        var normalizedManualSlots = manualCandidateSlots ?? [];
+        var availableCandidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates(normalizedManualSlots);
         var overrideCandidate = TitleBackgroundCharacterSelectOverrideCandidateRegistry.ResolveFromConfig(
             selectedOverrideCandidateId,
             overrideScenePath,
             overrideTerritoryId,
-            layerFilterKey);
+            layerFilterKey,
+            availableCandidates);
         var overrideCandidateDiagnostic = new TitleBackgroundPhase2NOverrideCandidateDiagnostic(
             overrideCandidate,
-            TitleBackgroundCharacterSelectOverrideCandidateRegistry.All);
+            availableCandidates,
+            normalizedManualSlots,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.All.Count,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.All.Count(candidate => candidate.VerifiedInGame),
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.All.Count(candidate => !candidate.VerifiedInGame),
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.GetBrightCandidates(TitleBackgroundCharacterSelectOverrideCandidateRegistry.All).Count,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId);
         var currentObjectTableIgnored = !currentObjectTableValidForCharaSelect;
         var currentObjectTableIgnoredReason = currentObjectTableIgnored
             ? string.IsNullOrWhiteSpace(currentObjectTableInvalidReason)
@@ -590,9 +606,10 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
     {
         var isDark = expectedBrightness is TitleBackgroundCharacterSelectExpectedBrightness.Dark or TitleBackgroundCharacterSelectExpectedBrightness.TooDark;
         var brightCandidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildBrightLayerCandidateList(availableCandidates);
-        var recommended = isDark
+        var hasBrightCandidates = brightCandidates != "none";
+        var recommended = hasBrightCandidates
             ? TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildLightingRecommendedAction(availableCandidates)
-            : "none";
+            : isDark ? "add-bright-override-candidate" : "none";
         var lastSkipped = mode is TitleBackgroundCharacterSelectLightingMode.EnvironmentOverrideExperimental
             or TitleBackgroundCharacterSelectLightingMode.DisableDarkeningExperimental
             ? "safe-public-write-api-not-found"
@@ -614,7 +631,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             expectedBrightness,
             layerFilterKey,
             expectedBrightness != TitleBackgroundCharacterSelectExpectedBrightness.Unknown,
-            isDark ? brightCandidates : "not-needed",
+            hasBrightCandidates || isDark ? brightCandidates : "not-needed",
             recommended);
     }
 
@@ -670,7 +687,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             return ("needs-one-more-experimental-run", "try-native-preview-source", "native preview source candidate is ready but default-off");
         }
 
-        if (lighting.RecommendedAction is "try-bright-layer" or "try-bright-custom-target")
+        if (lighting.RecommendedAction is "try-bright-layer" or "try-bright-custom-target" or "verify-manual-bright-candidate")
         {
             return ("working-background-only", lighting.RecommendedAction, "background is available but brightness is dark");
         }

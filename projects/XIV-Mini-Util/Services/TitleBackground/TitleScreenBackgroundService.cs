@@ -830,7 +830,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             transitionSafety,
             phase2NCurrentObjectTableValid,
             phase2NCurrentObjectTableInvalidReason,
-            _configuration.TitleBackgroundCharacterSelectOverrideCandidateId);
+            _configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
+            BuildPhase2PManualCandidateSlots());
         var deliveryDetailPath = !includeDetailedPhase2Diagnostics
             ? SavePhase2NDeliveryDiagnosticDump(phase2NDeliverySummary)
             : string.Empty;
@@ -5443,6 +5444,21 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return lines;
     }
 
+    private IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot> BuildPhase2PManualCandidateSlots()
+    {
+        return
+        [
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildManualSlot(
+                1,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1Enabled,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1DisplayName,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1TerritoryPath,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1TerritoryId,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey,
+                _configuration.TitleBackgroundCharacterSelectManualCandidate1ExpectedBrightness),
+        ];
+    }
+
     private static void AddPhase2NDeliveryLines(List<string> lines, TitleBackgroundPhase2NDeliverySummary summary)
     {
         lines.Add($"phase2N.featureGoal={summary.FeatureGoal}");
@@ -5511,6 +5527,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2N.compatibility.brightness={summary.OverrideCompatibility.ExpectedBrightness}");
         lines.Add($"phase2N.compatibility.recommendedAction={FormatNone(summary.OverrideCompatibility.RecommendedAction)}");
         lines.Add($"phase2N.overrideCandidate.selectedId={FormatNone(summary.OverrideCandidate.Selected.Id)}");
+        lines.Add($"phase2N.overrideCandidate.source={FormatNone(summary.OverrideCandidate.Selected.Source)}");
         lines.Add($"phase2N.overrideCandidate.displayName={FormatNone(summary.OverrideCandidate.Selected.DisplayName)}");
         lines.Add($"phase2N.overrideCandidate.verifiedInGame={summary.OverrideCandidate.Selected.VerifiedInGame}");
         lines.Add($"phase2N.overrideCandidate.expectedCompatibility={summary.OverrideCandidate.Selected.ExpectedCompatibility}");
@@ -5521,6 +5538,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2N.overrideCandidate.knownIssue={FormatNone(summary.OverrideCandidate.Selected.KnownIssue)}");
         lines.Add($"phase2N.overrideCandidate.recommendedAction={FormatNone(summary.OverrideCandidate.Selected.RecommendedAction)}");
         lines.Add($"phase2N.overrideCandidate.availableCount={summary.OverrideCandidate.Available.Count}");
+        lines.Add($"phase2N.overrideCandidate.registry.count={summary.OverrideCandidate.RegistryCount}");
+        lines.Add($"phase2N.overrideCandidate.registry.verifiedCount={summary.OverrideCandidate.RegistryVerifiedCount}");
+        lines.Add($"phase2N.overrideCandidate.registry.unverifiedCount={summary.OverrideCandidate.RegistryUnverifiedCount}");
+        lines.Add($"phase2N.overrideCandidate.registry.brightCount={summary.OverrideCandidate.RegistryBrightCount}");
+        lines.Add($"phase2N.overrideCandidate.registry.defaultId={FormatNone(summary.OverrideCandidate.RegistryDefaultId)}");
         for (var i = 0; i < summary.OverrideCandidate.Available.Count; i++)
         {
             var candidate = summary.OverrideCandidate.Available[i];
@@ -5528,6 +5550,20 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             lines.Add($"phase2N.overrideCandidate.available[{i}].displayName={FormatNone(candidate.DisplayName)}");
             lines.Add($"phase2N.overrideCandidate.available[{i}].brightness={candidate.ExpectedBrightness}");
             lines.Add($"phase2N.overrideCandidate.available[{i}].verifiedInGame={candidate.VerifiedInGame}");
+            lines.Add($"phase2N.overrideCandidate.available[{i}].source={FormatNone(candidate.Source)}");
+        }
+        foreach (var slot in summary.OverrideCandidate.ManualSlots)
+        {
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].enabled={slot.Enabled}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].valid={slot.Valid}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].id={FormatNone(slot.Id)}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].displayName={FormatNone(slot.DisplayName)}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].territoryPath={FormatNone(slot.TerritoryPath)}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].territoryId={slot.TerritoryId}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].layerFilterKey={slot.LayerFilterKey}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].expectedBrightness={slot.ExpectedBrightness}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].verifiedInGame=False");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].validationError={FormatNone(slot.ValidationError)}");
         }
         lines.Add($"phase2N.lighting.mode={summary.Lighting.Mode}");
         lines.Add($"phase2N.lighting.diagnostic.available={summary.Lighting.Available}");

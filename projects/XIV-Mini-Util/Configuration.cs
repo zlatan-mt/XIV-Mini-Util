@@ -81,6 +81,12 @@ public sealed class Configuration : IPluginConfiguration
     public bool TitleBackgroundCameraOverrideEnabled { get; set; } = false;
     public string TitleBackgroundSelectedPresetId { get; set; } = string.Empty;
     public string TitleBackgroundCharacterSelectOverrideCandidateId { get; set; } = string.Empty;
+    public bool TitleBackgroundCharacterSelectManualCandidate1Enabled { get; set; } = false;
+    public string TitleBackgroundCharacterSelectManualCandidate1DisplayName { get; set; } = string.Empty;
+    public string TitleBackgroundCharacterSelectManualCandidate1TerritoryPath { get; set; } = string.Empty;
+    public uint TitleBackgroundCharacterSelectManualCandidate1TerritoryId { get; set; } = 0;
+    public uint TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey { get; set; } = 0;
+    public TitleBackgroundCharacterSelectExpectedBrightness TitleBackgroundCharacterSelectManualCandidate1ExpectedBrightness { get; set; } = TitleBackgroundCharacterSelectExpectedBrightness.Unknown;
     public TitleBackgroundRuntimeMode TitleBackgroundRuntimeMode { get; set; } = TitleBackgroundRuntimeMode.ResolveOnly;
     public TitleBackgroundCharacterSelectBackgroundMode TitleBackgroundCharacterSelectBackgroundMode { get; set; } = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly;
     public TitleBackgroundCharacterSelectLightingMode TitleBackgroundCharacterSelectLightingMode { get; set; } = TitleBackgroundCharacterSelectLightingMode.Default;
@@ -281,6 +287,12 @@ public sealed class Configuration : IPluginConfiguration
         TitleBackgroundCameraOverrideEnabled = source.TitleBackgroundCameraOverrideEnabled;
         TitleBackgroundSelectedPresetId = TitleBackgroundBuiltInPresetCatalog.NormalizeId(source.TitleBackgroundSelectedPresetId);
         TitleBackgroundCharacterSelectOverrideCandidateId = NormalizeTitleBackgroundCharacterSelectOverrideCandidateId(source.TitleBackgroundCharacterSelectOverrideCandidateId);
+        TitleBackgroundCharacterSelectManualCandidate1Enabled = source.TitleBackgroundCharacterSelectManualCandidate1Enabled;
+        TitleBackgroundCharacterSelectManualCandidate1DisplayName = NormalizeTitleBackgroundManualCandidateDisplayName(source.TitleBackgroundCharacterSelectManualCandidate1DisplayName);
+        TitleBackgroundCharacterSelectManualCandidate1TerritoryPath = NormalizeTitleBackgroundTerritoryPath(source.TitleBackgroundCharacterSelectManualCandidate1TerritoryPath);
+        TitleBackgroundCharacterSelectManualCandidate1TerritoryId = source.TitleBackgroundCharacterSelectManualCandidate1TerritoryId;
+        TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey = source.TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey;
+        TitleBackgroundCharacterSelectManualCandidate1ExpectedBrightness = NormalizeTitleBackgroundCharacterSelectExpectedBrightness(source.TitleBackgroundCharacterSelectManualCandidate1ExpectedBrightness);
         TitleBackgroundRuntimeMode = NormalizeTitleBackgroundRuntimeMode(source.TitleBackgroundRuntimeMode);
         TitleBackgroundCharacterSelectBackgroundMode = NormalizeTitleBackgroundCharacterSelectBackgroundMode(source.TitleBackgroundCharacterSelectBackgroundMode);
         TitleBackgroundCharacterSelectLightingMode = NormalizeTitleBackgroundCharacterSelectLightingMode(source.TitleBackgroundCharacterSelectLightingMode);
@@ -556,6 +568,27 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedManualDisplayName = NormalizeTitleBackgroundManualCandidateDisplayName(TitleBackgroundCharacterSelectManualCandidate1DisplayName);
+        if (TitleBackgroundCharacterSelectManualCandidate1DisplayName != normalizedManualDisplayName)
+        {
+            TitleBackgroundCharacterSelectManualCandidate1DisplayName = normalizedManualDisplayName;
+            changed = true;
+        }
+
+        var normalizedManualTerritoryPath = NormalizeTitleBackgroundTerritoryPath(TitleBackgroundCharacterSelectManualCandidate1TerritoryPath);
+        if (TitleBackgroundCharacterSelectManualCandidate1TerritoryPath != normalizedManualTerritoryPath)
+        {
+            TitleBackgroundCharacterSelectManualCandidate1TerritoryPath = normalizedManualTerritoryPath;
+            changed = true;
+        }
+
+        var normalizedManualExpectedBrightness = NormalizeTitleBackgroundCharacterSelectExpectedBrightness(TitleBackgroundCharacterSelectManualCandidate1ExpectedBrightness);
+        if (TitleBackgroundCharacterSelectManualCandidate1ExpectedBrightness != normalizedManualExpectedBrightness)
+        {
+            TitleBackgroundCharacterSelectManualCandidate1ExpectedBrightness = normalizedManualExpectedBrightness;
+            changed = true;
+        }
+
         var normalizedTitleRuntimeMode = NormalizeTitleBackgroundRuntimeMode(TitleBackgroundRuntimeMode);
         if (TitleBackgroundRuntimeMode != normalizedTitleRuntimeMode)
         {
@@ -740,6 +773,13 @@ public sealed class Configuration : IPluginConfiguration
             : TitleBackgroundCharacterSelectLightingMode.Default;
     }
 
+    private static TitleBackgroundCharacterSelectExpectedBrightness NormalizeTitleBackgroundCharacterSelectExpectedBrightness(TitleBackgroundCharacterSelectExpectedBrightness brightness)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundCharacterSelectExpectedBrightness), brightness)
+            ? brightness
+            : TitleBackgroundCharacterSelectExpectedBrightness.Unknown;
+    }
+
     private static TitleBackgroundResolverMode NormalizeTitleBackgroundResolverMode(TitleBackgroundResolverMode mode)
     {
         return Enum.IsDefined(typeof(TitleBackgroundResolverMode), mode)
@@ -762,6 +802,11 @@ public sealed class Configuration : IPluginConfiguration
     private static string NormalizeTitleBackgroundCharacterSelectOverrideCandidateId(string? id)
     {
         return TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(id);
+    }
+
+    private static string NormalizeTitleBackgroundManualCandidateDisplayName(string? displayName)
+    {
+        return (displayName ?? string.Empty).Trim();
     }
 
     private static string NormalizeSignature(string? signature)

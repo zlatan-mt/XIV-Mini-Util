@@ -14,13 +14,27 @@ internal readonly record struct TitleBackgroundCharacterSelectOverrideCandidate(
     bool BackgroundUsable,
     bool CharacterExpectedVisible,
     bool VerifiedInGame,
+    string Source,
     string Warning,
     string KnownIssue,
     string RecommendedAction);
 
+internal readonly record struct TitleBackgroundCharacterSelectManualCandidateSlot(
+    int SlotNumber,
+    bool Enabled,
+    string Id,
+    string DisplayName,
+    string TerritoryPath,
+    uint TerritoryId,
+    uint LayerFilterKey,
+    TitleBackgroundCharacterSelectExpectedBrightness ExpectedBrightness,
+    bool Valid,
+    string ValidationError);
+
 internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
 {
     public const string DefaultCandidateId = "custom:n4f4";
+    public const string ManualSlot1CandidateId = "manual:slot1";
 
     private static readonly TitleBackgroundCharacterSelectOverrideCandidate CustomN4F4 = new(
         DefaultCandidateId,
@@ -33,6 +47,7 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
         true,
         false,
         true,
+        "registry",
         "full scene override works as background-only; selected character is not expected to be visible",
         "selected character model is hidden with full scene override",
         "add-bright-override-candidate or use-background-only");
@@ -69,14 +84,29 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
         uint overrideTerritoryId,
         uint layerFilterKey)
     {
+        return ResolveFromConfig(
+            selectedCandidateId,
+            overrideTerritoryPath,
+            overrideTerritoryId,
+            layerFilterKey,
+            All);
+    }
+
+    public static TitleBackgroundCharacterSelectOverrideCandidate ResolveFromConfig(
+        string? selectedCandidateId,
+        string? overrideTerritoryPath,
+        uint overrideTerritoryId,
+        uint layerFilterKey,
+        IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> availableCandidates)
+    {
         var normalizedPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(overrideTerritoryPath);
-        if (TryGet(selectedCandidateId, out var selected)
+        if (TryGet(availableCandidates, selectedCandidateId, out var selected)
             && Matches(selected, normalizedPath, overrideTerritoryId, layerFilterKey))
         {
             return selected;
         }
 
-        foreach (var candidate in All)
+        foreach (var candidate in availableCandidates)
         {
             if (Matches(candidate, normalizedPath, overrideTerritoryId, layerFilterKey))
             {
@@ -96,7 +126,7 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
         IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> candidates)
     {
         return candidates
-            .Where(candidate => candidate.BackgroundUsable
+            .Where(candidate => (candidate.BackgroundUsable || candidate.Source == "manual")
                 && candidate.ExpectedBrightness is TitleBackgroundCharacterSelectExpectedBrightness.Bright
                     or TitleBackgroundCharacterSelectExpectedBrightness.Normal)
             .ToList();
@@ -112,7 +142,13 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
 
     public static string BuildLightingRecommendedAction(IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> candidates)
     {
-        return GetBrightCandidates(candidates).Count == 0
+        var brightCandidates = GetBrightCandidates(candidates);
+        if (brightCandidates.Any(candidate => candidate.Source == "manual"))
+        {
+            return "verify-manual-bright-candidate";
+        }
+
+        return brightCandidates.Count == 0
             ? "add-bright-override-candidate"
             : "try-bright-custom-target";
     }
@@ -132,9 +168,103 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
         return (id ?? string.Empty).Trim();
     }
 
+    public static IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> BuildAvailableCandidates(
+        IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot> manualSlots)
+    {
+        var candidates = new List<TitleBackgroundCharacterSelectOverrideCandidate>(All);
+        foreach (var slot in manualSlots)
+        {
+            if (TryCreateManualCandidate(slot, out var candidate))
+            {
+                candidates.Add(candidate);
+            }
+        }
+
+        return candidates;
+    }
+
+    public static TitleBackgroundCharacterSelectManualCandidateSlot BuildManualSlot(
+        int slotNumber,
+        bool enabled,
+        string? displayName,
+        string? territoryPath,
+        uint territoryId,
+        uint layerFilterKey,
+        TitleBackgroundCharacterSelectExpectedBrightness expectedBrightness)
+    {
+        var id = slotNumber == 1 ? ManualSlot1CandidateId : $"manual:slot{slotNumber}";
+        var normalizedDisplayName = string.IsNullOrWhiteSpace(displayName)
+            ? $"Manual candidate slot {slotNumber}"
+            : displayName.Trim();
+        var normalizedPath = TitleBackgroundPathHelper.NormalizeTerritoryPathInput(territoryPath);
+        var normalizedBrightness = Enum.IsDefined(typeof(TitleBackgroundCharacterSelectExpectedBrightness), expectedBrightness)
+            ? expectedBrightness
+            : TitleBackgroundCharacterSelectExpectedBrightness.Unknown;
+
+        var validationError = ValidateManualSlot(enabled, normalizedPath, territoryId);
+        return new TitleBackgroundCharacterSelectManualCandidateSlot(
+            slotNumber,
+            enabled,
+            id,
+            normalizedDisplayName,
+            string.IsNullOrWhiteSpace(normalizedPath) ? "none" : normalizedPath,
+            territoryId,
+            layerFilterKey,
+            normalizedBrightness,
+            validationError == "none",
+            validationError);
+    }
+
+    public static bool TryCreateManualCandidate(
+        TitleBackgroundCharacterSelectManualCandidateSlot slot,
+        out TitleBackgroundCharacterSelectOverrideCandidate candidate)
+    {
+        if (!slot.Valid)
+        {
+            candidate = default;
+            return false;
+        }
+
+        candidate = new TitleBackgroundCharacterSelectOverrideCandidate(
+            slot.Id,
+            slot.DisplayName,
+            slot.TerritoryPath,
+            slot.TerritoryId,
+            slot.LayerFilterKey,
+            TitleBackgroundCharacterSelectCompatibility.BackgroundOnly,
+            slot.ExpectedBrightness,
+            false,
+            false,
+            false,
+            "manual",
+            "manual candidate is unverified; test with /xmutbgdiag and screenshots before promoting",
+            "selected character model is hidden with full scene override",
+            "verify-with-screenshot-and-xmutbgdiag");
+        return true;
+    }
+
     public static bool IsDefaultCandidateTarget(string? territoryPath, uint territoryId, uint layerFilterKey)
     {
         return Matches(CustomN4F4, TitleBackgroundPathHelper.NormalizeTerritoryPathInput(territoryPath), territoryId, layerFilterKey);
+    }
+
+    private static bool TryGet(
+        IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> candidates,
+        string? id,
+        out TitleBackgroundCharacterSelectOverrideCandidate candidate)
+    {
+        var normalizedId = NormalizeId(id);
+        foreach (var entry in candidates)
+        {
+            if (string.Equals(entry.Id, normalizedId, StringComparison.Ordinal))
+            {
+                candidate = entry;
+                return true;
+            }
+        }
+
+        candidate = default;
+        return false;
     }
 
     private static bool Matches(
@@ -164,8 +294,34 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
             true,
             false,
             false,
+            "custom-override",
             "custom override target has no Character Select compatibility metadata yet",
             "requires one real-game /xmutbgdiag capture",
             "add-bright-override-candidate");
+    }
+
+    private static string ValidateManualSlot(bool enabled, string normalizedPath, uint territoryId)
+    {
+        if (!enabled)
+        {
+            return "disabled";
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return "territory-path-empty";
+        }
+
+        if (!TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath(normalizedPath))
+        {
+            return "territory-path-invalid";
+        }
+
+        if (territoryId == 0)
+        {
+            return "territory-id-zero";
+        }
+
+        return "none";
     }
 }
