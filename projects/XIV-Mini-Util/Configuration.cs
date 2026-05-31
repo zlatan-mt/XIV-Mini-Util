@@ -7,6 +7,7 @@ using Dalamud.Plugin;
 using System.Text;
 using System.Text.Json;
 using XivMiniUtil.Models.Checklist;
+using XivMiniUtil.Services.CharaSelect;
 using XivMiniUtil.Services.TitleBackground;
 
 namespace XivMiniUtil;
@@ -73,6 +74,13 @@ public sealed class Configuration : IPluginConfiguration
     public float CharaSelectOverridePositionX { get; set; } = 0f;
     public float CharaSelectOverridePositionY { get; set; } = 0f;
     public float CharaSelectOverridePositionZ { get; set; } = 0f;
+    public bool CharaSelectSceneCompositionEnabled { get; set; } = false;
+    public string CharaSelectSceneProfileId { get; set; } = CharaSelectSceneProfileRegistry.DefaultProfileId;
+    public bool CharaSelectSceneUseProfileTerritory { get; set; } = true;
+    public bool CharaSelectSceneUseProfilePosition { get; set; } = false;
+    public bool CharaSelectSceneUseSavedEmote { get; set; } = true;
+    public CharaSelectScenePlacementMode CharaSelectScenePlacementMode { get; set; } = CharaSelectScenePlacementMode.ObserveOnly;
+    public CharaSelectBrightnessRating CharaSelectSceneExpectedBrightness { get; set; } = CharaSelectBrightnessRating.Unknown;
     public bool CharaSelectShowLastDataCenterNameEnabled { get; set; } = false;
     public string CharaSelectLastDataCenterName { get; set; } = string.Empty;
 
@@ -281,6 +289,13 @@ public sealed class Configuration : IPluginConfiguration
         CharaSelectOverridePositionX = SanitizeCoordinate(source.CharaSelectOverridePositionX);
         CharaSelectOverridePositionY = SanitizeCoordinate(source.CharaSelectOverridePositionY);
         CharaSelectOverridePositionZ = SanitizeCoordinate(source.CharaSelectOverridePositionZ);
+        CharaSelectSceneCompositionEnabled = source.CharaSelectSceneCompositionEnabled;
+        CharaSelectSceneProfileId = CharaSelectSceneProfileRegistry.NormalizeId(source.CharaSelectSceneProfileId);
+        CharaSelectSceneUseProfileTerritory = source.CharaSelectSceneUseProfileTerritory;
+        CharaSelectSceneUseProfilePosition = source.CharaSelectSceneUseProfilePosition;
+        CharaSelectSceneUseSavedEmote = source.CharaSelectSceneUseSavedEmote;
+        CharaSelectScenePlacementMode = NormalizeCharaSelectScenePlacementMode(source.CharaSelectScenePlacementMode);
+        CharaSelectSceneExpectedBrightness = NormalizeCharaSelectBrightnessRating(source.CharaSelectSceneExpectedBrightness);
         CharaSelectShowLastDataCenterNameEnabled = source.CharaSelectShowLastDataCenterNameEnabled;
         CharaSelectLastDataCenterName = source.CharaSelectLastDataCenterName ?? string.Empty;
         TitleBackgroundOverrideEnabled = source.TitleBackgroundOverrideEnabled;
@@ -547,6 +562,27 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedSceneProfileId = CharaSelectSceneProfileRegistry.NormalizeId(CharaSelectSceneProfileId);
+        if (CharaSelectSceneProfileId != normalizedSceneProfileId)
+        {
+            CharaSelectSceneProfileId = normalizedSceneProfileId;
+            changed = true;
+        }
+
+        var normalizedScenePlacementMode = NormalizeCharaSelectScenePlacementMode(CharaSelectScenePlacementMode);
+        if (CharaSelectScenePlacementMode != normalizedScenePlacementMode)
+        {
+            CharaSelectScenePlacementMode = normalizedScenePlacementMode;
+            changed = true;
+        }
+
+        var normalizedSceneBrightness = NormalizeCharaSelectBrightnessRating(CharaSelectSceneExpectedBrightness);
+        if (CharaSelectSceneExpectedBrightness != normalizedSceneBrightness)
+        {
+            CharaSelectSceneExpectedBrightness = normalizedSceneBrightness;
+            changed = true;
+        }
+
         var normalizedTitleTerritoryPath = NormalizeTitleBackgroundTerritoryPath(TitleBackgroundTerritoryPath);
         if (TitleBackgroundTerritoryPath != normalizedTitleTerritoryPath)
         {
@@ -740,6 +776,20 @@ public sealed class Configuration : IPluginConfiguration
     private static float SanitizeFovY(float value)
     {
         return TitleBackgroundPreset.ClampFovY(value);
+    }
+
+    private static CharaSelectScenePlacementMode NormalizeCharaSelectScenePlacementMode(CharaSelectScenePlacementMode mode)
+    {
+        return Enum.IsDefined(typeof(CharaSelectScenePlacementMode), mode)
+            ? mode
+            : CharaSelectScenePlacementMode.ObserveOnly;
+    }
+
+    private static CharaSelectBrightnessRating NormalizeCharaSelectBrightnessRating(CharaSelectBrightnessRating brightness)
+    {
+        return Enum.IsDefined(typeof(CharaSelectBrightnessRating), brightness)
+            ? brightness
+            : CharaSelectBrightnessRating.Unknown;
     }
 
     private static string NormalizeTitleBackgroundTerritoryPath(string? path)

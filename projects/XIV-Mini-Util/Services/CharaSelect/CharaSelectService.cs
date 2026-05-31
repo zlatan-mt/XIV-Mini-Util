@@ -100,6 +100,131 @@ public sealed unsafe class CharaSelectService : IDisposable
         }
     }
 
+    public IReadOnlyList<CharaSelectSceneProfile> SceneProfiles => CharaSelectSceneProfileRegistry.All;
+
+    public CharaSelectSceneProfile CurrentSceneProfile => CharaSelectSceneCompositionPlanner.ResolveProfile(_configuration);
+
+    public string GetCurrentSceneProfileLabel()
+    {
+        return CharaSelectSceneProfileRegistry.BuildLabel(CurrentSceneProfile);
+    }
+
+    public void SetSceneCompositionEnabled(bool enabled)
+    {
+        _configuration.CharaSelectSceneCompositionEnabled = enabled;
+        if (enabled)
+        {
+            ApplyCurrentSceneProfileToConfiguration();
+        }
+        else
+        {
+            ClearCurrentSceneProfileRuntimeSettings();
+        }
+
+        _configuration.Save();
+        ApplySceneCompositionRuntimeState();
+    }
+
+    public void SetSceneProfileId(string profileId)
+    {
+        _configuration.CharaSelectSceneProfileId = CharaSelectSceneProfileRegistry.NormalizeId(profileId);
+        ApplyCurrentSceneProfileToConfiguration();
+        _configuration.Save();
+        ApplySceneCompositionRuntimeState();
+    }
+
+    public void SetSceneUseProfileTerritory(bool enabled)
+    {
+        _configuration.CharaSelectSceneUseProfileTerritory = enabled;
+        if (enabled)
+        {
+            ApplyCurrentSceneProfileToConfiguration();
+        }
+
+        _configuration.Save();
+        ApplySceneCompositionRuntimeState();
+    }
+
+    public void SetSceneUseProfilePosition(bool enabled)
+    {
+        _configuration.CharaSelectSceneUseProfilePosition = enabled;
+        if (enabled)
+        {
+            ApplyCurrentSceneProfileToConfiguration();
+        }
+
+        _configuration.Save();
+        ApplySceneCompositionRuntimeState();
+    }
+
+    public void SetSceneUseSavedEmote(bool enabled)
+    {
+        _configuration.CharaSelectSceneUseSavedEmote = enabled;
+        if (enabled)
+        {
+            ApplyCurrentSceneProfileToConfiguration();
+        }
+
+        _configuration.Save();
+        ApplySceneCompositionRuntimeState();
+    }
+
+    public void SetScenePlacementMode(CharaSelectScenePlacementMode mode)
+    {
+        _configuration.CharaSelectScenePlacementMode = Enum.IsDefined(typeof(CharaSelectScenePlacementMode), mode)
+            ? mode
+            : CharaSelectScenePlacementMode.ObserveOnly;
+        _configuration.Save();
+    }
+
+    public void ApplyCurrentSceneProfile()
+    {
+        ApplyCurrentSceneProfileToConfiguration();
+        _configuration.Save();
+        ApplySceneCompositionRuntimeState();
+    }
+
+    private void ApplyCurrentSceneProfileToConfiguration()
+    {
+        CharaSelectSceneCompositionPlanner.ApplyProfileToConfiguration(_configuration, CurrentSceneProfile);
+    }
+
+    private void ClearCurrentSceneProfileRuntimeSettings()
+    {
+        var profile = CurrentSceneProfile;
+        if (_configuration.CharaSelectSceneUseProfileTerritory
+            && _configuration.CharaSelectOverrideTerritoryEnabled
+            && _configuration.CharaSelectOverrideTerritoryTypeId == profile.TerritoryTypeId)
+        {
+            _configuration.CharaSelectOverrideTerritoryEnabled = false;
+            _configuration.CharaSelectOverrideTerritoryTypeId = 0;
+            TryUnloadPrefetchLayout(CharaSelectPrefetchOwner.OverrideDisplay);
+        }
+    }
+
+    private void ApplySceneCompositionRuntimeState()
+    {
+        ApplyLoginWaitHookState();
+        if (!_configuration.CharaSelectSceneCompositionEnabled)
+        {
+            RefreshCharaSelectDisplay();
+            return;
+        }
+
+        if (_clientState.IsLoggedIn)
+        {
+            return;
+        }
+
+        ApplyOverrideTerritoryPrefetch();
+        RefreshCharaSelectDisplay();
+        if (_configuration.CharaSelectSceneCompositionEnabled
+            && _configuration.CharaSelectSceneUseSavedEmote)
+        {
+            ReplaySelectedEmote();
+        }
+    }
+
     public void SetEmoteEnabled(bool enabled)
     {
         _configuration.CharaSelectEmoteEnabled = enabled;
@@ -421,6 +546,7 @@ public sealed unsafe class CharaSelectService : IDisposable
     public IReadOnlyList<string> GetVoiceDiagnosticLines()
     {
         var lines = new List<string>();
+        lines.AddRange(GetSceneCompositionDiagnosticLines());
 
         try
         {
@@ -471,6 +597,15 @@ public sealed unsafe class CharaSelectService : IDisposable
         }
 
         return lines;
+    }
+
+    public IReadOnlyList<string> GetSceneCompositionDiagnosticLines()
+    {
+        var diagnostic = CharaSelectSceneCompositionPlanner.BuildDiagnostic(
+            _configuration,
+            GetCurrentSelectedEmoteDisplayName(),
+            _currentEntry == null || _currentEntry.Character == null ? "Unknown" : "True");
+        return CharaSelectSceneCompositionPlanner.BuildDiagnosticLines(diagnostic);
     }
 
     public void Dispose()

@@ -46,6 +46,147 @@ Test("invalid replay inputs are ignored", () =>
         && !tracker.ShouldReplay(1, 100, nint.Zero, force: true);
 });
 
+Test("chara select scene profile old sharlayan exists", () =>
+{
+    return CharaSelectSceneProfileRegistry.TryGet("scene:old-sharlayan-k5t1", out var profile)
+        && profile.DisplayName == "Old Sharlayan outdoor test"
+        && profile.TerritoryTypeId == 962
+        && profile.TerritoryPath == "ex4/03_kld_k5/twn/k5t1/level/k5t1"
+        && profile.LayerFilterKey == 8
+        && profile.ExpectedBrightness == CharaSelectBrightnessRating.Unknown
+        && !profile.VerifiedInGame
+        && profile.Source == "observed";
+});
+
+Test("chara select scene profile expects character visible", () =>
+{
+    var profile = CharaSelectSceneProfileRegistry.GetDefault();
+    return profile.Id == "scene:old-sharlayan-k5t1"
+        && profile.CharacterExpectedVisible
+        && profile.RecommendedAction == "verify-character-visible-and-emote";
+});
+
+Test("chara select scene composition is default off", () =>
+{
+    var configuration = new Configuration();
+    return !configuration.CharaSelectSceneCompositionEnabled
+        && configuration.CharaSelectSceneProfileId == CharaSelectSceneProfileRegistry.DefaultProfileId
+        && configuration.CharaSelectScenePlacementMode == CharaSelectScenePlacementMode.ObserveOnly;
+});
+
+Test("chara select scene profile maps to override territory config", () =>
+{
+    var configuration = new Configuration
+    {
+        CharaSelectSceneCompositionEnabled = true,
+        CharaSelectSceneUseProfileTerritory = true,
+        CharaSelectSceneProfileId = "scene:old-sharlayan-k5t1",
+    };
+
+    CharaSelectSceneCompositionPlanner.ApplyProfileToConfiguration(
+        configuration,
+        CharaSelectSceneProfileRegistry.GetDefault());
+
+    return configuration.CharaSelectOverrideTerritoryEnabled
+        && configuration.CharaSelectOverrideTerritoryTypeId == 962
+        && !configuration.TitleBackgroundOverrideEnabled;
+});
+
+Test("chara select scene profile preserves existing emote presets", () =>
+{
+    var configuration = new Configuration
+    {
+        CharaSelectSceneCompositionEnabled = true,
+        CharaSelectSceneUseSavedEmote = true,
+        CharaSelectEmotePresets = new Dictionary<ulong, List<uint>>
+        {
+            [77] = [101, 102],
+        },
+        CharaSelectActiveEmotePresetIndexes = new Dictionary<ulong, int>
+        {
+            [77] = 1,
+        },
+    };
+
+    CharaSelectSceneCompositionPlanner.ApplyProfileToConfiguration(
+        configuration,
+        CharaSelectSceneProfileRegistry.GetDefault());
+
+    return configuration.CharaSelectEmoteEnabled
+        && configuration.CharaSelectEmotePresets[77].SequenceEqual([101u, 102u])
+        && configuration.CharaSelectActiveEmotePresetIndexes[77] == 1;
+});
+
+Test("chara select scene observe only does not enable position override without profile position", () =>
+{
+    var configuration = new Configuration
+    {
+        CharaSelectSceneCompositionEnabled = true,
+        CharaSelectSceneUseProfilePosition = true,
+        CharaSelectScenePlacementMode = CharaSelectScenePlacementMode.ObserveOnly,
+    };
+
+    CharaSelectSceneCompositionPlanner.ApplyProfileToConfiguration(
+        configuration,
+        CharaSelectSceneProfileRegistry.GetDefault());
+
+    return !configuration.CharaSelectOverridePositionEnabled
+        && configuration.CharaSelectOverridePositionX == 0f
+        && configuration.CharaSelectOverridePositionY == 0f
+        && configuration.CharaSelectOverridePositionZ == 0f;
+});
+
+Test("chara select scene runtime apply is post login no op", () =>
+{
+    return !CharaSelectSceneCompositionPlanner.ShouldApplyRuntime(isLoggedIn: true, agentIsLoggedIn: false, enabled: true)
+        && !CharaSelectSceneCompositionPlanner.ShouldApplyRuntime(isLoggedIn: false, agentIsLoggedIn: true, enabled: true)
+        && CharaSelectSceneCompositionPlanner.ShouldApplyRuntime(isLoggedIn: false, agentIsLoggedIn: false, enabled: true);
+});
+
+Test("chara select scene diagnostic uses foreground preserving route", () =>
+{
+    var configuration = new Configuration
+    {
+        CharaSelectSceneCompositionEnabled = true,
+        CharaSelectSceneUseProfileTerritory = true,
+        CharaSelectOverrideTerritoryEnabled = true,
+        CharaSelectOverrideTerritoryTypeId = 962,
+        CharaSelectSceneUseSavedEmote = true,
+        CharaSelectEmoteEnabled = true,
+    };
+
+    var diagnostic = CharaSelectSceneCompositionPlanner.BuildDiagnostic(configuration, "Test Emote", "Unknown");
+    var lines = CharaSelectSceneCompositionPlanner.BuildDiagnosticLines(diagnostic);
+
+    return diagnostic.Route == "foreground-preserving"
+        && diagnostic.ExpectedCharacterVisible
+        && diagnostic.TerritoryOverrideEnabled
+        && diagnostic.TerritoryOverrideTerritoryTypeId == 962
+        && diagnostic.EmoteEnabled
+        && diagnostic.NextAction == "verify-character-visible-background-and-emote-with-screenshot"
+        && lines.Contains("charaSelectScene.profileId=scene:old-sharlayan-k5t1");
+});
+
+Test("chara select scene phase3a does not introduce forbidden write paths", () =>
+{
+    var root = FindRepositoryRoot();
+    var files = new[]
+    {
+        Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectSceneProfileRegistry.cs"),
+        Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectSceneCompositionPlanner.cs"),
+    };
+    var text = string.Join("\n", files.Select(File.ReadAllText));
+
+    return !text.Contains("SceneCamera.Position", StringComparison.Ordinal)
+        && !text.Contains("SceneCamera.LookAtVector", StringComparison.Ordinal)
+        && !text.Contains("SceneCamera.FoV", StringComparison.Ordinal)
+        && !text.Contains("ObjectTable", StringComparison.Ordinal)
+        && !text.Contains(".Position =", StringComparison.Ordinal)
+        && !text.Contains(".Rotation =", StringComparison.Ordinal)
+        && !text.Contains("lighting", StringComparison.OrdinalIgnoreCase)
+        && !text.Contains("environment", StringComparison.OrdinalIgnoreCase);
+});
+
 Test("emote mode uses condition mode and row id parameter", () =>
 {
     var plan = CharaSelectEmotePlaybackPlanner.Create(

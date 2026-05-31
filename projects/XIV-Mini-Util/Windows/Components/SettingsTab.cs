@@ -378,6 +378,11 @@ public sealed class SettingsTab : ITabComponent
         ImGui.Text("ログイン / タイトル背景");
         ImGui.Separator();
 
+        DrawCharaSelectSceneCompositionSettings();
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
         var emoteEnabled = _configuration.CharaSelectEmoteEnabled;
         if (ImGui.Checkbox("キャラ選択画面で保存したエモートを再生する", ref emoteEnabled))
         {
@@ -566,6 +571,88 @@ public sealed class SettingsTab : ITabComponent
 
         ImGui.Text($"最後に記録したDC: {(_configuration.CharaSelectLastDataCenterName.Length == 0 ? "なし" : _configuration.CharaSelectLastDataCenterName)}");
         ImGui.TextDisabled("DataCenter表示の置換は対象addon確認後に有効化します。");
+    }
+
+    private void DrawCharaSelectSceneCompositionSettings()
+    {
+        ImGui.Text("キャラ選択画面の撮影構成");
+        ImGui.TextWrapped("背景だけを差し替える Title Background route ではなく、キャラ選択画面の本物の選択キャラクターを残したまま、場所・立ち位置・エモートを構成します。");
+
+        var enabled = _configuration.CharaSelectSceneCompositionEnabled;
+        if (ImGui.Checkbox("撮影構成を有効にする", ref enabled))
+        {
+            _charaSelectService.SetSceneCompositionEnabled(enabled);
+        }
+
+        var selectedProfile = _charaSelectService.CurrentSceneProfile;
+        if (ImGui.BeginCombo("Scene profile##CharaSelectSceneProfile", _charaSelectService.GetCurrentSceneProfileLabel()))
+        {
+            foreach (var profile in _charaSelectService.SceneProfiles)
+            {
+                if (ImGui.Selectable(CharaSelectSceneProfileRegistry.BuildLabel(profile), selectedProfile.Id == profile.Id))
+                {
+                    _charaSelectService.SetSceneProfileId(profile.Id);
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.TextDisabled($"Route: {CharaSelectSceneCompositionPlanner.ForegroundPreservingRoute}");
+        ImGui.TextDisabled($"Expected character visible: {selectedProfile.CharacterExpectedVisible}");
+        ImGui.TextDisabled($"Brightness: {selectedProfile.ExpectedBrightness}");
+        ImGui.TextDisabled($"Recommended: {selectedProfile.RecommendedAction}");
+
+        var useTerritory = _configuration.CharaSelectSceneUseProfileTerritory;
+        if (ImGui.Checkbox("profile の場所を使う", ref useTerritory))
+        {
+            _charaSelectService.SetSceneUseProfileTerritory(useTerritory);
+        }
+
+        ImGui.TextDisabled($"TerritoryTypeId: {selectedProfile.TerritoryTypeId}");
+        ImGui.TextDisabled($"TerritoryPath: {selectedProfile.TerritoryPath}");
+
+        var useSavedEmote = _configuration.CharaSelectSceneUseSavedEmote;
+        if (ImGui.Checkbox("保存済みエモートを再生する", ref useSavedEmote))
+        {
+            _charaSelectService.SetSceneUseSavedEmote(useSavedEmote);
+        }
+
+        ImGui.Text($"現在の保存エモート: {_charaSelectService.GetCurrentSelectedEmoteDisplayName()}");
+        ImGui.Text($"最後に記録したエモート: {_charaSelectService.GetLastRecordedEmoteDisplayName()}");
+
+        var usePosition = _configuration.CharaSelectSceneUseProfilePosition;
+        if (ImGui.Checkbox("profile の立ち位置を使う（Phase3Aでは観測のみ）", ref usePosition))
+        {
+            _charaSelectService.SetSceneUseProfilePosition(usePosition);
+        }
+
+        var placementMode = _configuration.CharaSelectScenePlacementMode;
+        if (ImGui.BeginCombo("Placement mode##CharaSelectScenePlacementMode", placementMode.ToString()))
+        {
+            foreach (CharaSelectScenePlacementMode mode in Enum.GetValues(typeof(CharaSelectScenePlacementMode)))
+            {
+                if (ImGui.Selectable(mode.ToString(), placementMode == mode))
+                {
+                    _charaSelectService.SetScenePlacementMode(mode);
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        if (ImGui.Button("profile を適用"))
+        {
+            _charaSelectService.ApplyCurrentSceneProfile();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("再生テスト##CharaSelectSceneReplay"))
+        {
+            _charaSelectService.ReplaySelectedEmote();
+        }
+
+        ImGui.TextDisabled("Phase3A は position write を行いません。OneShotAfterDisplay は Phase3B 用の枠です。");
     }
 
     private void DrawTitleBackgroundSettings()
