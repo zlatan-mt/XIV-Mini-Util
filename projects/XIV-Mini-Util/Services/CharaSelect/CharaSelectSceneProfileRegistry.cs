@@ -19,6 +19,17 @@ public enum CharaSelectScenePlacementMode
     OneShotAfterDisplay,
 }
 
+public enum CharaSelectStageStrategy
+{
+    Disabled,
+    ObserveOnly,
+    ClientSelectDataTerritoryPatch,
+    LobbyPositionPatch,
+    LobbySheetResolvedPatch,
+    LayoutPrefetchOnly,
+    TitleBackgroundFullSceneFallback,
+}
+
 public enum CharaSelectSceneBinaryResult
 {
     Unknown,

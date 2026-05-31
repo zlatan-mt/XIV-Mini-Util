@@ -80,6 +80,11 @@ public sealed class Configuration : IPluginConfiguration
     public bool CharaSelectSceneUseProfilePosition { get; set; } = false;
     public bool CharaSelectSceneUseSavedEmote { get; set; } = true;
     public CharaSelectScenePlacementMode CharaSelectScenePlacementMode { get; set; } = CharaSelectScenePlacementMode.ObserveOnly;
+    public CharaSelectStageStrategy CharaSelectSceneStageStrategy { get; set; } = CharaSelectStageStrategy.ObserveOnly;
+    public bool CharaSelectSceneStageStrategyExperimentalEnabled { get; set; } = false;
+    public bool CharaSelectSceneStageStrategyOneShotProbeEnabled { get; set; } = false;
+    public string CharaSelectSceneStageStrategyLastResult { get; set; } = "none";
+    public string CharaSelectSceneStageStrategyLastReason { get; set; } = "none";
     public CharaSelectBrightnessRating CharaSelectSceneExpectedBrightness { get; set; } = CharaSelectBrightnessRating.Unknown;
     public CharaSelectSceneBinaryResult LastSceneProfileCharacterVisibleResult { get; set; } = CharaSelectSceneBinaryResult.Unknown;
     public CharaSelectSceneBinaryResult LastSceneProfileLocationChangedResult { get; set; } = CharaSelectSceneBinaryResult.Unknown;
@@ -299,6 +304,11 @@ public sealed class Configuration : IPluginConfiguration
         CharaSelectSceneUseProfilePosition = source.CharaSelectSceneUseProfilePosition;
         CharaSelectSceneUseSavedEmote = source.CharaSelectSceneUseSavedEmote;
         CharaSelectScenePlacementMode = NormalizeCharaSelectScenePlacementMode(source.CharaSelectScenePlacementMode);
+        CharaSelectSceneStageStrategy = NormalizeCharaSelectStageStrategy(source.CharaSelectSceneStageStrategy);
+        CharaSelectSceneStageStrategyExperimentalEnabled = source.CharaSelectSceneStageStrategyExperimentalEnabled;
+        CharaSelectSceneStageStrategyOneShotProbeEnabled = source.CharaSelectSceneStageStrategyOneShotProbeEnabled;
+        CharaSelectSceneStageStrategyLastResult = NormalizeShortDiagnostic(source.CharaSelectSceneStageStrategyLastResult);
+        CharaSelectSceneStageStrategyLastReason = NormalizeShortDiagnostic(source.CharaSelectSceneStageStrategyLastReason);
         CharaSelectSceneExpectedBrightness = NormalizeCharaSelectBrightnessRating(source.CharaSelectSceneExpectedBrightness);
         LastSceneProfileCharacterVisibleResult = NormalizeCharaSelectSceneBinaryResult(source.LastSceneProfileCharacterVisibleResult);
         LastSceneProfileLocationChangedResult = NormalizeCharaSelectSceneBinaryResult(source.LastSceneProfileLocationChangedResult);
@@ -584,6 +594,23 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedStageStrategy = NormalizeCharaSelectStageStrategy(CharaSelectSceneStageStrategy);
+        if (CharaSelectSceneStageStrategy != normalizedStageStrategy)
+        {
+            CharaSelectSceneStageStrategy = normalizedStageStrategy;
+            changed = true;
+        }
+
+        var normalizedStageStrategyLastResult = NormalizeShortDiagnostic(CharaSelectSceneStageStrategyLastResult);
+        var normalizedStageStrategyLastReason = NormalizeShortDiagnostic(CharaSelectSceneStageStrategyLastReason);
+        if (CharaSelectSceneStageStrategyLastResult != normalizedStageStrategyLastResult
+            || CharaSelectSceneStageStrategyLastReason != normalizedStageStrategyLastReason)
+        {
+            CharaSelectSceneStageStrategyLastResult = normalizedStageStrategyLastResult;
+            CharaSelectSceneStageStrategyLastReason = normalizedStageStrategyLastReason;
+            changed = true;
+        }
+
         var normalizedSceneBrightness = NormalizeCharaSelectBrightnessRating(CharaSelectSceneExpectedBrightness);
         if (CharaSelectSceneExpectedBrightness != normalizedSceneBrightness)
         {
@@ -809,6 +836,13 @@ public sealed class Configuration : IPluginConfiguration
             : CharaSelectScenePlacementMode.ObserveOnly;
     }
 
+    private static CharaSelectStageStrategy NormalizeCharaSelectStageStrategy(CharaSelectStageStrategy strategy)
+    {
+        return Enum.IsDefined(typeof(CharaSelectStageStrategy), strategy)
+            ? strategy
+            : CharaSelectStageStrategy.ObserveOnly;
+    }
+
     private static CharaSelectBrightnessRating NormalizeCharaSelectBrightnessRating(CharaSelectBrightnessRating brightness)
     {
         return Enum.IsDefined(typeof(CharaSelectBrightnessRating), brightness)
@@ -828,6 +862,17 @@ public sealed class Configuration : IPluginConfiguration
         return Enum.IsDefined(typeof(CharaSelectSceneBrightnessResult), result)
             ? result
             : CharaSelectSceneBrightnessResult.Unknown;
+    }
+
+    private static string NormalizeShortDiagnostic(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "none";
+        }
+
+        return normalized.Length <= 120 ? normalized : normalized[..120];
     }
 
     private static string NormalizeTitleBackgroundTerritoryPath(string? path)

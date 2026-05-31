@@ -14,6 +14,15 @@ using Lumina.Excel.Sheets;
 
 namespace XivMiniUtil.Services.CharaSelect;
 
+internal readonly record struct CharaSelectLobbyStageProbe(
+    bool Available,
+    int MatchCount,
+    CharaSelectLobbyCandidate Candidate0,
+    int ResolvedPosition,
+    bool Changed,
+    string PositionVerdict,
+    string ResolvedReason);
+
 public sealed unsafe class CharaSelectService : IDisposable
 {
     private const ushort IdleTimelineId = 3;
@@ -59,6 +68,7 @@ public sealed unsafe class CharaSelectService : IDisposable
     private int _lastOverrideLoginPosition;
     private IReadOnlyList<string> _lastVoiceDiagnosticLines = [];
     private CharaSelectSceneLastObservation _lastSceneObservation = CharaSelectSceneLastObservation.Empty;
+    private CharaSelectStageProbeSnapshot _lastStageProbe = CharaSelectStageProbeSnapshot.Empty;
 
     public CharaSelectService(
         IGameInteropProvider gameInteropProvider,
@@ -176,6 +186,16 @@ public sealed unsafe class CharaSelectService : IDisposable
             ? mode
             : CharaSelectScenePlacementMode.ObserveOnly;
         _configuration.Save();
+    }
+
+    public void SetSceneStageStrategy(CharaSelectStageStrategy strategy)
+    {
+        _configuration.CharaSelectSceneStageStrategy = Enum.IsDefined(typeof(CharaSelectStageStrategy), strategy)
+            ? strategy
+            : CharaSelectStageStrategy.ObserveOnly;
+        ApplyCurrentSceneProfileToConfiguration();
+        _configuration.Save();
+        ApplySceneCompositionRuntimeState();
     }
 
     public void ApplyCurrentSceneProfile()
@@ -764,6 +784,7 @@ public sealed unsafe class CharaSelectService : IDisposable
 
         if (agent == null
             || _clientState.IsLoggedIn
+            || !CharaSelectSceneCompositionPlanner.UsesClientSelectDataTerritoryPatch(_configuration)
             || !_configuration.CharaSelectOverrideTerritoryEnabled
             || _configuration.CharaSelectOverrideTerritoryTypeId == 0)
         {
@@ -780,6 +801,14 @@ public sealed unsafe class CharaSelectService : IDisposable
         var entry = agent->LobbyData.GetCharacterEntryByIndex(0, worldIndex, normalizedIndex);
         if (entry == null || entry->ContentId == 0)
         {
+            CaptureStageProbe(
+                agent,
+                index,
+                normalizedIndex,
+                false,
+                entry == null ? 0 : entry->ContentId,
+                "entry-null",
+                patchAttempted: true);
             return false;
         }
 
@@ -793,9 +822,34 @@ public sealed unsafe class CharaSelectService : IDisposable
         var patchedZoneId = resolvedLevel.IsValid && resolvedLevel.RowId <= ushort.MaxValue
             ? (ushort)resolvedLevel.RowId
             : (ushort)0;
+        CaptureStageProbe(
+            agent,
+            index,
+            normalizedIndex,
+            characterPointerResolved: CharaSelectCharacterList.GetCurrentCharacter() != null,
+            contentId: entry->ContentId,
+            reason: "client-select-data-probe",
+            originalTerritoryType: entry->ClientSelectData.TerritoryType,
+            originalZoneId: entry->ClientSelectData.ZoneId,
+            patchedTerritoryType: territoryTypeId,
+            patchedZoneId: patchedZoneId,
+            patchAttempted: true);
         if (entry->ClientSelectData.TerritoryType == territoryTypeId
             && (patchedZoneId == 0 || entry->ClientSelectData.ZoneId == patchedZoneId))
         {
+            CaptureStageProbe(
+                agent,
+                index,
+                normalizedIndex,
+                characterPointerResolved: CharaSelectCharacterList.GetCurrentCharacter() != null,
+                contentId: entry->ContentId,
+                reason: "client-select-data-not-needed",
+                originalTerritoryType: entry->ClientSelectData.TerritoryType,
+                originalZoneId: entry->ClientSelectData.ZoneId,
+                patchedTerritoryType: territoryTypeId,
+                patchedZoneId: patchedZoneId,
+                patchAttempted: true,
+                patchApplied: false);
             return false;
         }
 
@@ -807,6 +861,19 @@ public sealed unsafe class CharaSelectService : IDisposable
             entry->ClientSelectData.ZoneId = patchedZoneId;
         }
 
+        CaptureStageProbe(
+            agent,
+            index,
+            normalizedIndex,
+            characterPointerResolved: CharaSelectCharacterList.GetCurrentCharacter() != null,
+            contentId: entry->ContentId,
+            reason: "client-select-data-patched",
+            originalTerritoryType: originalClientSelectData.TerritoryType,
+            originalZoneId: originalClientSelectData.ZoneId,
+            patchedTerritoryType: entry->ClientSelectData.TerritoryType,
+            patchedZoneId: entry->ClientSelectData.ZoneId,
+            patchAttempted: true,
+            patchApplied: true);
         return true;
     }
 
@@ -829,6 +896,13 @@ public sealed unsafe class CharaSelectService : IDisposable
         }
 
         entry->ClientSelectData = originalClientSelectData;
+        _lastStageProbe = _lastStageProbe with
+        {
+            ClientSelectDataRestoreApplied = true,
+            ClientSelectDataVerdict = _lastStageProbe.ClientSelectDataPatchApplied
+                ? "patch-applied"
+                : _lastStageProbe.ClientSelectDataVerdict,
+        };
     }
 
     private bool ExecuteEmoteDetour(EmoteManager* manager, ushort emoteId, EmoteController.PlayEmoteOption* playEmoteOption)
@@ -972,6 +1046,13 @@ public sealed unsafe class CharaSelectService : IDisposable
 
         if (entry == null || character == null || entry->ContentId == 0)
         {
+            CaptureStageProbe(
+                agent,
+                index,
+                normalizedIndex,
+                false,
+                entry == null ? 0 : entry->ContentId,
+                entry == null ? "entry-null" : "character-null");
             RecordSceneObservation(false, entry == null ? 0 : entry->ContentId, normalizedIndex, false);
             CleanupCharaSelect();
             return;
@@ -980,6 +1061,15 @@ public sealed unsafe class CharaSelectService : IDisposable
         var voiceId = ResolveCharacterVoiceId(entry);
         CharaSelectCharacterApplier.ApplyVoice(character, voiceId);
         _lastVoiceDiagnosticLines = BuildVoiceDiagnosticLines(agent, index, normalizedIndex, entry, character, voiceId);
+        CaptureStageProbe(
+            agent,
+            index,
+            normalizedIndex,
+            true,
+            entry->ContentId,
+            "read-only-observation",
+            originalTerritoryType: entry->ClientSelectData.TerritoryType,
+            originalZoneId: entry->ClientSelectData.ZoneId);
         RecordSceneObservation(true, entry->ContentId, normalizedIndex, false);
 
         var isFirstEntry = _currentEntry == null;
@@ -1044,7 +1134,8 @@ public sealed unsafe class CharaSelectService : IDisposable
             emoteReplayAttempted || _lastSceneObservation.EmoteReplayAttempted,
             emoteReplayApplied || _lastSceneObservation.EmoteReplayApplied,
             _configuration.TitleBackgroundOverrideEnabled,
-            DateTimeOffset.UtcNow.ToString("O"));
+            DateTimeOffset.UtcNow.ToString("O"),
+            _lastStageProbe);
     }
 
     private void MarkSceneEmoteReplay(bool applied)
@@ -1066,7 +1157,122 @@ public sealed unsafe class CharaSelectService : IDisposable
             true,
             applied || _lastSceneObservation.EmoteReplayApplied,
             _configuration.TitleBackgroundOverrideEnabled,
-            DateTimeOffset.UtcNow.ToString("O"));
+            DateTimeOffset.UtcNow.ToString("O"),
+            _lastStageProbe);
+    }
+
+    private void CaptureStageProbe(
+        AgentLobby* agent,
+        sbyte selectedIndex,
+        int normalizedIndex,
+        bool characterPointerResolved,
+        ulong contentId,
+        string reason,
+        ushort originalTerritoryType = 0,
+        ushort originalZoneId = 0,
+        ushort patchedTerritoryType = 0,
+        ushort patchedZoneId = 0,
+        bool patchAttempted = false,
+        bool patchApplied = false)
+    {
+        if (!_configuration.CharaSelectSceneCompositionEnabled)
+        {
+            return;
+        }
+
+        var profile = CurrentSceneProfile;
+        var territoryTypeId = NormalizeHousingTerritory(profile.TerritoryTypeId);
+        var lobbyProbe = BuildLobbyStageProbe(territoryTypeId);
+        var layoutRequested = _configuration.CharaSelectOverrideTerritoryEnabled
+            && _configuration.CharaSelectOverrideTerritoryTypeId != 0;
+        var layoutVerdict = _prefetchOwner == CharaSelectPrefetchOwner.OverrideDisplay
+            && _loadedPrefetchTerritoryTypeId == territoryTypeId
+                ? "loaded"
+                : layoutRequested ? "not-loaded" : "not-requested";
+        var preservePreviousPatch = !patchAttempted
+            && _lastStageProbe.Available
+            && _lastStageProbe.ContentId == contentId
+            && _lastStageProbe.ClientSelectDataPatchAttempted;
+        var clientSelectVerdict = patchApplied
+            ? "patch-applied"
+            : patchAttempted ? "not-needed" : preservePreviousPatch ? _lastStageProbe.ClientSelectDataVerdict : "not-visible-stage-source";
+        _lastStageProbe = new CharaSelectStageProbeSnapshot(
+            true,
+            string.IsNullOrWhiteSpace(reason) ? "none" : reason,
+            DateTimeOffset.UtcNow.ToString("O"),
+            selectedIndex,
+            normalizedIndex,
+            agent == null ? (short)0 : agent->WorldIndex,
+            contentId,
+            characterPointerResolved,
+            preservePreviousPatch ? _lastStageProbe.ClientSelectDataOriginalTerritoryType : originalTerritoryType,
+            preservePreviousPatch ? _lastStageProbe.ClientSelectDataOriginalZoneId : originalZoneId,
+            preservePreviousPatch ? _lastStageProbe.ClientSelectDataPatchedTerritoryType : patchedTerritoryType,
+            preservePreviousPatch ? _lastStageProbe.ClientSelectDataPatchedZoneId : patchedZoneId,
+            patchAttempted || preservePreviousPatch,
+            patchApplied || (preservePreviousPatch && _lastStageProbe.ClientSelectDataPatchApplied),
+            preservePreviousPatch && _lastStageProbe.ClientSelectDataRestoreApplied,
+            clientSelectVerdict,
+            _lastLoginPosition,
+            lobbyProbe.ResolvedPosition,
+            lobbyProbe.Changed,
+            _lastOverrideLoginPosition,
+            lobbyProbe.PositionVerdict,
+            lobbyProbe.Available,
+            lobbyProbe.MatchCount,
+            lobbyProbe.Candidate0.RowId,
+            lobbyProbe.Candidate0.Type,
+            lobbyProbe.Candidate0.Param,
+            lobbyProbe.Candidate0.Link,
+            lobbyProbe.ResolvedReason,
+            layoutRequested,
+            string.IsNullOrWhiteSpace(_loadedPrefetchBg) ? "none" : _loadedPrefetchBg,
+            _loadedPrefetchLevelId,
+            _loadedPrefetchLayerEntryType,
+            _prefetchOwner.ToString(),
+            layoutVerdict,
+            _configuration.TitleBackgroundOverrideEnabled,
+            false,
+            _configuration.TitleBackgroundOverrideEnabled ? "conflict-disabled-by-final-mode" : "disabled-for-final-composition",
+            CharaSelectSceneCompositionPlanner.BuildStageProbeRouteVerdict(_configuration),
+            CharaSelectSceneCompositionPlanner.BuildNextAction(_configuration, _lastSceneObservation));
+        _configuration.CharaSelectSceneStageStrategyLastResult = _lastStageProbe.RouteVerdict;
+        _configuration.CharaSelectSceneStageStrategyLastReason = _lastStageProbe.Reason;
+    }
+
+    private CharaSelectLobbyStageProbe BuildLobbyStageProbe(ushort territoryTypeId)
+    {
+        if (territoryTypeId == 0)
+        {
+            return new CharaSelectLobbyStageProbe(false, 0, default, 0, false, "not-available", "territory-zero");
+        }
+
+        try
+        {
+            var lobbySheet = _dataManager.GetExcelSheet<Lobby>();
+            var matches = lobbySheet
+                .Select(lobby => new CharaSelectLobbyCandidate(lobby.RowId, lobby.TYPE, lobby.PARAM, lobby.LINK))
+                .Where(candidate => candidate.Param == territoryTypeId || candidate.Link == territoryTypeId)
+                .OrderBy(candidate => candidate.RowId)
+                .Take(8)
+                .ToList();
+            var fallback = _lastLoginPosition;
+            var resolved = CharaSelectLobbyPositionResolver.ResolveByTerritory(matches, territoryTypeId, fallback);
+            var changed = resolved != fallback;
+            return new CharaSelectLobbyStageProbe(
+                true,
+                matches.Count,
+                matches.Count == 0 ? default : matches[0],
+                resolved,
+                changed,
+                changed ? "changed" : "not-changed",
+                matches.Count == 0 ? "no-lobby-row-match" : "lobby-row-candidate-found");
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Failed to build CharaSelect lobby stage probe.");
+            return new CharaSelectLobbyStageProbe(false, 0, default, _lastLoginPosition, false, "not-available", "error");
+        }
     }
 
     private void RefreshCharaSelectDisplay()
@@ -1567,6 +1773,12 @@ public sealed unsafe class CharaSelectService : IDisposable
 
     private void ApplyOverrideTerritoryPrefetch()
     {
+        if (_configuration.CharaSelectSceneCompositionEnabled
+            && !CharaSelectSceneCompositionPlanner.UsesClientSelectDataTerritoryPatch(_configuration))
+        {
+            return;
+        }
+
         if (!_configuration.CharaSelectOverrideTerritoryEnabled)
         {
             return;

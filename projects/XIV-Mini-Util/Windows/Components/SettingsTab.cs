@@ -609,6 +609,7 @@ public sealed class SettingsTab : ITabComponent
         ImGui.TextDisabled($"Brightness: {selectedProfile.ExpectedBrightness}");
         ImGui.TextDisabled($"Recommended: {selectedProfile.RecommendedAction}");
         ImGui.TextDisabled($"状態: キャラ本体={GetSceneBinaryResultLabel(_configuration.LastSceneProfileCharacterVisibleResult, "見えた", "見えない")} / 場所={GetSceneBinaryResultLabel(_configuration.LastSceneProfileLocationChangedResult, "変わった", "変わらない")} / エモート={GetSceneBinaryResultLabel(_configuration.LastSceneProfileEmotePlayedResult, "再生した", "再生しない")} / 明るさ={GetSceneBrightnessResultLabel(_configuration.LastSceneProfileBrightnessResult)}");
+        ImGui.TextDisabled($"次にやること: {CharaSelectSceneCompositionPlanner.BuildNextAction(_configuration)}");
 
         var useTerritory = _configuration.CharaSelectSceneUseProfileTerritory;
         if (ImGui.Checkbox("profile の場所を使う", ref useTerritory))
@@ -616,8 +617,21 @@ public sealed class SettingsTab : ITabComponent
             _charaSelectService.SetSceneUseProfileTerritory(useTerritory);
         }
 
-        ImGui.TextDisabled($"TerritoryTypeId: {selectedProfile.TerritoryTypeId}");
-        ImGui.TextDisabled($"TerritoryPath: {selectedProfile.TerritoryPath}");
+        var stageStrategy = _configuration.CharaSelectSceneStageStrategy;
+        if (ImGui.BeginCombo("Stage strategy##CharaSelectStageStrategy", GetStageStrategyLabel(stageStrategy)))
+        {
+            foreach (CharaSelectStageStrategy strategy in Enum.GetValues(typeof(CharaSelectStageStrategy)))
+            {
+                if (ImGui.Selectable(GetStageStrategyLabel(strategy), stageStrategy == strategy))
+                {
+                    _charaSelectService.SetSceneStageStrategy(strategy);
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.TextDisabled(GetStageStrategyDescription(stageStrategy));
 
         var useSavedEmote = _configuration.CharaSelectSceneUseSavedEmote;
         if (ImGui.Checkbox("保存済みエモートを再生する", ref useSavedEmote))
@@ -680,6 +694,8 @@ public sealed class SettingsTab : ITabComponent
             _charaSelectService.SetSceneLocationChangedResult(locationChanged);
         }
 
+        ImGui.TextWrapped("場所が default のままなら「場所=変わらない」を選んでください。これは TerritoryTypeId の差し替えだけでは見た目のステージが変わっていないことを意味します。");
+
         var emotePlayed = _configuration.LastSceneProfileEmotePlayedResult;
         if (DrawSceneBinaryResultCombo("エモート##SceneEmotePlayed", ref emotePlayed, "再生した", "再生しない"))
         {
@@ -690,6 +706,15 @@ public sealed class SettingsTab : ITabComponent
         if (DrawSceneBrightnessResultCombo("明るさ##SceneBrightness", ref brightness))
         {
             _charaSelectService.SetSceneBrightnessResult(brightness);
+        }
+
+        if (ImGui.CollapsingHeader("Stage probe 詳細 / 開発者向け"))
+        {
+            ImGui.TextDisabled($"Profile territory: {selectedProfile.TerritoryTypeId}");
+            ImGui.TextDisabled($"Profile path: {selectedProfile.TerritoryPath}");
+            ImGui.TextDisabled($"Stage strategy last result: {_configuration.CharaSelectSceneStageStrategyLastResult}");
+            ImGui.TextDisabled($"Stage strategy last reason: {_configuration.CharaSelectSceneStageStrategyLastReason}");
+            ImGui.TextDisabled("Lobby position / Layout prefetch / ClientSelectData details は /xmucdiag に出力します。");
         }
     }
 
@@ -1455,6 +1480,33 @@ public sealed class SettingsTab : ITabComponent
             CharaSelectSceneBrightnessResult.Acceptable => "許容",
             CharaSelectSceneBrightnessResult.Bright => "明るい",
             _ => "未確認",
+        };
+    }
+
+    private static string GetStageStrategyLabel(CharaSelectStageStrategy strategy)
+    {
+        return strategy switch
+        {
+            CharaSelectStageStrategy.Disabled => "無効",
+            CharaSelectStageStrategy.ObserveOnly => "診断のみ",
+            CharaSelectStageStrategy.ClientSelectDataTerritoryPatch => "現在の安全 route",
+            CharaSelectStageStrategy.LobbyPositionPatch => "Lobby position 実験",
+            CharaSelectStageStrategy.LobbySheetResolvedPatch => "Lobby sheet 実験",
+            CharaSelectStageStrategy.LayoutPrefetchOnly => "Layout prefetch のみ",
+            CharaSelectStageStrategy.TitleBackgroundFullSceneFallback => "背景だけ fallback",
+            _ => strategy.ToString(),
+        };
+    }
+
+    private static string GetStageStrategyDescription(CharaSelectStageStrategy strategy)
+    {
+        return strategy switch
+        {
+            CharaSelectStageStrategy.ObserveOnly => "見た目は変えず、Character Select 中の stage source 候補だけを記録します。",
+            CharaSelectStageStrategy.ClientSelectDataTerritoryPatch => "既存の ClientSelectData TerritoryTypeId 差し替えを使います。SSで場所が default のままなら source 未解決として扱います。",
+            CharaSelectStageStrategy.TitleBackgroundFullSceneFallback => "背景だけ差し替え実験です。最終目的 route ではなく、キャラ本体は消える想定です。",
+            CharaSelectStageStrategy.Disabled => "stage strategy を使いません。",
+            _ => "現時点では安全な foreground-preserving 実装が未確定です。/xmucdiag で unavailable として出します。",
         };
     }
 

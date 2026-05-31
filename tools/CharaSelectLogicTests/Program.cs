@@ -71,7 +71,8 @@ Test("chara select scene composition is default off", () =>
     var configuration = new Configuration();
     return !configuration.CharaSelectSceneCompositionEnabled
         && configuration.CharaSelectSceneProfileId == CharaSelectSceneProfileRegistry.DefaultProfileId
-        && configuration.CharaSelectScenePlacementMode == CharaSelectScenePlacementMode.ObserveOnly;
+        && configuration.CharaSelectScenePlacementMode == CharaSelectScenePlacementMode.ObserveOnly
+        && configuration.CharaSelectSceneStageStrategy == CharaSelectStageStrategy.ObserveOnly;
 });
 
 Test("chara select scene profile maps to override territory config", () =>
@@ -80,6 +81,7 @@ Test("chara select scene profile maps to override territory config", () =>
     {
         CharaSelectSceneCompositionEnabled = true,
         CharaSelectSceneUseProfileTerritory = true,
+        CharaSelectSceneStageStrategy = CharaSelectStageStrategy.ClientSelectDataTerritoryPatch,
         CharaSelectSceneProfileId = "scene:old-sharlayan-k5t1",
         TitleBackgroundOverrideEnabled = true,
     };
@@ -178,6 +180,7 @@ Test("chara select scene diagnostic uses foreground preserving route", () =>
     {
         CharaSelectSceneCompositionEnabled = true,
         CharaSelectSceneUseProfileTerritory = true,
+        CharaSelectSceneStageStrategy = CharaSelectStageStrategy.ClientSelectDataTerritoryPatch,
         CharaSelectOverrideTerritoryEnabled = true,
         CharaSelectOverrideTerritoryTypeId = 962,
         CharaSelectSceneUseSavedEmote = true,
@@ -193,7 +196,9 @@ Test("chara select scene diagnostic uses foreground preserving route", () =>
         && diagnostic.TerritoryOverrideTerritoryTypeId == 962
         && diagnostic.EmoteEnabled
         && diagnostic.NextAction == "verify-character-visible-background-and-emote-with-screenshot"
-        && lines.Contains("charaSelectScene.profileId=scene:old-sharlayan-k5t1");
+        && diagnostic.VisualLocation.ExpectedTerritoryTypeId == 962
+        && lines.Contains("charaSelectScene.profileId=scene:old-sharlayan-k5t1")
+        && lines.Contains("charaSelectStageProbe.routeVerdict=source-not-resolved");
 });
 
 Test("chara select scene last observation survives as value diagnostics", () =>
@@ -202,6 +207,7 @@ Test("chara select scene last observation survives as value diagnostics", () =>
     {
         CharaSelectSceneCompositionEnabled = true,
         CharaSelectSceneUseProfileTerritory = true,
+        CharaSelectSceneStageStrategy = CharaSelectStageStrategy.ClientSelectDataTerritoryPatch,
         CharaSelectOverrideTerritoryEnabled = true,
         CharaSelectOverrideTerritoryTypeId = 962,
     };
@@ -216,7 +222,47 @@ Test("chara select scene last observation survives as value diagnostics", () =>
         true,
         false,
         false,
-        "2026-05-31T00:00:00.0000000+00:00");
+        "2026-05-31T00:00:00.0000000+00:00",
+        new CharaSelectStageProbeSnapshot(
+            true,
+            "read-only-observation",
+            "2026-05-31T00:00:00.0000000+00:00",
+            2,
+            2,
+            0,
+            123456789,
+            true,
+            1,
+            2,
+            962,
+            0,
+            true,
+            true,
+            true,
+            "patch-applied",
+            0,
+            0,
+            false,
+            0,
+            "not-changed",
+            true,
+            1,
+            10,
+            1,
+            962,
+            0,
+            "lobby-row-candidate-found",
+            true,
+            "ex4/03_kld_k5/twn/k5t1/level/k5t1",
+            0,
+            0,
+            "OverrideDisplay",
+            "loaded",
+            false,
+            false,
+            "disabled-for-final-composition",
+            "source-not-resolved",
+            "verify-with-screenshot-and-set-manual-results"));
 
     var diagnostic = CharaSelectSceneCompositionPlanner.BuildDiagnostic(configuration, "none", "True", observation);
     var lines = CharaSelectSceneCompositionPlanner.BuildDiagnosticLines(diagnostic);
@@ -230,7 +276,9 @@ Test("chara select scene last observation survives as value diagnostics", () =>
         && diagnostic.LastObservationEmoteReplayAttempted
         && !diagnostic.LastObservationEmoteReplayApplied
         && !diagnostic.LastObservationTitleBackgroundConflictDetected
-        && lines.Contains("charaSelectScene.lastObservation.characterPointerResolved=True");
+        && diagnostic.StageProbe.ClientSelectDataPatchApplied
+        && lines.Contains("charaSelectScene.lastObservation.characterPointerResolved=True")
+        && lines.Contains("charaSelectStageProbe.clientSelectData.patchApplied=True");
 });
 
 Test("chara select scene next action follows manual result", () =>
@@ -253,10 +301,104 @@ Test("chara select scene next action follows manual result", () =>
     configuration.LastSceneProfileEmotePlayedResult = CharaSelectSceneBinaryResult.Yes;
     var readyNext = CharaSelectSceneCompositionPlanner.BuildNextAction(configuration);
 
-    return hiddenNext == "disable-title-background-route-and-verify-foreground"
-        && noLocationNext == "fix-territory-display-patch-route"
+    return hiddenNext == "inspect-character-visibility-route"
+        && noLocationNext == "discover-visible-stage-source"
         && noEmoteNext == "fix-emote-replay-route"
         && readyNext == "implement-one-shot-placement";
+});
+
+Test("chara select visual location reports territory patch unchanged", () =>
+{
+    var configuration = new Configuration
+    {
+        CharaSelectSceneCompositionEnabled = true,
+        CharaSelectSceneUseProfileTerritory = true,
+        CharaSelectSceneStageStrategy = CharaSelectStageStrategy.ClientSelectDataTerritoryPatch,
+        CharaSelectOverrideTerritoryEnabled = true,
+        CharaSelectOverrideTerritoryTypeId = 962,
+        LastSceneProfileCharacterVisibleResult = CharaSelectSceneBinaryResult.Yes,
+        LastSceneProfileLocationChangedResult = CharaSelectSceneBinaryResult.No,
+    };
+    var observation = new CharaSelectSceneLastObservation(
+        true,
+        true,
+        123,
+        0,
+        "scene:old-sharlayan-k5t1",
+        "Old Sharlayan outdoor test",
+        true,
+        true,
+        true,
+        false,
+        "2026-05-31T00:00:00.0000000+00:00",
+        CharaSelectStageProbeSnapshot.Empty with
+        {
+            Available = true,
+            CharacterPointerResolved = true,
+            ClientSelectDataPatchAttempted = true,
+            ClientSelectDataPatchApplied = true,
+            ClientSelectDataRestoreApplied = true,
+        });
+
+    var diagnostic = CharaSelectSceneCompositionPlanner.BuildDiagnostic(configuration, "Test Emote", "True", observation);
+    var lines = CharaSelectSceneCompositionPlanner.BuildDiagnosticLines(diagnostic);
+
+    return diagnostic.LastObservationCharacterPointerResolved
+        && diagnostic.VisualLocation.ManualResult == "Unchanged"
+        && diagnostic.VisualLocation.RouteVerdict == "territory-patch-did-not-change-visible-stage"
+        && diagnostic.VisualLocation.NextAction == "discover-visible-stage-source"
+        && diagnostic.NextAction == "discover-visible-stage-source"
+        && lines.Contains("charaSelectScene.visualLocation.routeVerdict=territory-patch-did-not-change-visible-stage");
+});
+
+Test("chara select stage strategy observe only does not perform write", () =>
+{
+    var configuration = new Configuration
+    {
+        CharaSelectSceneCompositionEnabled = true,
+        CharaSelectSceneUseProfileTerritory = true,
+        CharaSelectSceneStageStrategy = CharaSelectStageStrategy.ObserveOnly,
+    };
+
+    CharaSelectSceneCompositionPlanner.ApplyProfileToConfiguration(
+        configuration,
+        CharaSelectSceneProfileRegistry.GetDefault());
+    var diagnostic = CharaSelectSceneCompositionPlanner.BuildDiagnostic(configuration, "none");
+
+    return !configuration.CharaSelectOverrideTerritoryEnabled
+        && diagnostic.StageStrategyDiagnostic.Selected == CharaSelectStageStrategy.ObserveOnly
+        && diagnostic.StageStrategyDiagnostic.Available
+        && !diagnostic.StageStrategyDiagnostic.Applied;
+});
+
+Test("chara select stage probe stores primitive diagnostics only", () =>
+{
+    var snapshot = CharaSelectStageProbeSnapshot.Empty with
+    {
+        Available = true,
+        Reason = "read-only-observation",
+        ContentId = 123,
+        CharacterPointerResolved = true,
+        ClientSelectDataOriginalTerritoryType = 1,
+        ClientSelectDataPatchedTerritoryType = 962,
+        ClientSelectDataPatchAttempted = true,
+        ClientSelectDataPatchApplied = true,
+        ClientSelectDataRestoreApplied = true,
+    };
+    var text = snapshot.ToString();
+
+    return snapshot.Available
+        && snapshot.ContentId == 123
+        && !text.Contains("Character*", StringComparison.Ordinal)
+        && !text.Contains("0x", StringComparison.Ordinal);
+});
+
+Test("chara select scene ui explains unchanged default background", () =>
+{
+    var root = FindRepositoryRoot();
+    var settings = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    return settings.Contains("場所が default のままなら", StringComparison.Ordinal)
+        && settings.Contains("場所=変わらない", StringComparison.Ordinal);
 });
 
 Test("chara select scene phase3a does not introduce forbidden write paths", () =>
