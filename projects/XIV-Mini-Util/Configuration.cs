@@ -81,6 +81,10 @@ public sealed class Configuration : IPluginConfiguration
     public bool CharaSelectSceneUseSavedEmote { get; set; } = true;
     public CharaSelectScenePlacementMode CharaSelectScenePlacementMode { get; set; } = CharaSelectScenePlacementMode.ObserveOnly;
     public CharaSelectBrightnessRating CharaSelectSceneExpectedBrightness { get; set; } = CharaSelectBrightnessRating.Unknown;
+    public CharaSelectSceneBinaryResult LastSceneProfileCharacterVisibleResult { get; set; } = CharaSelectSceneBinaryResult.Unknown;
+    public CharaSelectSceneBinaryResult LastSceneProfileLocationChangedResult { get; set; } = CharaSelectSceneBinaryResult.Unknown;
+    public CharaSelectSceneBinaryResult LastSceneProfileEmotePlayedResult { get; set; } = CharaSelectSceneBinaryResult.Unknown;
+    public CharaSelectSceneBrightnessResult LastSceneProfileBrightnessResult { get; set; } = CharaSelectSceneBrightnessResult.Unknown;
     public bool CharaSelectShowLastDataCenterNameEnabled { get; set; } = false;
     public string CharaSelectLastDataCenterName { get; set; } = string.Empty;
 
@@ -296,6 +300,10 @@ public sealed class Configuration : IPluginConfiguration
         CharaSelectSceneUseSavedEmote = source.CharaSelectSceneUseSavedEmote;
         CharaSelectScenePlacementMode = NormalizeCharaSelectScenePlacementMode(source.CharaSelectScenePlacementMode);
         CharaSelectSceneExpectedBrightness = NormalizeCharaSelectBrightnessRating(source.CharaSelectSceneExpectedBrightness);
+        LastSceneProfileCharacterVisibleResult = NormalizeCharaSelectSceneBinaryResult(source.LastSceneProfileCharacterVisibleResult);
+        LastSceneProfileLocationChangedResult = NormalizeCharaSelectSceneBinaryResult(source.LastSceneProfileLocationChangedResult);
+        LastSceneProfileEmotePlayedResult = NormalizeCharaSelectSceneBinaryResult(source.LastSceneProfileEmotePlayedResult);
+        LastSceneProfileBrightnessResult = NormalizeCharaSelectSceneBrightnessResult(source.LastSceneProfileBrightnessResult);
         CharaSelectShowLastDataCenterNameEnabled = source.CharaSelectShowLastDataCenterNameEnabled;
         CharaSelectLastDataCenterName = source.CharaSelectLastDataCenterName ?? string.Empty;
         TitleBackgroundOverrideEnabled = source.TitleBackgroundOverrideEnabled;
@@ -583,6 +591,22 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedCharacterVisibleResult = NormalizeCharaSelectSceneBinaryResult(LastSceneProfileCharacterVisibleResult);
+        var normalizedLocationChangedResult = NormalizeCharaSelectSceneBinaryResult(LastSceneProfileLocationChangedResult);
+        var normalizedEmotePlayedResult = NormalizeCharaSelectSceneBinaryResult(LastSceneProfileEmotePlayedResult);
+        var normalizedBrightnessResult = NormalizeCharaSelectSceneBrightnessResult(LastSceneProfileBrightnessResult);
+        if (LastSceneProfileCharacterVisibleResult != normalizedCharacterVisibleResult
+            || LastSceneProfileLocationChangedResult != normalizedLocationChangedResult
+            || LastSceneProfileEmotePlayedResult != normalizedEmotePlayedResult
+            || LastSceneProfileBrightnessResult != normalizedBrightnessResult)
+        {
+            LastSceneProfileCharacterVisibleResult = normalizedCharacterVisibleResult;
+            LastSceneProfileLocationChangedResult = normalizedLocationChangedResult;
+            LastSceneProfileEmotePlayedResult = normalizedEmotePlayedResult;
+            LastSceneProfileBrightnessResult = normalizedBrightnessResult;
+            changed = true;
+        }
+
         var normalizedTitleTerritoryPath = NormalizeTitleBackgroundTerritoryPath(TitleBackgroundTerritoryPath);
         if (TitleBackgroundTerritoryPath != normalizedTitleTerritoryPath)
         {
@@ -790,6 +814,20 @@ public sealed class Configuration : IPluginConfiguration
         return Enum.IsDefined(typeof(CharaSelectBrightnessRating), brightness)
             ? brightness
             : CharaSelectBrightnessRating.Unknown;
+    }
+
+    private static CharaSelectSceneBinaryResult NormalizeCharaSelectSceneBinaryResult(CharaSelectSceneBinaryResult result)
+    {
+        return Enum.IsDefined(typeof(CharaSelectSceneBinaryResult), result)
+            ? result
+            : CharaSelectSceneBinaryResult.Unknown;
+    }
+
+    private static CharaSelectSceneBrightnessResult NormalizeCharaSelectSceneBrightnessResult(CharaSelectSceneBrightnessResult result)
+    {
+        return Enum.IsDefined(typeof(CharaSelectSceneBrightnessResult), result)
+            ? result
+            : CharaSelectSceneBrightnessResult.Unknown;
     }
 
     private static string NormalizeTitleBackgroundTerritoryPath(string? path)

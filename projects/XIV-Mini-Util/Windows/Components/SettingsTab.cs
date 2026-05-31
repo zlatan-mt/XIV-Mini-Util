@@ -575,12 +575,18 @@ public sealed class SettingsTab : ITabComponent
 
     private void DrawCharaSelectSceneCompositionSettings()
     {
-        ImGui.Text("キャラ選択画面の撮影構成");
+        ImGui.Text("キャラ選択画面の撮影構成（最終目的モード）");
         ImGui.TextWrapped("背景だけを差し替える Title Background route ではなく、キャラ選択画面の本物の選択キャラクターを残したまま、場所・立ち位置・エモートを構成します。");
+        ImGui.TextWrapped("最終目的はキャラ本体を表示することなので、撮影構成モードでは背景だけ差し替える実験機能を無効化します。");
 
         var enabled = _configuration.CharaSelectSceneCompositionEnabled;
         if (ImGui.Checkbox("撮影構成を有効にする", ref enabled))
         {
+            if (enabled && _configuration.TitleBackgroundOverrideEnabled)
+            {
+                _titleScreenBackgroundService.SetEnabled(false);
+            }
+
             _charaSelectService.SetSceneCompositionEnabled(enabled);
         }
 
@@ -602,6 +608,7 @@ public sealed class SettingsTab : ITabComponent
         ImGui.TextDisabled($"Expected character visible: {selectedProfile.CharacterExpectedVisible}");
         ImGui.TextDisabled($"Brightness: {selectedProfile.ExpectedBrightness}");
         ImGui.TextDisabled($"Recommended: {selectedProfile.RecommendedAction}");
+        ImGui.TextDisabled($"状態: キャラ本体={GetSceneBinaryResultLabel(_configuration.LastSceneProfileCharacterVisibleResult, "見えた", "見えない")} / 場所={GetSceneBinaryResultLabel(_configuration.LastSceneProfileLocationChangedResult, "変わった", "変わらない")} / エモート={GetSceneBinaryResultLabel(_configuration.LastSceneProfileEmotePlayedResult, "再生した", "再生しない")} / 明るさ={GetSceneBrightnessResultLabel(_configuration.LastSceneProfileBrightnessResult)}");
 
         var useTerritory = _configuration.CharaSelectSceneUseProfileTerritory;
         if (ImGui.Checkbox("profile の場所を使う", ref useTerritory))
@@ -643,6 +650,11 @@ public sealed class SettingsTab : ITabComponent
 
         if (ImGui.Button("profile を適用"))
         {
+            if (_configuration.TitleBackgroundOverrideEnabled)
+            {
+                _titleScreenBackgroundService.SetEnabled(false);
+            }
+
             _charaSelectService.ApplyCurrentSceneProfile();
         }
 
@@ -653,16 +665,48 @@ public sealed class SettingsTab : ITabComponent
         }
 
         ImGui.TextDisabled("Phase3A は position write を行いません。OneShotAfterDisplay は Phase3B 用の枠です。");
+
+        ImGui.Spacing();
+        ImGui.Text("SS判定");
+        var characterVisible = _configuration.LastSceneProfileCharacterVisibleResult;
+        if (DrawSceneBinaryResultCombo("キャラ本体##SceneCharacterVisible", ref characterVisible, "見えた", "見えない"))
+        {
+            _charaSelectService.SetSceneCharacterVisibleResult(characterVisible);
+        }
+
+        var locationChanged = _configuration.LastSceneProfileLocationChangedResult;
+        if (DrawSceneBinaryResultCombo("場所##SceneLocationChanged", ref locationChanged, "変わった", "変わらない"))
+        {
+            _charaSelectService.SetSceneLocationChangedResult(locationChanged);
+        }
+
+        var emotePlayed = _configuration.LastSceneProfileEmotePlayedResult;
+        if (DrawSceneBinaryResultCombo("エモート##SceneEmotePlayed", ref emotePlayed, "再生した", "再生しない"))
+        {
+            _charaSelectService.SetSceneEmotePlayedResult(emotePlayed);
+        }
+
+        var brightness = _configuration.LastSceneProfileBrightnessResult;
+        if (DrawSceneBrightnessResultCombo("明るさ##SceneBrightness", ref brightness))
+        {
+            _charaSelectService.SetSceneBrightnessResult(brightness);
+        }
     }
 
     private void DrawTitleBackgroundSettings()
     {
-        ImGui.Text("キャラクター選択画面背景");
+        ImGui.Text("背景だけ差し替え実験");
         ImGui.TextDisabled("キャラ選択画面の scene load 時だけ preset 背景へ差し替えます。emote / pet / queue preload とは別機能です。");
+        ImGui.TextDisabled("これは最終目的モードではありません。キャラ本体は表示されない想定です。");
 
         var enabled = _configuration.TitleBackgroundOverrideEnabled;
         if (ImGui.Checkbox("キャラ選択画面背景を差し替える（実験）", ref enabled))
         {
+            if (enabled && _configuration.CharaSelectSceneCompositionEnabled)
+            {
+                _charaSelectService.DisableSceneCompositionForTitleBackgroundRoute();
+            }
+
             _titleScreenBackgroundService.SetEnabled(enabled);
         }
 
@@ -1341,6 +1385,76 @@ public sealed class SettingsTab : ITabComponent
             TitleBackgroundCharacterSelectLightingMode.EnvironmentOverrideExperimental => "環境override（実験）",
             TitleBackgroundCharacterSelectLightingMode.DisableDarkeningExperimental => "暗転抑制（実験）",
             _ => mode.ToString(),
+        };
+    }
+
+    private static bool DrawSceneBinaryResultCombo(
+        string label,
+        ref CharaSelectSceneBinaryResult result,
+        string yesLabel,
+        string noLabel)
+    {
+        var changed = false;
+        if (ImGui.BeginCombo(label, GetSceneBinaryResultLabel(result, yesLabel, noLabel)))
+        {
+            foreach (CharaSelectSceneBinaryResult candidate in Enum.GetValues(typeof(CharaSelectSceneBinaryResult)))
+            {
+                if (ImGui.Selectable(GetSceneBinaryResultLabel(candidate, yesLabel, noLabel), result == candidate))
+                {
+                    result = candidate;
+                    changed = true;
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        return changed;
+    }
+
+    private static bool DrawSceneBrightnessResultCombo(string label, ref CharaSelectSceneBrightnessResult result)
+    {
+        var changed = false;
+        if (ImGui.BeginCombo(label, GetSceneBrightnessResultLabel(result)))
+        {
+            foreach (CharaSelectSceneBrightnessResult candidate in Enum.GetValues(typeof(CharaSelectSceneBrightnessResult)))
+            {
+                if (ImGui.Selectable(GetSceneBrightnessResultLabel(candidate), result == candidate))
+                {
+                    result = candidate;
+                    changed = true;
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        return changed;
+    }
+
+    private static string GetSceneBinaryResultLabel(
+        CharaSelectSceneBinaryResult result,
+        string yesLabel,
+        string noLabel)
+    {
+        return result switch
+        {
+            CharaSelectSceneBinaryResult.Unknown => "未確認",
+            CharaSelectSceneBinaryResult.Yes => yesLabel,
+            CharaSelectSceneBinaryResult.No => noLabel,
+            _ => "未確認",
+        };
+    }
+
+    private static string GetSceneBrightnessResultLabel(CharaSelectSceneBrightnessResult result)
+    {
+        return result switch
+        {
+            CharaSelectSceneBrightnessResult.Unknown => "未確認",
+            CharaSelectSceneBrightnessResult.Dark => "暗い",
+            CharaSelectSceneBrightnessResult.Acceptable => "許容",
+            CharaSelectSceneBrightnessResult.Bright => "明るい",
+            _ => "未確認",
         };
     }
 

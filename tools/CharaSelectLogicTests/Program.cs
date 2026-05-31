@@ -81,6 +81,7 @@ Test("chara select scene profile maps to override territory config", () =>
         CharaSelectSceneCompositionEnabled = true,
         CharaSelectSceneUseProfileTerritory = true,
         CharaSelectSceneProfileId = "scene:old-sharlayan-k5t1",
+        TitleBackgroundOverrideEnabled = true,
     };
 
     CharaSelectSceneCompositionPlanner.ApplyProfileToConfiguration(
@@ -90,6 +91,34 @@ Test("chara select scene profile maps to override territory config", () =>
     return configuration.CharaSelectOverrideTerritoryEnabled
         && configuration.CharaSelectOverrideTerritoryTypeId == 962
         && !configuration.TitleBackgroundOverrideEnabled;
+});
+
+Test("chara select scene final mode disables title background route", () =>
+{
+    var configuration = new Configuration
+    {
+        CharaSelectSceneCompositionEnabled = false,
+        TitleBackgroundOverrideEnabled = true,
+    };
+
+    CharaSelectSceneCompositionPlanner.SetFinalCompositionEnabled(configuration, true);
+
+    return configuration.CharaSelectSceneCompositionEnabled
+        && !configuration.TitleBackgroundOverrideEnabled;
+});
+
+Test("title background route disables final scene composition mode", () =>
+{
+    var configuration = new Configuration
+    {
+        CharaSelectSceneCompositionEnabled = true,
+        TitleBackgroundOverrideEnabled = false,
+    };
+
+    CharaSelectSceneCompositionPlanner.SetTitleBackgroundRouteEnabled(configuration, true);
+
+    return configuration.TitleBackgroundOverrideEnabled
+        && !configuration.CharaSelectSceneCompositionEnabled;
 });
 
 Test("chara select scene profile preserves existing emote presets", () =>
@@ -165,6 +194,69 @@ Test("chara select scene diagnostic uses foreground preserving route", () =>
         && diagnostic.EmoteEnabled
         && diagnostic.NextAction == "verify-character-visible-background-and-emote-with-screenshot"
         && lines.Contains("charaSelectScene.profileId=scene:old-sharlayan-k5t1");
+});
+
+Test("chara select scene last observation survives as value diagnostics", () =>
+{
+    var configuration = new Configuration
+    {
+        CharaSelectSceneCompositionEnabled = true,
+        CharaSelectSceneUseProfileTerritory = true,
+        CharaSelectOverrideTerritoryEnabled = true,
+        CharaSelectOverrideTerritoryTypeId = 962,
+    };
+    var observation = new CharaSelectSceneLastObservation(
+        true,
+        true,
+        123456789,
+        2,
+        "scene:old-sharlayan-k5t1",
+        "Old Sharlayan outdoor test",
+        true,
+        true,
+        false,
+        false,
+        "2026-05-31T00:00:00.0000000+00:00");
+
+    var diagnostic = CharaSelectSceneCompositionPlanner.BuildDiagnostic(configuration, "none", "True", observation);
+    var lines = CharaSelectSceneCompositionPlanner.BuildDiagnosticLines(diagnostic);
+
+    return diagnostic.LastObservationAvailable
+        && diagnostic.LastObservationCharacterPointerResolved
+        && diagnostic.LastObservationContentId == 123456789
+        && diagnostic.LastObservationSelectedIndex == 2
+        && diagnostic.LastObservationProfileName == "Old Sharlayan outdoor test"
+        && diagnostic.LastObservationTerritoryOverrideApplied
+        && diagnostic.LastObservationEmoteReplayAttempted
+        && !diagnostic.LastObservationEmoteReplayApplied
+        && !diagnostic.LastObservationTitleBackgroundConflictDetected
+        && lines.Contains("charaSelectScene.lastObservation.characterPointerResolved=True");
+});
+
+Test("chara select scene next action follows manual result", () =>
+{
+    var configuration = new Configuration
+    {
+        CharaSelectSceneCompositionEnabled = true,
+        LastSceneProfileCharacterVisibleResult = CharaSelectSceneBinaryResult.No,
+    };
+    var hiddenNext = CharaSelectSceneCompositionPlanner.BuildNextAction(configuration);
+
+    configuration.LastSceneProfileCharacterVisibleResult = CharaSelectSceneBinaryResult.Yes;
+    configuration.LastSceneProfileLocationChangedResult = CharaSelectSceneBinaryResult.No;
+    var noLocationNext = CharaSelectSceneCompositionPlanner.BuildNextAction(configuration);
+
+    configuration.LastSceneProfileLocationChangedResult = CharaSelectSceneBinaryResult.Yes;
+    configuration.LastSceneProfileEmotePlayedResult = CharaSelectSceneBinaryResult.No;
+    var noEmoteNext = CharaSelectSceneCompositionPlanner.BuildNextAction(configuration);
+
+    configuration.LastSceneProfileEmotePlayedResult = CharaSelectSceneBinaryResult.Yes;
+    var readyNext = CharaSelectSceneCompositionPlanner.BuildNextAction(configuration);
+
+    return hiddenNext == "disable-title-background-route-and-verify-foreground"
+        && noLocationNext == "fix-territory-display-patch-route"
+        && noEmoteNext == "fix-emote-replay-route"
+        && readyNext == "implement-one-shot-placement";
 });
 
 Test("chara select scene phase3a does not introduce forbidden write paths", () =>

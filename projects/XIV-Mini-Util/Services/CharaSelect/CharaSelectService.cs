@@ -58,6 +58,7 @@ public sealed unsafe class CharaSelectService : IDisposable
     private int _lastLoginPosition;
     private int _lastOverrideLoginPosition;
     private IReadOnlyList<string> _lastVoiceDiagnosticLines = [];
+    private CharaSelectSceneLastObservation _lastSceneObservation = CharaSelectSceneLastObservation.Empty;
 
     public CharaSelectService(
         IGameInteropProvider gameInteropProvider,
@@ -111,7 +112,7 @@ public sealed unsafe class CharaSelectService : IDisposable
 
     public void SetSceneCompositionEnabled(bool enabled)
     {
-        _configuration.CharaSelectSceneCompositionEnabled = enabled;
+        CharaSelectSceneCompositionPlanner.SetFinalCompositionEnabled(_configuration, enabled);
         if (enabled)
         {
             ApplyCurrentSceneProfileToConfiguration();
@@ -187,6 +188,37 @@ public sealed unsafe class CharaSelectService : IDisposable
     private void ApplyCurrentSceneProfileToConfiguration()
     {
         CharaSelectSceneCompositionPlanner.ApplyProfileToConfiguration(_configuration, CurrentSceneProfile);
+    }
+
+    public void DisableSceneCompositionForTitleBackgroundRoute()
+    {
+        CharaSelectSceneCompositionPlanner.SetTitleBackgroundRouteEnabled(_configuration, true);
+        _configuration.Save();
+        ApplySceneCompositionRuntimeState();
+    }
+
+    public void SetSceneCharacterVisibleResult(CharaSelectSceneBinaryResult result)
+    {
+        _configuration.LastSceneProfileCharacterVisibleResult = result;
+        _configuration.Save();
+    }
+
+    public void SetSceneLocationChangedResult(CharaSelectSceneBinaryResult result)
+    {
+        _configuration.LastSceneProfileLocationChangedResult = result;
+        _configuration.Save();
+    }
+
+    public void SetSceneEmotePlayedResult(CharaSelectSceneBinaryResult result)
+    {
+        _configuration.LastSceneProfileEmotePlayedResult = result;
+        _configuration.Save();
+    }
+
+    public void SetSceneBrightnessResult(CharaSelectSceneBrightnessResult result)
+    {
+        _configuration.LastSceneProfileBrightnessResult = result;
+        _configuration.Save();
     }
 
     private void ClearCurrentSceneProfileRuntimeSettings()
@@ -326,7 +358,7 @@ public sealed unsafe class CharaSelectService : IDisposable
             return;
         }
 
-        PlayEmote(emoteId);
+        MarkSceneEmoteReplay(PlayEmote(emoteId));
     }
 
     public void SelectPreviousEmote()
@@ -604,7 +636,8 @@ public sealed unsafe class CharaSelectService : IDisposable
         var diagnostic = CharaSelectSceneCompositionPlanner.BuildDiagnostic(
             _configuration,
             GetCurrentSelectedEmoteDisplayName(),
-            _currentEntry == null || _currentEntry.Character == null ? "Unknown" : "True");
+            _currentEntry == null || _currentEntry.Character == null ? "Unknown" : "True",
+            _lastSceneObservation);
         return CharaSelectSceneCompositionPlanner.BuildDiagnosticLines(diagnostic);
     }
 
@@ -928,6 +961,7 @@ public sealed unsafe class CharaSelectService : IDisposable
     {
         if (agent == null || index < 0)
         {
+            RecordSceneObservation(false, 0, index, false);
             CleanupCharaSelect();
             return;
         }
@@ -938,6 +972,7 @@ public sealed unsafe class CharaSelectService : IDisposable
 
         if (entry == null || character == null || entry->ContentId == 0)
         {
+            RecordSceneObservation(false, entry == null ? 0 : entry->ContentId, normalizedIndex, false);
             CleanupCharaSelect();
             return;
         }
@@ -945,6 +980,7 @@ public sealed unsafe class CharaSelectService : IDisposable
         var voiceId = ResolveCharacterVoiceId(entry);
         CharaSelectCharacterApplier.ApplyVoice(character, voiceId);
         _lastVoiceDiagnosticLines = BuildVoiceDiagnosticLines(agent, index, normalizedIndex, entry, character, voiceId);
+        RecordSceneObservation(true, entry->ContentId, normalizedIndex, false);
 
         var isFirstEntry = _currentEntry == null;
         var sameEntry = _currentEntry?.ContentId == entry->ContentId
@@ -977,6 +1013,60 @@ public sealed unsafe class CharaSelectService : IDisposable
         }
 
         ReplaySelectedEmoteIfNeeded(force: true);
+    }
+
+    private void RecordSceneObservation(
+        bool characterPointerResolved,
+        ulong contentId,
+        int selectedIndex,
+        bool emoteReplayApplied)
+    {
+        if (!_configuration.CharaSelectSceneCompositionEnabled)
+        {
+            return;
+        }
+
+        var profile = CurrentSceneProfile;
+        var territoryOverrideApplied = _configuration.CharaSelectSceneUseProfileTerritory
+            && _configuration.CharaSelectOverrideTerritoryEnabled
+            && _configuration.CharaSelectOverrideTerritoryTypeId == profile.TerritoryTypeId;
+        var emoteReplayAttempted = _configuration.CharaSelectSceneUseSavedEmote
+            && _configuration.CharaSelectEmoteEnabled
+            && CurrentSelectedEmoteId.HasValue;
+        _lastSceneObservation = new CharaSelectSceneLastObservation(
+            true,
+            characterPointerResolved,
+            contentId,
+            selectedIndex,
+            profile.Id,
+            profile.DisplayName,
+            territoryOverrideApplied,
+            emoteReplayAttempted || _lastSceneObservation.EmoteReplayAttempted,
+            emoteReplayApplied || _lastSceneObservation.EmoteReplayApplied,
+            _configuration.TitleBackgroundOverrideEnabled,
+            DateTimeOffset.UtcNow.ToString("O"));
+    }
+
+    private void MarkSceneEmoteReplay(bool applied)
+    {
+        if (!_configuration.CharaSelectSceneCompositionEnabled)
+        {
+            return;
+        }
+
+        var profile = CurrentSceneProfile;
+        _lastSceneObservation = new CharaSelectSceneLastObservation(
+            true,
+            _lastSceneObservation.CharacterPointerResolved,
+            _lastSceneObservation.ContentId,
+            _lastSceneObservation.SelectedIndex,
+            profile.Id,
+            profile.DisplayName,
+            _lastSceneObservation.TerritoryOverrideApplied,
+            true,
+            applied || _lastSceneObservation.EmoteReplayApplied,
+            _configuration.TitleBackgroundOverrideEnabled,
+            DateTimeOffset.UtcNow.ToString("O"));
     }
 
     private void RefreshCharaSelectDisplay()
@@ -1314,18 +1404,18 @@ public sealed unsafe class CharaSelectService : IDisposable
         return introId != 0 || loopId != 0;
     }
 
-    private void PlayEmote(uint emoteId)
+    private bool PlayEmote(uint emoteId)
     {
         var entry = _currentEntry;
         if (!_configuration.CharaSelectEmoteEnabled || entry == null || entry.Character == null)
         {
-            return;
+            return false;
         }
 
         if (!TryGetEmote(emoteId, out var emote))
         {
             ResetEmoteMode();
-            return;
+            return false;
         }
 
         var character = entry.Character;
@@ -1340,7 +1430,7 @@ public sealed unsafe class CharaSelectService : IDisposable
         if (introId == 0 && loopId == 0)
         {
             ResetEmoteMode();
-            return;
+            return false;
         }
 
         var plan = CharaSelectEmotePlaybackPlanner.Create(
@@ -1352,7 +1442,7 @@ public sealed unsafe class CharaSelectService : IDisposable
         if (!plan.HasTimeline)
         {
             ResetEmoteMode();
-            return;
+            return false;
         }
 
         character->SetMode(plan.Mode, plan.ModeParam);
@@ -1367,6 +1457,7 @@ public sealed unsafe class CharaSelectService : IDisposable
         }
 
         _replayTracker.MarkReplayed(entry.ContentId, emoteId, (nint)character);
+        return true;
     }
 
     private void ResetEmoteMode()
@@ -1402,7 +1493,7 @@ public sealed unsafe class CharaSelectService : IDisposable
             return;
         }
 
-        PlayEmote(emoteId);
+        MarkSceneEmoteReplay(PlayEmote(emoteId));
     }
 
     private void ScheduleDelayedReplay()
@@ -1456,7 +1547,7 @@ public sealed unsafe class CharaSelectService : IDisposable
             return;
         }
 
-        PlayEmote(_delayedReplayEmoteId);
+        MarkSceneEmoteReplay(PlayEmote(_delayedReplayEmoteId));
     }
 
     private void ClearReplayState()

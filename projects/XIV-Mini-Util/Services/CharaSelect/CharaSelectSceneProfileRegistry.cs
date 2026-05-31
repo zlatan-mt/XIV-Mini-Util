@@ -19,6 +19,21 @@ public enum CharaSelectScenePlacementMode
     OneShotAfterDisplay,
 }
 
+public enum CharaSelectSceneBinaryResult
+{
+    Unknown,
+    Yes,
+    No,
+}
+
+public enum CharaSelectSceneBrightnessResult
+{
+    Unknown,
+    Dark,
+    Acceptable,
+    Bright,
+}
+
 public readonly record struct CharaSelectSceneProfile(
     string Id,
     string DisplayName,
