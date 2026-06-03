@@ -575,9 +575,8 @@ public sealed class SettingsTab : ITabComponent
 
     private void DrawCharaSelectSceneCompositionSettings()
     {
-        ImGui.Text("キャラ選択画面の撮影構成（最終目的モード）");
-        ImGui.TextWrapped("背景だけを差し替える Title Background route ではなく、キャラ選択画面の本物の選択キャラクターを残したまま、場所・立ち位置・エモートを構成します。");
-        ImGui.TextWrapped("最終目的はキャラ本体を表示することなので、撮影構成モードでは背景だけ差し替える実験機能を無効化します。");
+        ImGui.Text("通常: キャラを残す撮影構成");
+        ImGui.TextWrapped("キャラ選択画面の本物の選択キャラクターを残したまま、場所・立ち位置・エモートを構成します。背景だけ実験とは同時に使いません。");
 
         var enabled = _configuration.CharaSelectSceneCompositionEnabled;
         if (ImGui.Checkbox("撮影構成を有効にする", ref enabled))
@@ -591,7 +590,9 @@ public sealed class SettingsTab : ITabComponent
         }
 
         var selectedProfile = _charaSelectService.CurrentSceneProfile;
-        if (ImGui.BeginCombo("Scene profile##CharaSelectSceneProfile", _charaSelectService.GetCurrentSceneProfileLabel()))
+        DrawSceneCompositionDecisionSummary(selectedProfile);
+
+        if (ImGui.BeginCombo("撮影 profile##CharaSelectSceneProfile", _charaSelectService.GetCurrentSceneProfileLabel()))
         {
             foreach (var profile in _charaSelectService.SceneProfiles)
             {
@@ -604,13 +605,6 @@ public sealed class SettingsTab : ITabComponent
             ImGui.EndCombo();
         }
 
-        ImGui.TextDisabled($"Route: {CharaSelectSceneCompositionPlanner.ForegroundPreservingRoute}");
-        ImGui.TextDisabled($"Expected character visible: {selectedProfile.CharacterExpectedVisible}");
-        ImGui.TextDisabled($"Brightness: {selectedProfile.ExpectedBrightness}");
-        ImGui.TextDisabled($"Recommended: {selectedProfile.RecommendedAction}");
-        ImGui.TextDisabled($"状態: キャラ本体={GetSceneBinaryResultLabel(_configuration.LastSceneProfileCharacterVisibleResult, "見えた", "見えない")} / 場所={GetSceneBinaryResultLabel(_configuration.LastSceneProfileLocationChangedResult, "変わった", "変わらない")} / エモート={GetSceneBinaryResultLabel(_configuration.LastSceneProfileEmotePlayedResult, "再生した", "再生しない")} / 明るさ={GetSceneBrightnessResultLabel(_configuration.LastSceneProfileBrightnessResult)}");
-        ImGui.TextDisabled($"次にやること: {CharaSelectSceneCompositionPlanner.BuildNextAction(_configuration)}");
-
         var useTerritory = _configuration.CharaSelectSceneUseProfileTerritory;
         if (ImGui.Checkbox("profile の場所を使う", ref useTerritory))
         {
@@ -618,7 +612,7 @@ public sealed class SettingsTab : ITabComponent
         }
 
         var stageStrategy = _configuration.CharaSelectSceneStageStrategy;
-        if (ImGui.BeginCombo("Stage strategy##CharaSelectStageStrategy", GetStageStrategyLabel(stageStrategy)))
+        if (ImGui.BeginCombo("場所変更ルート##CharaSelectStageStrategy", GetStageStrategyLabel(stageStrategy)))
         {
             foreach (CharaSelectStageStrategy strategy in Enum.GetValues(typeof(CharaSelectStageStrategy)))
             {
@@ -649,7 +643,7 @@ public sealed class SettingsTab : ITabComponent
         }
 
         var placementMode = _configuration.CharaSelectScenePlacementMode;
-        if (ImGui.BeginCombo("Placement mode##CharaSelectScenePlacementMode", placementMode.ToString()))
+        if (ImGui.BeginCombo("立ち位置 mode##CharaSelectScenePlacementMode", placementMode.ToString()))
         {
             foreach (CharaSelectScenePlacementMode mode in Enum.GetValues(typeof(CharaSelectScenePlacementMode)))
             {
@@ -662,7 +656,7 @@ public sealed class SettingsTab : ITabComponent
             ImGui.EndCombo();
         }
 
-        if (ImGui.Button("profile を適用"))
+        if (ImGui.Button("撮影構成を適用"))
         {
             if (_configuration.TitleBackgroundOverrideEnabled)
             {
@@ -710,6 +704,10 @@ public sealed class SettingsTab : ITabComponent
 
         if (ImGui.CollapsingHeader("Stage probe 詳細 / 開発者向け"))
         {
+            ImGui.TextDisabled($"Route: {CharaSelectSceneCompositionPlanner.ForegroundPreservingRoute}");
+            ImGui.TextDisabled($"Expected character visible: {selectedProfile.CharacterExpectedVisible}");
+            ImGui.TextDisabled($"Brightness: {selectedProfile.ExpectedBrightness}");
+            ImGui.TextDisabled($"Recommended: {selectedProfile.RecommendedAction}");
             ImGui.TextDisabled($"Profile territory: {selectedProfile.TerritoryTypeId}");
             ImGui.TextDisabled($"Profile path: {selectedProfile.TerritoryPath}");
             ImGui.TextDisabled($"Stage strategy last result: {_configuration.CharaSelectSceneStageStrategyLastResult}");
@@ -718,11 +716,34 @@ public sealed class SettingsTab : ITabComponent
         }
     }
 
+    private void DrawSceneCompositionDecisionSummary(CharaSelectSceneProfile selectedProfile)
+    {
+        var verdict = GetSceneCompositionVerdictLabel();
+        var nextAction = CharaSelectSceneCompositionPlanner.BuildNextAction(_configuration);
+        var statusColor = GetSceneCompositionVerdictColor();
+
+        ImGui.Spacing();
+        ImGui.Text("現在の判定");
+        ImGui.TextColored(statusColor, verdict);
+        ImGui.TextWrapped(
+            $"結果: キャラ={GetSceneBinaryResultLabel(_configuration.LastSceneProfileCharacterVisibleResult, "見えた", "見えない")} / " +
+            $"場所={GetSceneBinaryResultLabel(_configuration.LastSceneProfileLocationChangedResult, "変わった", "変わらない")} / " +
+            $"エモート={GetSceneBinaryResultLabel(_configuration.LastSceneProfileEmotePlayedResult, "再生した", "再生しない")} / " +
+            $"明るさ={GetSceneBrightnessResultLabel(_configuration.LastSceneProfileBrightnessResult)}");
+        ImGui.TextWrapped($"次: {GetSceneNextActionLabel(nextAction)}");
+
+        if (_configuration.CharaSelectSceneCompositionEnabled && _configuration.TitleBackgroundOverrideEnabled)
+        {
+            ImGui.TextColored(new Vector4(1f, 0.45f, 0.45f, 1f), "背景だけ実験が同時に有効です。撮影構成を使う場合は背景だけ実験を無効にしてください。");
+        }
+
+        ImGui.TextDisabled($"期待: キャラ={BoolToVisibleLabel(selectedProfile.CharacterExpectedVisible)} / 明るさ={selectedProfile.ExpectedBrightness}");
+    }
+
     private void DrawTitleBackgroundSettings()
     {
-        ImGui.Text("背景だけ差し替え実験");
-        ImGui.TextDisabled("キャラ選択画面の scene load 時だけ preset 背景へ差し替えます。emote / pet / queue preload とは別機能です。");
-        ImGui.TextDisabled("これは最終目的モードではありません。キャラ本体は表示されない想定です。");
+        ImGui.Text("実験: 背景だけ差し替え");
+        ImGui.TextWrapped("キャラ選択画面の scene load 時だけ preset 背景へ差し替えます。これは最終目的モードではなく、キャラ本体は表示されない想定です。");
 
         var enabled = _configuration.TitleBackgroundOverrideEnabled;
         if (ImGui.Checkbox("キャラ選択画面背景を差し替える（実験）", ref enabled))
@@ -735,8 +756,10 @@ public sealed class SettingsTab : ITabComponent
             _titleScreenBackgroundService.SetEnabled(enabled);
         }
 
+        DrawTitleBackgroundRouteSummary();
+
         var runtimeMode = _configuration.TitleBackgroundRuntimeMode;
-        if (ImGui.BeginCombo("実行モード##TitleBackgroundRuntimeMode", GetTitleBackgroundRuntimeModeLabel(runtimeMode)))
+        if (ImGui.BeginCombo("実行範囲##TitleBackgroundRuntimeMode", GetTitleBackgroundRuntimeModeLabel(runtimeMode)))
         {
             foreach (TitleBackgroundRuntimeMode mode in Enum.GetValues(typeof(TitleBackgroundRuntimeMode)))
             {
@@ -770,16 +793,6 @@ public sealed class SettingsTab : ITabComponent
             ClearTitleBackgroundInputs();
         }
 
-        var statusText = _titleScreenBackgroundService.GetStatusText();
-        var statusIsError = statusText.Contains("失敗", StringComparison.Ordinal)
-            || statusText.Contains("エラー", StringComparison.Ordinal)
-            || statusText.Contains("見つかりません", StringComparison.Ordinal)
-            || statusText.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
-            || statusText.Contains("error", StringComparison.OrdinalIgnoreCase);
-        ImGui.TextColored(statusIsError
-            ? new Vector4(1f, 0.45f, 0.45f, 1f)
-            : new Vector4(0.7f, 0.7f, 0.7f, 1f), statusText);
-
         if (!string.IsNullOrWhiteSpace(_configuration.TitleBackgroundTerritoryPath))
         {
             ImGui.TextDisabled($"LVB想定パス: {TitleBackgroundPathHelper.BuildLvbPath(_configuration.TitleBackgroundTerritoryPath)}");
@@ -791,6 +804,20 @@ public sealed class SettingsTab : ITabComponent
 
         ImGui.Spacing();
         DrawTitleBackgroundAdvancedSettings();
+    }
+
+    private void DrawTitleBackgroundRouteSummary()
+    {
+        var statusText = _titleScreenBackgroundService.GetStatusText();
+        var statusIsError = IsStatusError(statusText);
+
+        ImGui.Spacing();
+        ImGui.Text("現在の判定");
+        ImGui.TextColored(statusIsError
+            ? new Vector4(1f, 0.45f, 0.45f, 1f)
+            : new Vector4(0.7f, 0.7f, 0.7f, 1f), statusText);
+        ImGui.TextWrapped("到達点: background-only MVP。背景だけを確認し、キャラ本体の表示は成功条件に含めません。");
+        ImGui.TextWrapped("次: キャラ選択画面のSSで背景を確認し、ログイン後に /xmutbgdiag の deliveryVerdict / mvpStatus / blocker を確認します。");
     }
 
     private void DrawTitleBackgroundPresetSettings()
@@ -981,7 +1008,7 @@ public sealed class SettingsTab : ITabComponent
         var lightingMode = _configuration.TitleBackgroundCharacterSelectLightingMode;
         var changed = false;
 
-        if (ImGui.BeginCombo("背景配送モード##TitleBackgroundCharacterSelectBackgroundMode", GetTitleBackgroundCharacterSelectBackgroundModeLabel(backgroundMode)))
+        if (ImGui.BeginCombo("背景の扱い##TitleBackgroundCharacterSelectBackgroundMode", GetTitleBackgroundCharacterSelectBackgroundModeLabel(backgroundMode)))
         {
             foreach (TitleBackgroundCharacterSelectBackgroundMode candidate in Enum.GetValues(typeof(TitleBackgroundCharacterSelectBackgroundMode)))
             {
@@ -995,7 +1022,7 @@ public sealed class SettingsTab : ITabComponent
             ImGui.EndCombo();
         }
 
-        if (ImGui.BeginCombo("明るさ診断モード##TitleBackgroundCharacterSelectLightingMode", GetTitleBackgroundCharacterSelectLightingModeLabel(lightingMode)))
+        if (ImGui.BeginCombo("明るさの扱い##TitleBackgroundCharacterSelectLightingMode", GetTitleBackgroundCharacterSelectLightingModeLabel(lightingMode)))
         {
             foreach (TitleBackgroundCharacterSelectLightingMode candidate in Enum.GetValues(typeof(TitleBackgroundCharacterSelectLightingMode)))
             {
@@ -1034,7 +1061,7 @@ public sealed class SettingsTab : ITabComponent
             availableCandidates);
         var selectedLabel = GetTitleBackgroundOverrideCandidateLabel(selectedCandidate);
 
-        if (ImGui.BeginCombo("Character Select background candidate##TitleBackgroundOverrideCandidate", selectedLabel))
+        if (ImGui.BeginCombo("背景候補##TitleBackgroundOverrideCandidate", selectedLabel))
         {
             foreach (var candidate in availableCandidates)
             {
@@ -1372,14 +1399,102 @@ public sealed class SettingsTab : ITabComponent
         _titleBackgroundPresetMessageColor = new Vector4(1f, 0.75f, 0.35f, 1f);
     }
 
+    private string GetSceneCompositionVerdictLabel()
+    {
+        if (!_configuration.CharaSelectSceneCompositionEnabled)
+        {
+            return "無効: 撮影構成はまだ使いません";
+        }
+
+        if (_configuration.TitleBackgroundOverrideEnabled)
+        {
+            return "要確認: 背景だけ実験と競合しています";
+        }
+
+        if (_configuration.LastSceneProfileCharacterVisibleResult == CharaSelectSceneBinaryResult.Yes
+            && _configuration.LastSceneProfileLocationChangedResult == CharaSelectSceneBinaryResult.Yes
+            && _configuration.LastSceneProfileEmotePlayedResult == CharaSelectSceneBinaryResult.Yes)
+        {
+            return "OK: キャラ・場所・エモートを確認済み";
+        }
+
+        if (_configuration.LastSceneProfileCharacterVisibleResult == CharaSelectSceneBinaryResult.No)
+        {
+            return "Blocked: キャラ本体が見えていません";
+        }
+
+        if (_configuration.LastSceneProfileCharacterVisibleResult == CharaSelectSceneBinaryResult.Yes
+            && _configuration.LastSceneProfileLocationChangedResult == CharaSelectSceneBinaryResult.No)
+        {
+            return "Blocked: 場所が変わっていません";
+        }
+
+        return "未確認: SS判定を入力してください";
+    }
+
+    private Vector4 GetSceneCompositionVerdictColor()
+    {
+        if (!_configuration.CharaSelectSceneCompositionEnabled)
+        {
+            return new Vector4(0.7f, 0.7f, 0.7f, 1f);
+        }
+
+        if (_configuration.TitleBackgroundOverrideEnabled
+            || _configuration.LastSceneProfileCharacterVisibleResult == CharaSelectSceneBinaryResult.No
+            || (_configuration.LastSceneProfileCharacterVisibleResult == CharaSelectSceneBinaryResult.Yes
+                && _configuration.LastSceneProfileLocationChangedResult == CharaSelectSceneBinaryResult.No))
+        {
+            return new Vector4(1f, 0.45f, 0.45f, 1f);
+        }
+
+        if (_configuration.LastSceneProfileCharacterVisibleResult == CharaSelectSceneBinaryResult.Yes
+            && _configuration.LastSceneProfileLocationChangedResult == CharaSelectSceneBinaryResult.Yes
+            && _configuration.LastSceneProfileEmotePlayedResult == CharaSelectSceneBinaryResult.Yes)
+        {
+            return new Vector4(0.3f, 0.8f, 0.45f, 1f);
+        }
+
+        return new Vector4(1f, 0.75f, 0.35f, 1f);
+    }
+
+    private static string GetSceneNextActionLabel(string nextAction)
+    {
+        return nextAction switch
+        {
+            "enable-scene-composition-and-select-profile" => "撮影構成を有効化し、profile を選びます",
+            "disable-title-background-route-and-verify-foreground" => "背景だけ実験を無効化し、キャラ本体が残るか確認します",
+            "inspect-character-visibility-route" => "キャラ本体が消える原因を診断します",
+            "discover-visible-stage-source" => "キャラ本体を残したまま場所を変える source を探します",
+            "fix-emote-replay-route" => "保存エモートの再生ルートを確認します",
+            "implement-one-shot-placement" => "一回だけの立ち位置適用へ進めます",
+            "verify-with-screenshot-and-set-manual-results" => "SSで確認し、下の判定を入力します",
+            "verify-character-visible-background-and-emote-with-screenshot" => "SSでキャラ・場所・エモートを確認します",
+            _ => nextAction,
+        };
+    }
+
+    private static bool IsStatusError(string statusText)
+    {
+        return statusText.Contains("失敗", StringComparison.Ordinal)
+            || statusText.Contains("エラー", StringComparison.Ordinal)
+            || statusText.Contains("見つかりません", StringComparison.Ordinal)
+            || statusText.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
+            || statusText.Contains("error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BoolToVisibleLabel(bool value)
+    {
+        return value ? "表示される想定" : "表示されない想定";
+    }
+
     private static string GetTitleBackgroundRuntimeModeLabel(TitleBackgroundRuntimeMode mode)
     {
         return mode switch
         {
-            TitleBackgroundRuntimeMode.ResolveOnly => "address解決のみ",
+            TitleBackgroundRuntimeMode.ResolveOnly => "準備だけ（address解決）",
             TitleBackgroundRuntimeMode.Disabled => "無効",
-            TitleBackgroundRuntimeMode.HookProbe => "hook probe（変更なし）",
-            TitleBackgroundRuntimeMode.CharaSelectOnly => "キャラ選択のみ",
+            TitleBackgroundRuntimeMode.HookProbe => "診断だけ（見た目変更なし）",
+            TitleBackgroundRuntimeMode.CharaSelectOnly => "キャラ選択だけ",
             TitleBackgroundRuntimeMode.TitleAndCharaSelect => "タイトル+キャラ選択",
             _ => mode.ToString(),
         };
@@ -1391,9 +1506,9 @@ public sealed class SettingsTab : ITabComponent
         {
             TitleBackgroundCharacterSelectBackgroundMode.Disabled => "無効",
             TitleBackgroundCharacterSelectBackgroundMode.DiagnosticsOnly => "診断のみ",
-            TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly => "scene override のみ",
-            TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground => "foreground保持を試行",
-            TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource => "native preview source",
+            TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly => "背景だけ差し替え",
+            TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground => "キャラ保持を試行",
+            TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource => "native preview source 診断",
             TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly => "互換候補のみ",
             _ => mode.ToString(),
         };
@@ -1407,7 +1522,7 @@ public sealed class SettingsTab : ITabComponent
             TitleBackgroundCharacterSelectLightingMode.DiagnosticsOnly => "診断のみ",
             TitleBackgroundCharacterSelectLightingMode.PreferBrightPreset => "明るい候補推奨",
             TitleBackgroundCharacterSelectLightingMode.PreferBrightLayer => "明るいレイヤー推奨",
-            TitleBackgroundCharacterSelectLightingMode.EnvironmentOverrideExperimental => "環境override（実験）",
+            TitleBackgroundCharacterSelectLightingMode.EnvironmentOverrideExperimental => "環境 override（実験）",
             TitleBackgroundCharacterSelectLightingMode.DisableDarkeningExperimental => "暗転抑制（実験）",
             _ => mode.ToString(),
         };
