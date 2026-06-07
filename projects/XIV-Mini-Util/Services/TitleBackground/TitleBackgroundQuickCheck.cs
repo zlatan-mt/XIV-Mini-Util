@@ -62,6 +62,8 @@ internal readonly record struct TitleBackgroundQuickCheckInput(
     TitleBackgroundQuickCheckRunState RunState,
     DateTimeOffset? StartedAt,
     DateTimeOffset CompletedAt,
+    bool StartedLoggedIn,
+    bool CharaSelectObserved,
     int SceneGenerationStart,
     int SceneGenerationEnd,
     int SceneReadyAcceptedCount,
@@ -130,6 +132,16 @@ internal static class TitleBackgroundQuickCheckEvaluator
             warnings.Add("QuickCheck was not started; run-scoped confidence is limited");
         }
 
+        if (input.RunScoped && input.StartedLoggedIn)
+        {
+            warnings.Add("Start QuickCheck from title/character select for a clean run. Current run started while already logged in.");
+        }
+
+        if (input.RunScoped && !input.CharaSelectObserved)
+        {
+            warnings.Add("Character Select was not observed during this QuickCheck run");
+        }
+
         if (!loginChecked)
         {
             warnings.Add("login transition has not been checked yet");
@@ -164,6 +176,8 @@ internal static class TitleBackgroundQuickCheckEvaluator
         var reason = level switch
         {
             TitleBackgroundQuickCheckLevel.NG => ngReason,
+            TitleBackgroundQuickCheckLevel.WARN when input.RunScoped && input.StartedLoggedIn => "QuickCheck started while already logged in. Start from title/character select for a clean run.",
+            TitleBackgroundQuickCheckLevel.WARN when input.RunScoped && !input.CharaSelectObserved => "Character Select was not observed during this QuickCheck run.",
             TitleBackgroundQuickCheckLevel.WARN when !loginChecked => "login transition has not been checked yet. Log in, then run QuickCheck again.",
             TitleBackgroundQuickCheckLevel.WARN => "background works with warnings",
             _ => "background-only works, no post-login leak",
@@ -267,6 +281,12 @@ internal static class TitleBackgroundQuickCheckEvaluator
             return "log in, then run QuickCheck again";
         }
 
+        if (warnings.Any(warning => warning.Contains("already logged in", StringComparison.Ordinal)
+                || warning.Contains("Character Select was not observed", StringComparison.Ordinal)))
+        {
+            return "start QuickCheck from title/character select, then log in and run check";
+        }
+
         if (warnings.Any(warning => warning.Contains("run-scoped confidence", StringComparison.Ordinal)))
         {
             return "start QuickCheck, enter Character Select, log in, then run check";
@@ -342,6 +362,8 @@ internal static class TitleBackgroundQuickCheckEvaluator
             $"postLogin.loginTransitionStatus={NormalizeNone(result.LoginTransitionStatus)}",
             $"postLogin.leakStatus={NormalizeNone(result.PostLoginLeakStatus)}",
             $"quickCheck.runScoped={input.RunScoped}",
+            $"quickCheck.startedLoggedIn={input.StartedLoggedIn}",
+            $"quickCheck.charaSelectObserved={input.CharaSelectObserved}",
             $"quickCheck.state={result.RunState}",
             $"quickCheck.sceneReadyAcceptedCount={input.SceneReadyAcceptedCount}",
             $"quickCheck.overrideAppliedCount={input.OverrideAppliedCount}",
@@ -373,7 +395,15 @@ internal static class TitleBackgroundQuickCheckEvaluator
 
     private static bool IsLoginTransitionChecked(TitleBackgroundQuickCheckInput input)
     {
-        return input.IsLoggedIn || input.RunState == TitleBackgroundQuickCheckRunState.LoggedInObserved;
+        if (input.RunScoped)
+        {
+            return input.CharaSelectObserved
+                && !input.StartedLoggedIn
+                && input.RunState is TitleBackgroundQuickCheckRunState.LoggedInObserved
+                    or TitleBackgroundQuickCheckRunState.Completed;
+        }
+
+        return input.IsLoggedIn;
     }
 
     private static string BuildLoginTransitionStatus(

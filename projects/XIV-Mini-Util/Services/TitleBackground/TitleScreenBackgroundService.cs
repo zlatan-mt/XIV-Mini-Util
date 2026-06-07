@@ -509,8 +509,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _clientState.IsLoggedIn);
         _configuration.TitleBackgroundLastQuickCheckResult = TitleBackgroundQuickCheckLevel.NotRun;
         _configuration.TitleBackgroundLastQuickCheckCandidateId = candidate.Id;
-        _configuration.TitleBackgroundLastQuickCheckReason = "Armed: enter Character Select, log in, then run check";
-        _configuration.TitleBackgroundLastQuickCheckNextAction = "enter Character Select, log in, then run check";
+        var startReason = _clientState.IsLoggedIn
+            ? "Start QuickCheck from title/character select for a clean run. Current run started while already logged in."
+            : "Armed: enter Character Select, log in, then run check";
+        _configuration.TitleBackgroundLastQuickCheckReason = startReason;
+        _configuration.TitleBackgroundLastQuickCheckNextAction = _clientState.IsLoggedIn
+            ? "return to title/character select, start QuickCheck, then log in and run check"
+            : "enter Character Select, log in, then run check";
         _configuration.TitleBackgroundLastQuickCheckTime = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz");
         _configuration.TitleBackgroundLastQuickCheckDetailFileName = TitleBackgroundQuickCheckEvaluator.DetailFileName;
         _configuration.Save();
@@ -519,7 +524,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         [
             "[XMU QuickCheck] START",
             $"Candidate: {candidate.Id} / {candidate.DisplayName}",
-            "Next: enter Character Select, log in, then run /xmutbgcheck.",
+            $"Next: {_configuration.TitleBackgroundLastQuickCheckNextAction}",
         ];
     }
 
@@ -595,8 +600,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             || string.Equals(phase2MSummary.Resolution, "ambiguous", StringComparison.OrdinalIgnoreCase);
         var zeroTransformStubs = phase2MSummary.ZeroPositionCandidateCount > 0
             && phase2MSummary.NonZeroPositionCandidateCount == 0;
-        var backgroundApplied = overrideAppliedCount > 0
-            || (_lastOverrideApplied && _lastOverrideLobbyType == GameLobbyType.CharaSelect);
+        var backgroundApplied = runScoped
+            ? overrideAppliedCount > 0
+            : overrideAppliedCount > 0 || (_lastOverrideApplied && _lastOverrideLobbyType == GameLobbyType.CharaSelect);
         var adapterState = _charaSelectCameraAdapter.State.ToString();
         var staleCharaSelectStateAfterLogin = _transitionDiagnostics.StaleAdapterStateAfterLogin
             || (_clientState.IsLoggedIn && TitleBackgroundQuickCheckEvaluator.IsUnsafeAfterLoginAdapterState(adapterState));
@@ -618,6 +624,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _quickCheckState.RunState,
             _quickCheckState.StartedAt,
             DateTimeOffset.Now,
+            runScoped && _quickCheckState.StartedLoggedIn,
+            IsQuickCheckCharaSelectObserved(),
             runScoped ? _quickCheckState.SceneGenerationStart : 0,
             _charaSelectCameraAdapter.RuntimeState.SceneGeneration,
             sceneReadyAcceptedCount,
@@ -693,6 +701,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private int GetPhase2GApplyCount()
     {
         return _phase2GGenerationOverrideSetMidAppliedCount + _phase2GGenerationOverrideLowHighAppliedCount;
+    }
+
+    private bool IsQuickCheckCharaSelectObserved()
+    {
+        return _quickCheckState.RunState is TitleBackgroundQuickCheckRunState.CharaSelectObserved
+            or TitleBackgroundQuickCheckRunState.LoggedInObserved
+            or TitleBackgroundQuickCheckRunState.Completed;
     }
 
     private IReadOnlyList<string> BuildTransitionDiagnosticSummaryLines(
@@ -5104,8 +5119,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         if (_sceneOverrideCleanupReason == "world-login-transition" && !_loggedInWorldTransitionRecorded)
         {
             _loggedInWorldTransitionRecorded = true;
-            if (_quickCheckState.RunState is TitleBackgroundQuickCheckRunState.Armed
-                or TitleBackgroundQuickCheckRunState.CharaSelectObserved)
+            if (_quickCheckState.RunState == TitleBackgroundQuickCheckRunState.CharaSelectObserved)
             {
                 _quickCheckState = _quickCheckState with { RunState = TitleBackgroundQuickCheckRunState.LoggedInObserved };
             }

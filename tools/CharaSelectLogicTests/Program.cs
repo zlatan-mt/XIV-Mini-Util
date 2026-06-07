@@ -455,6 +455,7 @@ Test("title background quickcheck warns when login not checked", () =>
 {
     var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
         isLoggedIn: false,
+        charaSelectObserved: true,
         runState: TitleBackgroundQuickCheckRunState.CharaSelectObserved));
     return result.Level == TitleBackgroundQuickCheckLevel.WARN
         && result.Reason.Contains("login transition has not been checked", StringComparison.Ordinal)
@@ -509,6 +510,39 @@ Test("title background quickcheck adapter stopping after login is not ng", () =>
 {
     return TitleBackgroundQuickCheckEvaluator.IsSafeAfterLoginAdapterState("Stopping")
         && !TitleBackgroundQuickCheckEvaluator.IsUnsafeAfterLoginAdapterState("Stopping");
+});
+
+Test("title background quickcheck run-scoped ignores historical last override", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        overrideAppliedCount: 0,
+        backgroundApplied: false,
+        backgroundObserved: false));
+    return result.Level != TitleBackgroundQuickCheckLevel.OK
+        && result.Reason.Contains("background was not applied", StringComparison.Ordinal);
+});
+
+Test("title background quickcheck started while already logged in is warn", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        startedLoggedIn: true,
+        charaSelectObserved: false,
+        runState: TitleBackgroundQuickCheckRunState.Armed));
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.Reason.Contains("already logged in", StringComparison.Ordinal)
+        && result.Level != TitleBackgroundQuickCheckLevel.OK;
+});
+
+Test("title background quickcheck proper clean flow is ok", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        runScoped: true,
+        startedLoggedIn: false,
+        charaSelectObserved: true,
+        runState: TitleBackgroundQuickCheckRunState.LoggedInObserved,
+        overrideAppliedCount: 1,
+        isLoggedIn: true));
+    return result.Level == TitleBackgroundQuickCheckLevel.OK;
 });
 
 Test("title background quickcheck ui simple mode is bounded", () =>
@@ -4026,9 +4060,12 @@ TitleBackgroundTransitionDelta TrustedDelta(
 }
 
 TitleBackgroundQuickCheckInput QuickCheckInput(
+    bool runScoped = true,
     string candidateId = "custom:n4f4",
     TitleBackgroundCharacterSelectExpectedBrightness expectedBrightness = TitleBackgroundCharacterSelectExpectedBrightness.Normal,
     bool isLoggedIn = true,
+    bool startedLoggedIn = false,
+    bool charaSelectObserved = true,
     TitleBackgroundQuickCheckRunState runState = TitleBackgroundQuickCheckRunState.LoggedInObserved,
     int sceneReadyAcceptedCount = 1,
     int overrideAppliedCount = 1,
@@ -4043,10 +4080,12 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
     bool objectTableZeroTransformStubs = false)
 {
     return new TitleBackgroundQuickCheckInput(
-        RunScoped: true,
+        RunScoped: runScoped,
         RunState: runState,
         StartedAt: DateTimeOffset.Now.AddMinutes(-2),
         CompletedAt: DateTimeOffset.Now,
+        StartedLoggedIn: startedLoggedIn,
+        CharaSelectObserved: charaSelectObserved,
         SceneGenerationStart: 1,
         SceneGenerationEnd: 2,
         SceneReadyAcceptedCount: sceneReadyAcceptedCount,
