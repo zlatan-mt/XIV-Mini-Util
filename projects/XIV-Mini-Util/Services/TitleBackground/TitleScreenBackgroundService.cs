@@ -155,6 +155,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private int _quickCheckOverrideAppliedCount;
     private bool _integratedCompositionRouteInvoked;
     private string _integratedCompositionRouteLastReason = string.Empty;
+    private bool _integratedCompositionAutoEnabled;
     private string _lastCurrentLobbyMapResetReason = "none";
     private bool _postLoginDiagnosticSeen;
     private TitleBackgroundSelfTestSession? _selfTestSession;
@@ -666,10 +667,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             && candidate.LayerFilterKey != 0;
 
         var serviceReady = _state == TitleBackgroundServiceState.Ready;
-        var shouldArmAdapter = TitleBackgroundCharaSelectCameraLogic.ShouldArmAdapter(
-            _configuration.TitleBackgroundOverrideEnabled,
-            _configuration.TitleBackgroundCameraOverrideEnabled,
-            _configuration.TitleBackgroundRuntimeMode);
+        // Derive shouldArmAdapter from reason so both fields are always consistent.
+        // ShouldArmAdapter(3 params) is kept for actual adapter arming in ConfigureCharaSelectCameraAdapter;
+        // the QuickCheck diagnostic must reflect ALL conditions including integrated composition.
         var shouldArmAdapterReason = TitleBackgroundCharaSelectCameraLogic.BuildShouldArmAdapterReason(
             _configuration.TitleBackgroundOverrideEnabled,
             _configuration.TitleBackgroundCameraOverrideEnabled,
@@ -678,6 +678,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             candidateFieldsValid,
             serviceReady,
             serviceReady);
+        var shouldArmAdapter = shouldArmAdapterReason == "none";
         var sceneOverrideApplyObserved = overrideAppliedCount > 0;
         var cameraFramingApplied = phase2GApplyCount > 0;
 
@@ -736,7 +737,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _integratedCompositionRouteInvoked,
             _integratedCompositionRouteLastReason,
             cameraFramingApplied,
-            sceneOverrideApplyObserved);
+            sceneOverrideApplyObserved,
+            _integratedCompositionAutoEnabled);
     }
 
     private void SaveQuickCheckResult(TitleBackgroundQuickCheckResult result)
@@ -5000,6 +5002,27 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundSetCameraCurveMidPointSignature = NormalizeSignature(_configuration.TitleBackgroundSetCameraCurveMidPointSignature);
         _configuration.TitleBackgroundCalculateCameraCurveLowAndHighPointSignature = NormalizeSignature(_configuration.TitleBackgroundCalculateCameraCurveLowAndHighPointSignature);
         TitleBackgroundPresetApplicator.ClearInvalidSelectedPreset(_configuration);
+
+        // Migration: TitleBackground override requires camera override and integrated composition.
+        // Correct any pre-existing config that was saved before these flags were introduced.
+        if (TitleBackgroundCharaSelectCameraLogic.NormalizeAndMigrateFlags(
+            _configuration.TitleBackgroundOverrideEnabled,
+            _configuration.TitleBackgroundCameraOverrideEnabled,
+            _configuration.TitleBackgroundIntegratedCompositionEnabled,
+            out var normCam,
+            out var normIntegrated))
+        {
+            var wasIntegratedDisabled = !_configuration.TitleBackgroundIntegratedCompositionEnabled;
+            _configuration.TitleBackgroundCameraOverrideEnabled = normCam;
+            _configuration.TitleBackgroundIntegratedCompositionEnabled = normIntegrated;
+            if (wasIntegratedDisabled)
+            {
+                _integratedCompositionAutoEnabled = true;
+            }
+
+            RecordTransitionEvent("config migration", "TitleBackground flags normalized on load");
+            _configuration.Save();
+        }
     }
 
     private bool AreSceneReady()

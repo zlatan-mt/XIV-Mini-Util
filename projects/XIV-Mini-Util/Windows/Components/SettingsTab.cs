@@ -830,6 +830,11 @@ public sealed class SettingsTab : ITabComponent
         ImGui.Text($"Title Background: {(_configuration.TitleBackgroundOverrideEnabled ? "ON" : "OFF")}");
         ImGui.Text(summary.CandidateLine);
         ImGui.TextColored(statusColor, summary.StatusLine);
+        if (_configuration.TitleBackgroundOverrideEnabled && !_configuration.TitleBackgroundIntegratedCompositionEnabled)
+        {
+            ImGui.TextColored(new Vector4(1f, 0.45f, 0.45f, 1f), "Integrated composition is OFF. Re-enable Character Select Background or reset Title Background settings.");
+        }
+
         ImGui.TextWrapped(summary.NextActionLine);
         ImGui.TextDisabled(_titleScreenBackgroundService.GetStatusText());
     }

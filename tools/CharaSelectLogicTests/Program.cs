@@ -446,7 +446,7 @@ Test("title background integrated composition off blocks with specific ng reason
         backgroundApplied: false,
         backgroundObserved: false));
     return result.Level == TitleBackgroundQuickCheckLevel.NG
-        && result.Reason.Contains("integrated character composition was not armed", StringComparison.Ordinal);
+        && result.Reason.Contains("integrated character composition is disabled", StringComparison.Ordinal);
 });
 
 Test("title background should arm adapter false surfaces blocking reason", () =>
@@ -4337,6 +4337,83 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
         CameraFramingApplied: cameraFramingApplied,
         SceneOverrideApplyObserved: sceneOverrideApplyObserved);
 }
+
+// ── New fix cases ──────────────────────────────────────────────────────────
+
+// Fix case 1: existing config migration
+// TitleBackgroundOverrideEnabled=True + camera=False + integrated=False
+// → NormalizeAndMigrateFlags auto-corrects both flags
+Test("title background fix case 1 normalize migrate flags auto enables camera and integrated when override on", () =>
+{
+    var changed = TitleBackgroundCharaSelectCameraLogic.NormalizeAndMigrateFlags(
+        overrideEnabled: true,
+        cameraOverrideEnabled: false,
+        integratedCompositionEnabled: false,
+        out var normalizedCamera,
+        out var normalizedIntegrated);
+    return changed && normalizedCamera && normalizedIntegrated;
+});
+
+// Fix case 2: NormalizeAndMigrateFlags no-op when override is off
+Test("title background fix case 2 normalize migrate flags no op when override off", () =>
+{
+    var changed = TitleBackgroundCharaSelectCameraLogic.NormalizeAndMigrateFlags(
+        overrideEnabled: false,
+        cameraOverrideEnabled: false,
+        integratedCompositionEnabled: false,
+        out var normalizedCamera,
+        out var normalizedIntegrated);
+    return !changed && !normalizedCamera && !normalizedIntegrated;
+});
+
+// Fix case 3: shouldArmAdapter false when integratedCompositionEnabled=False
+// reason=integratedCompositionDisabled → shouldArm=false (derived from reason)
+Test("title background fix case 3 shouldArmAdapter false when integrated composition disabled", () =>
+{
+    var reason = TitleBackgroundCharaSelectCameraLogic.BuildShouldArmAdapterReason(
+        overrideEnabled: true,
+        cameraAdaptationEnabled: true,
+        runtimeMode: TitleBackgroundRuntimeMode.CharaSelectOnly,
+        integratedCompositionEnabled: false);
+    var shouldArm = reason == "none";
+    return !shouldArm && reason == "integratedCompositionDisabled";
+});
+
+// Fix case 4: NG priority — integrated composition disabled takes priority over camera framing
+// Even with cameraFramingApplied=True, integratedCompositionEnabled=False must win
+Test("title background fix case 4 ng integrated composition disabled beats camera framing ng", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        backgroundApplied: false,
+        backgroundObserved: false,
+        overrideAppliedCount: 0,
+        integratedCompositionEnabled: false,
+        shouldArmAdapter: false,
+        shouldArmAdapterReason: "integratedCompositionDisabled",
+        cameraFramingApplied: true,
+        sceneOverrideApplyObserved: false));
+    return result.Level == TitleBackgroundQuickCheckLevel.NG
+        && result.Reason.Contains("integrated character composition is disabled", StringComparison.Ordinal);
+});
+
+// Fix case 5: happy path — all conditions correct → OK
+Test("title background fix case 5 happy path all correct is ok", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        titleBackgroundOverrideEnabled: true,
+        titleBackgroundCameraOverrideEnabled: true,
+        integratedCompositionEnabled: true,
+        shouldArmAdapter: true,
+        shouldArmAdapterReason: "",
+        integratedCompositionRouteInvoked: true,
+        integratedCompositionRouteReason: "reload requested",
+        sceneOverrideApplyObserved: true,
+        backgroundApplied: true,
+        backgroundObserved: true,
+        overrideAppliedCount: 1,
+        cameraFramingApplied: true));
+    return result.Level == TitleBackgroundQuickCheckLevel.OK;
+});
 
 // Case 1: IntegratedCompositionEnabled=True and SceneOverrideNotYetObserved
 // → detail line integratedCompositionRouteRequired=True must be present

@@ -124,6 +124,41 @@ internal static class TitleBackgroundCharaSelectCameraLogic
         return "none";
     }
 
+    /// <summary>
+    /// Title Background 有効時に camera override / integrated composition を自動 ON にするフラグ正規化。
+    /// 既存 config が移行前の不整合状態で残っていた場合でも plugin 起動時に補正できる。
+    /// 変更があった場合は true を返す。out パラメータに正規化後の値が入る。
+    /// </summary>
+    public static bool NormalizeAndMigrateFlags(
+        bool overrideEnabled,
+        bool cameraOverrideEnabled,
+        bool integratedCompositionEnabled,
+        out bool normalizedCameraOverride,
+        out bool normalizedIntegratedComposition)
+    {
+        normalizedCameraOverride = cameraOverrideEnabled;
+        normalizedIntegratedComposition = integratedCompositionEnabled;
+        if (!overrideEnabled)
+        {
+            return false;
+        }
+
+        var changed = false;
+        if (!cameraOverrideEnabled)
+        {
+            normalizedCameraOverride = true;
+            changed = true;
+        }
+
+        if (!integratedCompositionEnabled)
+        {
+            normalizedIntegratedComposition = true;
+            changed = true;
+        }
+
+        return changed;
+    }
+
     public static bool IsCharaSelectMap(GameLobbyType map)
     {
         return map == GameLobbyType.CharaSelect;

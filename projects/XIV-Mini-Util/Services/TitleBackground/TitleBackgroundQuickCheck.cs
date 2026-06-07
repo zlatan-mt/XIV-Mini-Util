@@ -112,7 +112,8 @@ internal readonly record struct TitleBackgroundQuickCheckInput(
     bool IntegratedCompositionRouteInvoked = false,
     string IntegratedCompositionRouteReason = "",
     bool CameraFramingApplied = false,
-    bool SceneOverrideApplyObserved = false);
+    bool SceneOverrideApplyObserved = false,
+    bool IntegratedCompositionAutoEnabled = false);
 
 internal readonly record struct TitleBackgroundQuickCheckResult(
     TitleBackgroundQuickCheckLevel Level,
@@ -270,6 +271,11 @@ internal static class TitleBackgroundQuickCheckEvaluator
             return "Title Background camera override is disabled";
         }
 
+        if (!input.TitleBackgroundIntegratedCompositionEnabledAtCheck)
+        {
+            return "integrated character composition is disabled";
+        }
+
         if (!input.ShouldArmAdapterAtCheck)
         {
             return $"adapter was not armed: {NormalizeNone(input.ShouldArmAdapterReasonAtCheck)}";
@@ -277,25 +283,20 @@ internal static class TitleBackgroundQuickCheckEvaluator
 
         if (input.OverrideAppliedCount <= 0 || !input.BackgroundApplied || !input.BackgroundObserved)
         {
-            if (input.CameraFramingApplied && !input.SceneOverrideApplyObserved)
-            {
-                return "camera framing applied but scene override was not observed";
-            }
-
             if (input.IntegratedCompositionRouteInvoked && !input.SceneOverrideApplyObserved)
             {
                 return "integrated composition route was invoked but scene override was not observed";
-            }
-
-            if (!input.TitleBackgroundIntegratedCompositionEnabledAtCheck)
-            {
-                return "integrated character composition was not armed";
             }
 
             if (!input.IntegratedCompositionRouteInvoked
                 && !string.IsNullOrWhiteSpace(input.IntegratedCompositionRouteReason))
             {
                 return "integrated composition flag is enabled but route was not invoked";
+            }
+
+            if (input.CameraFramingApplied && !input.SceneOverrideApplyObserved)
+            {
+                return "camera framing applied but scene override was not observed";
             }
 
             return "background was not applied";
@@ -448,6 +449,7 @@ internal static class TitleBackgroundQuickCheckEvaluator
             $"quickCheck.titleBackgroundCameraOverrideEnabled={input.TitleBackgroundCameraOverrideEnabledAtCheck}",
             $"quickCheck.legacySceneCompositionEnabled={input.LegacySceneCompositionEnabledAtCheck}",
             $"quickCheck.integratedCompositionEnabled={input.TitleBackgroundIntegratedCompositionEnabledAtCheck}",
+            $"quickCheck.integratedCompositionAutoEnabled={input.IntegratedCompositionAutoEnabled}",
             $"quickCheck.integratedCompositionRouteRequired={input.TitleBackgroundIntegratedCompositionEnabledAtCheck && !input.SceneOverrideApplyObserved}",
             $"quickCheck.integratedCompositionRouteInvoked={input.IntegratedCompositionRouteInvoked}",
             $"quickCheck.integratedCompositionRoute.reason={NormalizeNone(input.IntegratedCompositionRouteReason)}",
