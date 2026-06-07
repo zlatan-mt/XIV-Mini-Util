@@ -36,6 +36,7 @@ public sealed class Plugin : IDalamudPlugin
     private const string TitleBackgroundCameraProbeCommandName = "/xmutbgcamprobe";
     private const string TitleBackgroundSelfTestCommandName = "/xmutbgtest";
     private const string TitleBackgroundReloadCommandName = "/xmutbgreload";
+    private const string TitleBackgroundQuickCheckCommandName = "/xmutbgcheck";
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
     private readonly IChatGui _chatGui;
@@ -259,6 +260,10 @@ public sealed class Plugin : IDalamudPlugin
         {
             HelpMessage = "debug-only: キャラ選択ロビー中にタイトル背景とカメラを再適用します。通常確認では使用しません。",
         });
+        _commandManager.AddHandler(TitleBackgroundQuickCheckCommandName, new CommandInfo(OnTitleBackgroundQuickCheckCommand)
+        {
+            HelpMessage = "Character Select 背景 QuickCheck を開始/評価/表示/リセットします。サブコマンド: start / status / reset",
+        });
         _shopSearchService.OnSearchCompleted += OnShopSearchCompleted;
         _ = InitializeShopDataAsync();
     }
@@ -282,6 +287,7 @@ public sealed class Plugin : IDalamudPlugin
         _commandManager.RemoveHandler(TitleBackgroundCameraProbeCommandName);
         _commandManager.RemoveHandler(TitleBackgroundSelfTestCommandName);
         _commandManager.RemoveHandler(TitleBackgroundReloadCommandName);
+        _commandManager.RemoveHandler(TitleBackgroundQuickCheckCommandName);
         _pluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         _pluginInterface.UiBuilder.OpenMainUi -= OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi -= OpenSettingsWindow;
@@ -476,6 +482,28 @@ public sealed class Plugin : IDalamudPlugin
         _pluginLog.Information("TitleBackground reload: {Line}", message);
     }
 
+    private void OnTitleBackgroundQuickCheckCommand(string command, string args)
+    {
+        var subCommand = GetSubCommand(args);
+        IReadOnlyList<string> lines = subCommand switch
+        {
+            "" or "run" => _titleScreenBackgroundService.RunQuickCheck(),
+            "start" => _titleScreenBackgroundService.StartQuickCheck(),
+            "status" => _titleScreenBackgroundService.GetQuickCheckStatusLines(),
+            "reset" => _titleScreenBackgroundService.ResetQuickCheck(),
+            _ =>
+            [
+                "[XMU QuickCheck] usage: /xmutbgcheck [start|status|reset]",
+            ],
+        };
+
+        foreach (var line in lines)
+        {
+            _chatGui.Print($"[XIV Mini Util] {line}");
+            _pluginLog.Information("TitleBackground quickcheck: {Line}", line);
+        }
+    }
+
     private void OnTitleBackgroundSelfTestCompleted(string message)
     {
         _chatGui.Print($"[XIV Mini Util] {message}");
@@ -536,6 +564,8 @@ public sealed class Plugin : IDalamudPlugin
         _chatGui.Print("/xmuc : キャラ選択画面のエモート/声診断情報を表示します。");
         _chatGui.Print("/xmutbg : タイトル背景差し替えの診断情報を表示します。");
         _chatGui.Print("/xmutbg copy : タイトル背景差し替えの診断情報をクリップボードへコピーします。");
+        _chatGui.Print("/xmutbgcheck : Character Select 背景 QuickCheck を表示します。");
+        _chatGui.Print("/xmutbgcheck start : QuickCheck のrun-scoped確認を開始します。");
         _chatGui.Print("/xmutbgcamprobe arm-y : CameraY / FocusY one-shot probeを準備します。");
         _chatGui.Print("/xmu : /xivminiutil のエイリアス");
     }

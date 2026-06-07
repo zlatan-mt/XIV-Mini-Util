@@ -29,6 +29,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundCameraCaptureService _cameraCaptureService;
     private readonly TitleBackgroundCharaSelectCameraAdapter _charaSelectCameraAdapter = new();
     private readonly TitleBackgroundTransitionDiagnosticRecorder _transitionDiagnostics = new();
+    private TitleBackgroundQuickCheckState _quickCheckState = TitleBackgroundQuickCheckState.Idle;
 
     private Hook<CreateSceneDelegate>? _createSceneHook;
     private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
@@ -151,6 +152,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private int _phase2GGenerationOverrideLastAppliedSceneGeneration;
     private string _phase2GGenerationOverrideLastStatus = "not-run";
     private string _phase2GGenerationOverrideLastSkippedReason = string.Empty;
+    private int _quickCheckOverrideAppliedCount;
     private string _lastCurrentLobbyMapResetReason = "none";
     private bool _postLoginDiagnosticSeen;
     private TitleBackgroundSelfTestSession? _selfTestSession;
@@ -486,6 +488,203 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             TitleBackgroundServiceState.RuntimeError => $"状態: runtime error - {_stateReason}",
             _ => $"状態: {_state} - {_stateReason}",
         };
+    }
+
+    public IReadOnlyList<string> StartQuickCheck()
+    {
+        var currentMap = TryReadCurrentLobbyMap(out var map) ? map.ToString() : "unknown";
+        var candidate = ResolveCurrentOverrideCandidate();
+        _quickCheckState = new TitleBackgroundQuickCheckState(
+            TitleBackgroundQuickCheckRunState.Armed,
+            DateTimeOffset.Now,
+            _charaSelectCameraAdapter.RuntimeState.SceneGeneration,
+            _sceneReadySignalAcceptedCount,
+            _quickCheckOverrideAppliedCount,
+            GetPhase2GApplyCount(),
+            _configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
+            candidate.Id,
+            _configuration.TitleBackgroundCharacterSelectBackgroundMode,
+            _configuration.TitleBackgroundCharacterSelectLightingMode,
+            currentMap,
+            _clientState.IsLoggedIn);
+
+        return
+        [
+            "[XMU QuickCheck] START",
+            $"Candidate: {candidate.Id} / {candidate.DisplayName}",
+            "Next: enter Character Select, log in, then run /xmutbgcheck.",
+        ];
+    }
+
+    public IReadOnlyList<string> GetQuickCheckStatusLines()
+    {
+        var last = TitleBackgroundQuickCheckUiPresenter.BuildSummary(_configuration);
+        return
+        [
+            $"[XMU QuickCheck] state={_quickCheckState.RunState}",
+            $"Started: {(_quickCheckState.StartedAt.HasValue ? _quickCheckState.StartedAt.Value.ToString("yyyy-MM-dd HH:mm:ss zzz") : "none")}",
+            last.LastResultLine,
+            last.LastReasonLine,
+            last.NextActionLine,
+            last.DetailLine,
+        ];
+    }
+
+    public IReadOnlyList<string> ResetQuickCheck()
+    {
+        _quickCheckState = TitleBackgroundQuickCheckState.Idle;
+        _configuration.TitleBackgroundLastQuickCheckResult = TitleBackgroundQuickCheckLevel.NotRun;
+        _configuration.TitleBackgroundLastQuickCheckCandidateId = string.Empty;
+        _configuration.TitleBackgroundLastQuickCheckReason = string.Empty;
+        _configuration.TitleBackgroundLastQuickCheckNextAction = string.Empty;
+        _configuration.TitleBackgroundLastQuickCheckTime = string.Empty;
+        _configuration.TitleBackgroundLastQuickCheckDetailFileName = string.Empty;
+        _configuration.Save();
+
+        return
+        [
+            "[XMU QuickCheck] RESET",
+            "Next: run /xmutbgcheck start before the next Character Select login check.",
+        ];
+    }
+
+    public IReadOnlyList<string> RunQuickCheck()
+    {
+        var result = EvaluateQuickCheck();
+        SaveQuickCheckResult(result);
+        _quickCheckState = _quickCheckState with { RunState = result.RunState };
+        return TitleBackgroundQuickCheckEvaluator.BuildChatLines(result);
+    }
+
+    private TitleBackgroundQuickCheckResult EvaluateQuickCheck()
+    {
+        var input = BuildQuickCheckInput();
+        return TitleBackgroundQuickCheckEvaluator.Evaluate(input);
+    }
+
+    private TitleBackgroundQuickCheckInput BuildQuickCheckInput()
+    {
+        var candidate = ResolveCurrentOverrideCandidate();
+        var runScoped = _quickCheckState.StartedAt.HasValue
+            && _quickCheckState.RunState != TitleBackgroundQuickCheckRunState.Idle;
+        var sceneReadyAcceptedCount = runScoped
+            ? Math.Max(0, _sceneReadySignalAcceptedCount - _quickCheckState.SceneReadyAcceptedCountStart)
+            : _sceneReadySignalAcceptedCount;
+        var overrideAppliedCount = runScoped
+            ? Math.Max(0, _quickCheckOverrideAppliedCount - _quickCheckState.OverrideAppliedCountStart)
+            : _quickCheckOverrideAppliedCount;
+        var phase2GApplyCount = runScoped
+            ? Math.Max(0, GetPhase2GApplyCount() - _quickCheckState.Phase2GApplyCountStart)
+            : GetPhase2GApplyCount();
+        var currentLobbyMapAvailable = TryReadCurrentLobbyMap(out var currentLobbyMap);
+        var currentLobbyMapName = currentLobbyMapAvailable ? currentLobbyMap.ToString() : "unknown";
+        var currentLobbyMapRemainedAfterLogin = _clientState.IsLoggedIn
+            && currentLobbyMapAvailable
+            && currentLobbyMap != GameLobbyType.None;
+        var phase2MSummary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(_phase2MPlacementFrames.Values);
+        var characterKnownLimitation = !candidate.CharacterExpectedVisible
+            || string.Equals(phase2MSummary.ActorVisible, "not-observed", StringComparison.OrdinalIgnoreCase);
+        var actorSourceAmbiguous = string.Equals(GetLatestPhase2MActorCandidateStatus(), "ambiguous", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(phase2MSummary.Resolution, "ambiguous", StringComparison.OrdinalIgnoreCase);
+        var zeroTransformStubs = phase2MSummary.ZeroPositionCandidateCount > 0
+            && phase2MSummary.NonZeroPositionCandidateCount == 0;
+        var backgroundApplied = overrideAppliedCount > 0
+            || (_lastOverrideApplied && _lastOverrideLobbyType == GameLobbyType.CharaSelect);
+        var staleCharaSelectStateAfterLogin = _transitionDiagnostics.StaleAdapterStateAfterLogin
+            || (_clientState.IsLoggedIn && !string.Equals(_charaSelectCameraAdapter.State.ToString(), "Inactive", StringComparison.OrdinalIgnoreCase));
+        var activeAfterLoginDetected = _transitionDiagnostics.StaleSceneOverrideStateAfterLogin
+            || (_clientState.IsLoggedIn && _activeSceneOverride);
+        var pluginOrHookError = _state is TitleBackgroundServiceState.InvalidConfiguration
+            or TitleBackgroundServiceState.AddressResolveFailed
+            or TitleBackgroundServiceState.HookCreateFailed
+            or TitleBackgroundServiceState.HookEnableFailed
+            or TitleBackgroundServiceState.RuntimeError;
+        var candidateFieldsValid = !string.IsNullOrWhiteSpace(candidate.TerritoryPath)
+            && candidate.TerritoryPath != "none"
+            && TitleBackgroundPathHelper.IsLikelyValidNormalizedTerritoryPath(candidate.TerritoryPath)
+            && candidate.TerritoryId != 0
+            && candidate.LayerFilterKey != 0;
+
+        return new TitleBackgroundQuickCheckInput(
+            runScoped,
+            _quickCheckState.RunState,
+            _quickCheckState.StartedAt,
+            DateTimeOffset.Now,
+            runScoped ? _quickCheckState.SceneGenerationStart : 0,
+            _charaSelectCameraAdapter.RuntimeState.SceneGeneration,
+            sceneReadyAcceptedCount,
+            overrideAppliedCount,
+            phase2GApplyCount,
+            pluginOrHookError,
+            _stateReason,
+            _clientState.IsLoggedIn,
+            currentLobbyMapName,
+            currentLobbyMapRemainedAfterLogin,
+            _configuration.TitleBackgroundCharacterSelectBackgroundMode,
+            _configuration.TitleBackgroundCharacterSelectLightingMode,
+            candidate.Id,
+            candidate.DisplayName,
+            candidate.VerifiedInGame,
+            candidate.Source,
+            candidate.ExpectedCompatibility,
+            candidate.ExpectedBrightness,
+            candidate.TerritoryPath,
+            candidate.TerritoryId,
+            candidate.LayerFilterKey,
+            candidateFieldsValid,
+            backgroundApplied,
+            backgroundApplied,
+            !candidate.VerifiedInGame,
+            candidate.CharacterExpectedVisible,
+            phase2MSummary.ActorVisible,
+            characterKnownLimitation,
+            _clientState.IsLoggedIn && _activeSceneOverride,
+            activeAfterLoginDetected,
+            staleCharaSelectStateAfterLogin,
+            _transitionDiagnostics.Phase2GAppliedAfterLogin,
+            true,
+            actorSourceAmbiguous,
+            zeroTransformStubs);
+    }
+
+    private void SaveQuickCheckResult(TitleBackgroundQuickCheckResult result)
+    {
+        _configuration.TitleBackgroundLastQuickCheckResult = result.Level;
+        _configuration.TitleBackgroundLastQuickCheckCandidateId = result.CandidateId == "none" ? string.Empty : result.CandidateId;
+        _configuration.TitleBackgroundLastQuickCheckReason = result.Reason;
+        _configuration.TitleBackgroundLastQuickCheckNextAction = result.NextAction;
+        _configuration.TitleBackgroundLastQuickCheckTime = result.CompletedAt.ToString("yyyy-MM-dd HH:mm:ss zzz");
+        _configuration.TitleBackgroundLastQuickCheckDetailFileName = result.DetailFileName;
+        _configuration.Save();
+        SaveQuickCheckDetailFile(result);
+    }
+
+    private void SaveQuickCheckDetailFile(TitleBackgroundQuickCheckResult result)
+    {
+        try
+        {
+            var path = Path.Combine(_configDirectory, result.DetailFileName);
+            File.WriteAllLines(path, result.DetailLines);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "[XMU BG] Failed to write QuickCheck detail.");
+        }
+    }
+
+    private TitleBackgroundCharacterSelectOverrideCandidate ResolveCurrentOverrideCandidate()
+    {
+        return TitleBackgroundCharacterSelectOverrideCandidateRegistry.ResolveFromConfig(
+            _configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
+            _configuration.TitleBackgroundTerritoryPath,
+            _configuration.TitleBackgroundTerritoryTypeId,
+            _configuration.TitleBackgroundLayoutLayerFilterKey,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates(BuildPhase2PManualCandidateSlots()));
+    }
+
+    private int GetPhase2GApplyCount()
+    {
+        return _phase2GGenerationOverrideSetMidAppliedCount + _phase2GGenerationOverrideLowHighAppliedCount;
     }
 
     private IReadOnlyList<string> BuildTransitionDiagnosticSummaryLines(
@@ -1912,6 +2111,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             if (ShouldHandleCharaSelectSceneReadySignal(stateBeforeHandle, map))
             {
                 _sceneReadySignalAcceptedCount++;
+                if (_quickCheckState.RunState == TitleBackgroundQuickCheckRunState.Armed)
+                {
+                    _quickCheckState = _quickCheckState with { RunState = TitleBackgroundQuickCheckRunState.CharaSelectObserved };
+                }
+
                 _transitionDiagnostics.RecordSceneReadyAccepted(
                     sceneReadySnapshot,
                     $"map={map}; stateBefore={stateBeforeHandle}",
@@ -1985,6 +2189,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 _lastOverrideNewPath = _validatedTerritoryPath;
                 _lastOverrideTerritoryId = territoryId;
                 _lastOverrideLayerFilterKey = layerFilterKey;
+                _quickCheckOverrideAppliedCount++;
                 _charaSelectTitleBackgroundSessionActive = true;
                 _activeCharaSelectSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
                 _activeSceneOverride = true;
@@ -4891,6 +5096,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         if (_sceneOverrideCleanupReason == "world-login-transition" && !_loggedInWorldTransitionRecorded)
         {
             _loggedInWorldTransitionRecorded = true;
+            if (_quickCheckState.RunState is TitleBackgroundQuickCheckRunState.Armed
+                or TitleBackgroundQuickCheckRunState.CharaSelectObserved)
+            {
+                _quickCheckState = _quickCheckState with { RunState = TitleBackgroundQuickCheckRunState.LoggedInObserved };
+            }
+
             RecordTransitionEvent("entered logged-in world", source);
         }
 

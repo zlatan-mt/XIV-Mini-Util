@@ -1,0 +1,476 @@
+// Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundQuickCheck.cs
+// Description: Character Select 背景 QuickCheck の状態、判定、UI表示文字列をまとめる
+// Reason: /xmutbgdiag の累積診断に頼らず、1回の確認結果を OK/WARN/NG で出すため
+namespace XivMiniUtil.Services.TitleBackground;
+
+public enum TitleBackgroundQuickCheckLevel
+{
+    NotRun,
+    OK,
+    WARN,
+    NG,
+}
+
+public enum TitleBackgroundQuickCheckRunState
+{
+    Idle,
+    Armed,
+    CharaSelectObserved,
+    LoggedInObserved,
+    Completed,
+    Failed,
+}
+
+public enum TitleBackgroundSettingsDisplayMode
+{
+    Simple,
+    Advanced,
+    DeveloperDiagnostics,
+}
+
+internal readonly record struct TitleBackgroundQuickCheckState(
+    TitleBackgroundQuickCheckRunState RunState,
+    DateTimeOffset? StartedAt,
+    int SceneGenerationStart,
+    int SceneReadyAcceptedCountStart,
+    int OverrideAppliedCountStart,
+    int Phase2GApplyCountStart,
+    string SelectedCandidateIdStart,
+    string EffectiveCandidateIdStart,
+    TitleBackgroundCharacterSelectBackgroundMode BackgroundModeStart,
+    TitleBackgroundCharacterSelectLightingMode LightingModeStart,
+    string CurrentLobbyMapStart,
+    bool StartedLoggedIn)
+{
+    public static TitleBackgroundQuickCheckState Idle { get; } = new(
+        TitleBackgroundQuickCheckRunState.Idle,
+        null,
+        0,
+        0,
+        0,
+        0,
+        string.Empty,
+        string.Empty,
+        TitleBackgroundCharacterSelectBackgroundMode.Disabled,
+        TitleBackgroundCharacterSelectLightingMode.Default,
+        "None",
+        false);
+}
+
+internal readonly record struct TitleBackgroundQuickCheckInput(
+    bool RunScoped,
+    TitleBackgroundQuickCheckRunState RunState,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset CompletedAt,
+    int SceneGenerationStart,
+    int SceneGenerationEnd,
+    int SceneReadyAcceptedCount,
+    int OverrideAppliedCount,
+    int Phase2GApplyCount,
+    bool PluginOrHookError,
+    string PluginOrHookErrorReason,
+    bool IsLoggedIn,
+    string CurrentLobbyMap,
+    bool CurrentLobbyMapRemainedAfterLogin,
+    TitleBackgroundCharacterSelectBackgroundMode BackgroundMode,
+    TitleBackgroundCharacterSelectLightingMode LightingMode,
+    string CandidateId,
+    string CandidateDisplayName,
+    bool CandidateVerifiedInGame,
+    string CandidateSource,
+    TitleBackgroundCharacterSelectCompatibility ExpectedCompatibility,
+    TitleBackgroundCharacterSelectExpectedBrightness ExpectedBrightness,
+    string OverrideTerritoryPath,
+    uint OverrideTerritoryId,
+    uint OverrideLayerFilterKey,
+    bool CandidateFieldsValid,
+    bool BackgroundApplied,
+    bool BackgroundObserved,
+    bool VisualConfirmationRequired,
+    bool CharacterExpectedVisible,
+    string CharacterObserved,
+    bool CharacterKnownLimitation,
+    bool SceneOverrideActiveAfterLogin,
+    bool ActiveAfterLoginDetected,
+    bool StaleCharaSelectStateAfterLogin,
+    bool Phase2GAppliedAfterLogin,
+    bool ForegroundPreserveUnavailable,
+    bool ActorSourceAmbiguous,
+    bool ObjectTableZeroTransformStubs);
+
+internal readonly record struct TitleBackgroundQuickCheckResult(
+    TitleBackgroundQuickCheckLevel Level,
+    TitleBackgroundQuickCheckRunState RunState,
+    string Reason,
+    string CandidateId,
+    string CandidateDisplayName,
+    DateTimeOffset CompletedAt,
+    string NextAction,
+    string DetailFileName,
+    IReadOnlyList<string> Warnings,
+    IReadOnlyList<string> DetailLines);
+
+internal static class TitleBackgroundQuickCheckEvaluator
+{
+    public const string DetailFileName = "title-background-quickcheck.txt";
+
+    public static TitleBackgroundQuickCheckResult Evaluate(TitleBackgroundQuickCheckInput input)
+    {
+        var warnings = new List<string>();
+        var ngReason = GetNgReason(input);
+
+        if (!input.RunScoped)
+        {
+            warnings.Add("QuickCheck was not started; run-scoped confidence is limited");
+        }
+
+        if (input.SceneReadyAcceptedCount > 1)
+        {
+            warnings.Add($"sceneReady accepted multiple times during this run ({input.SceneReadyAcceptedCount})");
+        }
+
+        if (!input.CandidateVerifiedInGame)
+        {
+            warnings.Add("selected candidate is unverified");
+        }
+
+        if (input.ExpectedBrightness is TitleBackgroundCharacterSelectExpectedBrightness.Dark
+            or TitleBackgroundCharacterSelectExpectedBrightness.TooDark)
+        {
+            warnings.Add("candidate brightness is dark");
+        }
+
+        if (input.VisualConfirmationRequired)
+        {
+            warnings.Add("visual confirmation is required");
+        }
+
+        if (input.IsLoggedIn
+            && string.Equals(input.CurrentLobbyMap, "unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            warnings.Add("currentLobbyMap could not be read after login");
+        }
+
+        if (!input.CharacterExpectedVisible || input.CharacterKnownLimitation)
+        {
+            warnings.Add("selected character is expected to be hidden with full-scene override");
+        }
+
+        if (input.ForegroundPreserveUnavailable)
+        {
+            warnings.Add("foreground preserve is unavailable");
+        }
+
+        if (input.ActorSourceAmbiguous)
+        {
+            warnings.Add("actor source is ambiguous");
+        }
+
+        if (input.ObjectTableZeroTransformStubs)
+        {
+            warnings.Add("ObjectTable candidates are zero-transform stubs and are not used as actor source");
+        }
+
+        var level = !string.IsNullOrWhiteSpace(ngReason)
+            ? TitleBackgroundQuickCheckLevel.NG
+            : warnings.Count > 0
+                ? TitleBackgroundQuickCheckLevel.WARN
+                : TitleBackgroundQuickCheckLevel.OK;
+        var reason = level switch
+        {
+            TitleBackgroundQuickCheckLevel.NG => ngReason,
+            TitleBackgroundQuickCheckLevel.WARN => "background works with warnings",
+            _ => "background-only works, no post-login leak",
+        };
+        var runState = level == TitleBackgroundQuickCheckLevel.NG
+            ? TitleBackgroundQuickCheckRunState.Failed
+            : TitleBackgroundQuickCheckRunState.Completed;
+        var nextAction = BuildNextAction(level, input, warnings);
+        var result = new TitleBackgroundQuickCheckResult(
+            level,
+            runState,
+            reason,
+            NormalizeNone(input.CandidateId),
+            NormalizeNone(input.CandidateDisplayName),
+            input.CompletedAt,
+            nextAction,
+            DetailFileName,
+            warnings,
+            []);
+
+        return result with
+        {
+            DetailLines = BuildDetailLines(input, result),
+        };
+    }
+
+    private static string GetNgReason(TitleBackgroundQuickCheckInput input)
+    {
+        if (string.IsNullOrWhiteSpace(input.CandidateId) || input.CandidateId == "none")
+        {
+            return "effective candidate was none";
+        }
+
+        if (!input.CandidateFieldsValid)
+        {
+            return "selected candidate has invalid territory path/id/layer";
+        }
+
+        if (input.BackgroundMode == TitleBackgroundCharacterSelectBackgroundMode.Disabled)
+        {
+            return "background mode is disabled";
+        }
+
+        if (!TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(input.BackgroundMode))
+        {
+            return "background mode does not apply scene override";
+        }
+
+        if (input.OverrideAppliedCount <= 0 || !input.BackgroundApplied || !input.BackgroundObserved)
+        {
+            return "background was not applied";
+        }
+
+        if (input.PluginOrHookError)
+        {
+            return $"plugin or hook error: {NormalizeNone(input.PluginOrHookErrorReason)}";
+        }
+
+        if (input.IsLoggedIn && input.CurrentLobbyMapRemainedAfterLogin)
+        {
+            return "currentLobbyMap remained after login";
+        }
+
+        if (input.SceneOverrideActiveAfterLogin || input.ActiveAfterLoginDetected)
+        {
+            return "post-login scene override leak detected";
+        }
+
+        if (input.Phase2GAppliedAfterLogin)
+        {
+            return "Phase2G applied after login";
+        }
+
+        if (input.StaleCharaSelectStateAfterLogin)
+        {
+            return "stale Character Select state remained after login";
+        }
+
+        return string.Empty;
+    }
+
+    private static string BuildNextAction(
+        TitleBackgroundQuickCheckLevel level,
+        TitleBackgroundQuickCheckInput input,
+        IReadOnlyList<string> warnings)
+    {
+        if (level == TitleBackgroundQuickCheckLevel.NG)
+        {
+            return input.BackgroundMode == TitleBackgroundCharacterSelectBackgroundMode.Disabled
+                ? "enable Character Select background and select custom:n4f4"
+                : "check Settings UI candidate selection and transition diagnostics";
+        }
+
+        if (warnings.Any(warning => warning.Contains("sceneReady accepted multiple", StringComparison.Ordinal)))
+        {
+            return "retry once from clean title screen if needed";
+        }
+
+        if (warnings.Any(warning => warning.Contains("brightness is dark", StringComparison.Ordinal)))
+        {
+            return "use as background-only or add a bright candidate";
+        }
+
+        return "use background-only, or add a bright candidate";
+    }
+
+    public static IReadOnlyList<string> BuildChatLines(TitleBackgroundQuickCheckResult result)
+    {
+        var lines = new List<string>
+        {
+            $"[XMU QuickCheck] {result.Level}",
+            $"Candidate: {result.CandidateId}" + (result.CandidateDisplayName == "none" ? string.Empty : $" / {result.CandidateDisplayName}"),
+            $"Reason: {result.Reason}",
+            $"Next: {result.NextAction}",
+            $"Details: {result.DetailFileName}",
+        };
+
+        foreach (var warning in result.Warnings.Take(4))
+        {
+            lines.Insert(lines.Count - 2, $"Warning: {warning}");
+        }
+
+        return lines;
+    }
+
+    private static IReadOnlyList<string> BuildDetailLines(
+        TitleBackgroundQuickCheckInput input,
+        TitleBackgroundQuickCheckResult result)
+    {
+        return
+        [
+            $"result={result.Level}",
+            $"reason={NormalizeNone(result.Reason)}",
+            $"candidate.id={NormalizeNone(input.CandidateId)}",
+            $"candidate.displayName={NormalizeNone(input.CandidateDisplayName)}",
+            $"candidate.verifiedInGame={input.CandidateVerifiedInGame}",
+            $"candidate.source={NormalizeNone(input.CandidateSource)}",
+            $"candidate.expectedCompatibility={input.ExpectedCompatibility}",
+            $"candidate.brightness={input.ExpectedBrightness}",
+            $"background.mode={input.BackgroundMode}",
+            $"lighting.mode={input.LightingMode}",
+            $"override.path={NormalizeNone(input.OverrideTerritoryPath)}",
+            $"override.territoryId={input.OverrideTerritoryId}",
+            $"override.layerFilterKey={input.OverrideLayerFilterKey}",
+            $"background.applied={input.BackgroundApplied}",
+            $"background.observed={input.BackgroundObserved}",
+            $"character.expectedVisible={input.CharacterExpectedVisible}",
+            $"character.observed={NormalizeNone(input.CharacterObserved)}",
+            $"character.knownLimitation={input.CharacterKnownLimitation}",
+            $"postLogin.sceneOverrideActive={input.SceneOverrideActiveAfterLogin}",
+            $"postLogin.activeAfterLoginDetected={input.ActiveAfterLoginDetected}",
+            $"postLogin.phase2GAppliedAfterLogin={input.Phase2GAppliedAfterLogin}",
+            $"postLogin.currentLobbyMap={NormalizeNone(input.CurrentLobbyMap)}",
+            $"postLogin.currentLobbyMapRemained={input.CurrentLobbyMapRemainedAfterLogin}",
+            $"quickCheck.runScoped={input.RunScoped}",
+            $"quickCheck.state={result.RunState}",
+            $"quickCheck.sceneReadyAcceptedCount={input.SceneReadyAcceptedCount}",
+            $"quickCheck.overrideAppliedCount={input.OverrideAppliedCount}",
+            $"quickCheck.phase2GApplyCount={input.Phase2GApplyCount}",
+            $"quickCheck.sceneGenerationStart={input.SceneGenerationStart}",
+            $"quickCheck.sceneGenerationEnd={input.SceneGenerationEnd}",
+            $"quickCheck.startedAt={FormatTime(input.StartedAt)}",
+            $"quickCheck.completedAt={FormatTime(input.CompletedAt)}",
+            $"quickCheck.warningCount={result.Warnings.Count}",
+            $"nextAction={NormalizeNone(result.NextAction)}",
+            "detail.transition=title-background-transitiondiag.txt",
+            "detail.placement=title-background-placementdiag.txt",
+            "detail.delivery=title-background-deliverydiag.txt",
+        ];
+    }
+
+    private static string FormatTime(DateTimeOffset? value)
+    {
+        return value.HasValue ? value.Value.ToString("yyyy-MM-dd HH:mm:ss zzz") : "none";
+    }
+
+    private static string NormalizeNone(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "none" : value.Trim();
+    }
+}
+
+internal readonly record struct TitleBackgroundQuickCheckUiSummary(
+    TitleBackgroundQuickCheckLevel Level,
+    string StatusLine,
+    string CandidateLine,
+    string LastResultLine,
+    string LastReasonLine,
+    string NextActionLine,
+    string DetailLine,
+    string KnownLimitationLine);
+
+internal static class TitleBackgroundQuickCheckUiPresenter
+{
+    public static TitleBackgroundQuickCheckUiSummary BuildSummary(Configuration configuration)
+    {
+        var level = NormalizeLevel(configuration.TitleBackgroundLastQuickCheckResult);
+        var candidate = string.IsNullOrWhiteSpace(configuration.TitleBackgroundLastQuickCheckCandidateId)
+            ? configuration.TitleBackgroundCharacterSelectOverrideCandidateId
+            : configuration.TitleBackgroundLastQuickCheckCandidateId;
+        var candidateLine = string.IsNullOrWhiteSpace(candidate)
+            ? "Character Select Background: none"
+            : $"Character Select Background: {candidate}";
+        var reason = string.IsNullOrWhiteSpace(configuration.TitleBackgroundLastQuickCheckReason)
+            ? "Not checked yet"
+            : configuration.TitleBackgroundLastQuickCheckReason;
+        var statusLine = level switch
+        {
+            TitleBackgroundQuickCheckLevel.OK => "Status: OK - background-only works",
+            TitleBackgroundQuickCheckLevel.WARN => $"Status: WARN - {reason}",
+            TitleBackgroundQuickCheckLevel.NG => $"Status: NG - {reason}",
+            _ => "Status: Not checked yet",
+        };
+
+        return new TitleBackgroundQuickCheckUiSummary(
+            level,
+            statusLine,
+            candidateLine,
+            level == TitleBackgroundQuickCheckLevel.NotRun
+                ? "Last QuickCheck Result: Not Run"
+                : $"Last QuickCheck Result: {level}",
+            $"Last Reason: {reason}",
+            $"Next Action: {NormalizeForUi(configuration.TitleBackgroundLastQuickCheckNextAction, "Run QuickCheck after entering Character Select and logging in once.")}",
+            $"Detail: {NormalizeForUi(configuration.TitleBackgroundLastQuickCheckDetailFileName, TitleBackgroundQuickCheckEvaluator.DetailFileName)}",
+            "Known limitation: selected character is expected to be hidden with the current full-scene override method.");
+    }
+
+    public static IReadOnlyList<string> GetSimpleModeItems(Configuration configuration)
+    {
+        var summary = BuildSummary(configuration);
+        return
+        [
+            "Enable Character Select Background",
+            "Background Candidate",
+            summary.StatusLine,
+            "Run QuickCheck",
+            summary.LastResultLine,
+            summary.KnownLimitationLine,
+            summary.NextActionLine,
+        ];
+    }
+
+    public static bool IsExperimentalModeVisibleInSimple(TitleBackgroundCharacterSelectBackgroundMode mode)
+    {
+        return false;
+    }
+
+    public static string BuildCandidateLabel(TitleBackgroundCharacterSelectOverrideCandidate candidate)
+    {
+        var verified = candidate.VerifiedInGame ? "Verified" : "Unverified";
+        var compatibility = candidate.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
+            ? "Background-only"
+            : candidate.ExpectedCompatibility.ToString();
+        return $"{candidate.Id} - {candidate.DisplayName} [{verified} / {candidate.ExpectedBrightness} / {compatibility} / {candidate.Source}]";
+    }
+
+    public static string GetBackgroundModeUiLabel(TitleBackgroundCharacterSelectBackgroundMode mode)
+    {
+        return mode switch
+        {
+            TitleBackgroundCharacterSelectBackgroundMode.Disabled => "Off",
+            TitleBackgroundCharacterSelectBackgroundMode.DiagnosticsOnly => "Diagnostics only",
+            TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly => "Background only",
+            TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly => "Background only / recommended",
+            TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground => "Experimental: preserve character foreground",
+            TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource => "Experimental: native preview model source",
+            _ => mode.ToString(),
+        };
+    }
+
+    public static string GetBackgroundModeTooltip(TitleBackgroundCharacterSelectBackgroundMode mode)
+    {
+        return mode switch
+        {
+            TitleBackgroundCharacterSelectBackgroundMode.Disabled => "Character Select background override is disabled.",
+            TitleBackgroundCharacterSelectBackgroundMode.DiagnosticsOnly => "Collect diagnostics without changing the background.",
+            TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly => "Replace the full lobby scene as background-only. Character model is expected to be hidden.",
+            TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly => "Use only candidates known to be compatible as background-only.",
+            TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground => "Experimental. Not supported as stable because no safe public hook point is known.",
+            TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource => "Experimental. Native CharaSelect actor source is not resolved yet.",
+            _ => string.Empty,
+        };
+    }
+
+    private static TitleBackgroundQuickCheckLevel NormalizeLevel(TitleBackgroundQuickCheckLevel level)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundQuickCheckLevel), level)
+            ? level
+            : TitleBackgroundQuickCheckLevel.NotRun;
+    }
+
+    private static string NormalizeForUi(string? value, string fallback)
+    {
+        return string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+    }
+}

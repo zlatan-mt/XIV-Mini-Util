@@ -742,22 +742,22 @@ public sealed class SettingsTab : ITabComponent
 
     private void DrawTitleBackgroundSettings()
     {
-        ImGui.Text("実験: 背景だけ差し替え");
-        ImGui.TextWrapped("キャラ選択画面の scene load 時だけ preset 背景へ差し替えます。これは最終目的モードではなく、キャラ本体は表示されない想定です。");
+        ImGui.Text("Title Background");
+        ImGui.TextWrapped("Character Select の背景だけを差し替えます。選択キャラクター本体は表示されない想定です。");
 
-        var enabled = _configuration.TitleBackgroundOverrideEnabled;
-        if (ImGui.Checkbox("キャラ選択画面背景を差し替える（実験）", ref enabled))
+        DrawTitleBackgroundStatusSummary();
+        DrawTitleBackgroundQuickActions();
+        DrawTitleBackgroundDisplayModeSelector();
+        DrawTitleBackgroundKnownLimitation();
+
+        if (_configuration.TitleBackgroundSettingsDisplayMode == TitleBackgroundSettingsDisplayMode.Simple)
         {
-            if (enabled && _configuration.CharaSelectSceneCompositionEnabled)
-            {
-                _charaSelectService.DisableSceneCompositionForTitleBackgroundRoute();
-            }
-
-            _titleScreenBackgroundService.SetEnabled(enabled);
+            return;
         }
 
-        DrawTitleBackgroundRouteSummary();
-
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Text("Advanced Settings");
         var runtimeMode = _configuration.TitleBackgroundRuntimeMode;
         if (ImGui.BeginCombo("実行範囲##TitleBackgroundRuntimeMode", GetTitleBackgroundRuntimeModeLabel(runtimeMode)))
         {
@@ -780,7 +780,9 @@ public sealed class SettingsTab : ITabComponent
         }
         ImGui.TextDisabled("Title + CharaSelect は未実装のため、実機確認までは選択肢から外しています。");
 
-        DrawTitleBackgroundPresetSettings();
+        DrawTitleBackgroundCharacterSelectDeliveryModes();
+        ImGui.Spacing();
+        DrawTitleBackgroundOverrideCandidateSelector(showManualSlot: false);
 
         if (ImGui.Button("解除"))
         {
@@ -798,26 +800,111 @@ public sealed class SettingsTab : ITabComponent
             ImGui.TextDisabled($"LVB想定パス: {TitleBackgroundPathHelper.BuildLvbPath(_configuration.TitleBackgroundTerritoryPath)}");
         }
 
+        if (_configuration.TitleBackgroundSettingsDisplayMode != TitleBackgroundSettingsDisplayMode.DeveloperDiagnostics)
+        {
+            return;
+        }
+
         ImGui.Spacing();
         ImGui.Separator();
+        ImGui.Text("Developer Diagnostics");
+        DrawTitleBackgroundPresetSettings();
+        ImGui.Spacing();
         DrawTitleBackgroundPhase2Settings();
-
         ImGui.Spacing();
         DrawTitleBackgroundAdvancedSettings();
     }
 
-    private void DrawTitleBackgroundRouteSummary()
+    private void DrawTitleBackgroundStatusSummary()
     {
-        var statusText = _titleScreenBackgroundService.GetStatusText();
-        var statusIsError = IsStatusError(statusText);
+        var summary = TitleBackgroundQuickCheckUiPresenter.BuildSummary(_configuration);
+        var statusColor = summary.Level switch
+        {
+            TitleBackgroundQuickCheckLevel.OK => new Vector4(0.3f, 0.8f, 0.45f, 1f),
+            TitleBackgroundQuickCheckLevel.WARN => new Vector4(1f, 0.75f, 0.35f, 1f),
+            TitleBackgroundQuickCheckLevel.NG => new Vector4(1f, 0.45f, 0.45f, 1f),
+            _ => new Vector4(0.7f, 0.7f, 0.7f, 1f),
+        };
 
         ImGui.Spacing();
-        ImGui.Text("現在の判定");
-        ImGui.TextColored(statusIsError
-            ? new Vector4(1f, 0.45f, 0.45f, 1f)
-            : new Vector4(0.7f, 0.7f, 0.7f, 1f), statusText);
-        ImGui.TextWrapped("到達点: background-only MVP。背景だけを確認し、キャラ本体の表示は成功条件に含めません。");
-        ImGui.TextWrapped("次: キャラ選択画面のSSで背景を確認し、ログイン後に /xmutbgdiag の deliveryVerdict / mvpStatus / blocker を確認します。");
+        ImGui.Text($"Title Background: {(_configuration.TitleBackgroundOverrideEnabled ? "ON" : "OFF")}");
+        ImGui.Text(summary.CandidateLine);
+        ImGui.TextColored(statusColor, summary.StatusLine);
+        ImGui.TextWrapped(summary.NextActionLine);
+        ImGui.TextDisabled(_titleScreenBackgroundService.GetStatusText());
+    }
+
+    private void DrawTitleBackgroundQuickActions()
+    {
+        ImGui.Spacing();
+        ImGui.Text("Quick Actions");
+
+        var enabled = _configuration.TitleBackgroundOverrideEnabled;
+        if (ImGui.Checkbox("Enable Character Select Background", ref enabled))
+        {
+            if (enabled && _configuration.CharaSelectSceneCompositionEnabled)
+            {
+                _charaSelectService.DisableSceneCompositionForTitleBackgroundRoute();
+            }
+
+            if (enabled && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly)
+            {
+                _configuration.TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.CharaSelectOnly;
+                _configuration.Save();
+            }
+
+            _titleScreenBackgroundService.SetEnabled(enabled);
+        }
+
+        DrawTitleBackgroundOverrideCandidateSelector(showManualSlot: false);
+
+        if (ImGui.Button("Run QuickCheck"))
+        {
+            _titleScreenBackgroundService.RunQuickCheck();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Reset Check"))
+        {
+            _titleScreenBackgroundService.ResetQuickCheck();
+        }
+
+        var summary = TitleBackgroundQuickCheckUiPresenter.BuildSummary(_configuration);
+        ImGui.Text(summary.LastResultLine);
+        ImGui.Text(summary.LastReasonLine);
+        ImGui.Text(summary.NextActionLine);
+        ImGui.Text(summary.DetailLine);
+        if (!string.IsNullOrWhiteSpace(_configuration.TitleBackgroundLastQuickCheckTime))
+        {
+            ImGui.Text($"Last Check Time: {_configuration.TitleBackgroundLastQuickCheckTime}");
+        }
+    }
+
+    private void DrawTitleBackgroundDisplayModeSelector()
+    {
+        var displayMode = _configuration.TitleBackgroundSettingsDisplayMode;
+        ImGui.Spacing();
+        if (ImGui.BeginCombo("Display Mode##TitleBackgroundSettingsDisplayMode", GetTitleBackgroundSettingsDisplayModeLabel(displayMode)))
+        {
+            foreach (TitleBackgroundSettingsDisplayMode mode in Enum.GetValues(typeof(TitleBackgroundSettingsDisplayMode)))
+            {
+                if (ImGui.Selectable(GetTitleBackgroundSettingsDisplayModeLabel(mode), displayMode == mode))
+                {
+                    _configuration.TitleBackgroundSettingsDisplayMode = mode;
+                    _configuration.Save();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+    }
+
+    private static void DrawTitleBackgroundKnownLimitation()
+    {
+        ImGui.Spacing();
+        ImGui.Text("Known limitation:");
+        ImGui.TextWrapped("Character model is expected to be hidden with the current full-scene override method.");
+        ImGui.TextDisabled("This is not treated as an error in QuickCheck.");
     }
 
     private void DrawTitleBackgroundPresetSettings()
@@ -901,7 +988,7 @@ public sealed class SettingsTab : ITabComponent
 
         DrawTitleBackgroundCharacterSelectDeliveryModes();
         ImGui.Spacing();
-        DrawTitleBackgroundOverrideCandidateSelector();
+        DrawTitleBackgroundOverrideCandidateSelector(showManualSlot: true);
         ImGui.Spacing();
 
         var territoryPath = _configuration.TitleBackgroundTerritoryPath;
@@ -1021,6 +1108,10 @@ public sealed class SettingsTab : ITabComponent
 
             ImGui.EndCombo();
         }
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(TitleBackgroundQuickCheckUiPresenter.GetBackgroundModeTooltip(backgroundMode));
+        }
 
         if (ImGui.BeginCombo("明るさの扱い##TitleBackgroundCharacterSelectLightingMode", GetTitleBackgroundCharacterSelectLightingModeLabel(lightingMode)))
         {
@@ -1049,7 +1140,7 @@ public sealed class SettingsTab : ITabComponent
         _titleScreenBackgroundService.ApplyFromConfiguration();
     }
 
-    private void DrawTitleBackgroundOverrideCandidateSelector()
+    private void DrawTitleBackgroundOverrideCandidateSelector(bool showManualSlot)
     {
         var manualSlots = BuildTitleBackgroundManualCandidateSlots();
         var availableCandidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates(manualSlots);
@@ -1074,8 +1165,11 @@ public sealed class SettingsTab : ITabComponent
             ImGui.EndCombo();
         }
 
-        ImGui.TextWrapped("背景のみモードではロビーシーン全体を差し替えます。選択キャラクター本体は表示されない想定です。Character Select ではスクリーンショットで背景だけ確認し、ログイン後に /xmutbgdiag を実行してください。");
-        DrawTitleBackgroundManualCandidateSlot1(manualSlots[0]);
+        ImGui.TextWrapped("背景のみモードではロビーシーン全体を差し替えます。選択キャラクター本体は表示されない想定です。");
+        if (showManualSlot)
+        {
+            DrawTitleBackgroundManualCandidateSlot1(manualSlots[0]);
+        }
     }
 
     private void ApplyTitleBackgroundOverrideCandidate(TitleBackgroundCharacterSelectOverrideCandidate candidate)
@@ -1502,16 +1596,7 @@ public sealed class SettingsTab : ITabComponent
 
     private static string GetTitleBackgroundCharacterSelectBackgroundModeLabel(TitleBackgroundCharacterSelectBackgroundMode mode)
     {
-        return mode switch
-        {
-            TitleBackgroundCharacterSelectBackgroundMode.Disabled => "無効",
-            TitleBackgroundCharacterSelectBackgroundMode.DiagnosticsOnly => "診断のみ",
-            TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly => "背景だけ差し替え",
-            TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground => "キャラ保持を試行",
-            TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource => "native preview source 診断",
-            TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly => "互換候補のみ",
-            _ => mode.ToString(),
-        };
+        return TitleBackgroundQuickCheckUiPresenter.GetBackgroundModeUiLabel(mode);
     }
 
     private static string GetTitleBackgroundCharacterSelectLightingModeLabel(TitleBackgroundCharacterSelectLightingMode mode)
@@ -1627,12 +1712,18 @@ public sealed class SettingsTab : ITabComponent
 
     private static string GetTitleBackgroundOverrideCandidateLabel(TitleBackgroundCharacterSelectOverrideCandidate candidate)
     {
-        var verified = candidate.VerifiedInGame ? "Verified" : "Unverified";
-        var source = candidate.Source == "manual" ? "Manual / " : string.Empty;
-        var compatibility = candidate.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
-            ? "Background-only"
-            : candidate.ExpectedCompatibility.ToString();
-        return $"{candidate.DisplayName} [{source}{verified} / {candidate.ExpectedBrightness} / {compatibility}]";
+        return TitleBackgroundQuickCheckUiPresenter.BuildCandidateLabel(candidate);
+    }
+
+    private static string GetTitleBackgroundSettingsDisplayModeLabel(TitleBackgroundSettingsDisplayMode mode)
+    {
+        return mode switch
+        {
+            TitleBackgroundSettingsDisplayMode.Simple => "Simple",
+            TitleBackgroundSettingsDisplayMode.Advanced => "Advanced",
+            TitleBackgroundSettingsDisplayMode.DeveloperDiagnostics => "Developer Diagnostics",
+            _ => mode.ToString(),
+        };
     }
 
     private static string GetTitleBackgroundResolverModeLabel(TitleBackgroundResolverMode mode)

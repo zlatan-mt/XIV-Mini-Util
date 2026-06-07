@@ -107,6 +107,13 @@ public sealed class Configuration : IPluginConfiguration
     public TitleBackgroundRuntimeMode TitleBackgroundRuntimeMode { get; set; } = TitleBackgroundRuntimeMode.ResolveOnly;
     public TitleBackgroundCharacterSelectBackgroundMode TitleBackgroundCharacterSelectBackgroundMode { get; set; } = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly;
     public TitleBackgroundCharacterSelectLightingMode TitleBackgroundCharacterSelectLightingMode { get; set; } = TitleBackgroundCharacterSelectLightingMode.Default;
+    public TitleBackgroundSettingsDisplayMode TitleBackgroundSettingsDisplayMode { get; set; } = TitleBackgroundSettingsDisplayMode.Simple;
+    public TitleBackgroundQuickCheckLevel TitleBackgroundLastQuickCheckResult { get; set; } = TitleBackgroundQuickCheckLevel.NotRun;
+    public string TitleBackgroundLastQuickCheckCandidateId { get; set; } = string.Empty;
+    public string TitleBackgroundLastQuickCheckReason { get; set; } = string.Empty;
+    public string TitleBackgroundLastQuickCheckNextAction { get; set; } = string.Empty;
+    public string TitleBackgroundLastQuickCheckTime { get; set; } = string.Empty;
+    public string TitleBackgroundLastQuickCheckDetailFileName { get; set; } = string.Empty;
     public TitleBackgroundPhase2MExperimentalApplyMode TitleBackgroundPhase2MExperimentalApplyMode { get; set; } = TitleBackgroundPhase2MExperimentalApplyMode.None;
     public TitleBackgroundResolverMode TitleBackgroundCreateSceneResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
     public TitleBackgroundResolverMode TitleBackgroundLobbyUpdateResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
@@ -329,6 +336,13 @@ public sealed class Configuration : IPluginConfiguration
         TitleBackgroundRuntimeMode = NormalizeTitleBackgroundRuntimeMode(source.TitleBackgroundRuntimeMode);
         TitleBackgroundCharacterSelectBackgroundMode = NormalizeTitleBackgroundCharacterSelectBackgroundMode(source.TitleBackgroundCharacterSelectBackgroundMode);
         TitleBackgroundCharacterSelectLightingMode = NormalizeTitleBackgroundCharacterSelectLightingMode(source.TitleBackgroundCharacterSelectLightingMode);
+        TitleBackgroundSettingsDisplayMode = NormalizeTitleBackgroundSettingsDisplayMode(source.TitleBackgroundSettingsDisplayMode);
+        TitleBackgroundLastQuickCheckResult = NormalizeTitleBackgroundQuickCheckLevel(source.TitleBackgroundLastQuickCheckResult);
+        TitleBackgroundLastQuickCheckCandidateId = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckCandidateId);
+        TitleBackgroundLastQuickCheckReason = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckReason);
+        TitleBackgroundLastQuickCheckNextAction = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckNextAction);
+        TitleBackgroundLastQuickCheckTime = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckTime);
+        TitleBackgroundLastQuickCheckDetailFileName = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckDetailFileName);
         TitleBackgroundPhase2MExperimentalApplyMode = NormalizeTitleBackgroundPhase2MExperimentalApplyMode(source.TitleBackgroundPhase2MExperimentalApplyMode);
         TitleBackgroundCreateSceneResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundCreateSceneResolverMode);
         TitleBackgroundLobbyUpdateResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundLobbyUpdateResolverMode);
@@ -697,6 +711,20 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedSettingsDisplayMode = NormalizeTitleBackgroundSettingsDisplayMode(TitleBackgroundSettingsDisplayMode);
+        if (TitleBackgroundSettingsDisplayMode != normalizedSettingsDisplayMode)
+        {
+            TitleBackgroundSettingsDisplayMode = normalizedSettingsDisplayMode;
+            changed = true;
+        }
+
+        var normalizedQuickCheckLevel = NormalizeTitleBackgroundQuickCheckLevel(TitleBackgroundLastQuickCheckResult);
+        if (TitleBackgroundLastQuickCheckResult != normalizedQuickCheckLevel)
+        {
+            TitleBackgroundLastQuickCheckResult = normalizedQuickCheckLevel;
+            changed = true;
+        }
+
         var normalizedPhase2MExperimentalApplyMode = NormalizeTitleBackgroundPhase2MExperimentalApplyMode(TitleBackgroundPhase2MExperimentalApplyMode);
         if (TitleBackgroundPhase2MExperimentalApplyMode != normalizedPhase2MExperimentalApplyMode)
         {
@@ -904,6 +932,20 @@ public sealed class Configuration : IPluginConfiguration
         return Enum.IsDefined(typeof(TitleBackgroundCharacterSelectLightingMode), mode)
             ? mode
             : TitleBackgroundCharacterSelectLightingMode.Default;
+    }
+
+    private static TitleBackgroundSettingsDisplayMode NormalizeTitleBackgroundSettingsDisplayMode(TitleBackgroundSettingsDisplayMode mode)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundSettingsDisplayMode), mode)
+            ? mode
+            : TitleBackgroundSettingsDisplayMode.Simple;
+    }
+
+    private static TitleBackgroundQuickCheckLevel NormalizeTitleBackgroundQuickCheckLevel(TitleBackgroundQuickCheckLevel level)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundQuickCheckLevel), level)
+            ? level
+            : TitleBackgroundQuickCheckLevel.NotRun;
     }
 
     private static TitleBackgroundCharacterSelectExpectedBrightness NormalizeTitleBackgroundCharacterSelectExpectedBrightness(TitleBackgroundCharacterSelectExpectedBrightness brightness)
