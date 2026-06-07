@@ -264,6 +264,26 @@ public sealed unsafe class CharaSelectService : IDisposable
         RefreshCharaSelectDisplay();
     }
 
+    internal void ResetTitleBackgroundCharacterCompositionBridgeSnapshot()
+    {
+        _lastTitleBackgroundBridgeSnapshot = TitleBackgroundCharacterCompositionBridgeSnapshot.Empty;
+    }
+
+    internal void MarkTitleBackgroundCharacterCompositionBridgeCameraApplied()
+    {
+        if (!CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeEnabled(_configuration))
+        {
+            return;
+        }
+
+        var current = GetTitleBackgroundCharacterCompositionBridgeSnapshot();
+        _lastTitleBackgroundBridgeSnapshot = current with
+        {
+            AppliedCamera = true,
+            CharacterVisualKnownByBridge = current.AppliedStage && current.AppliedCharacter,
+        };
+    }
+
     public void SetSceneCharacterVisibleResult(CharaSelectSceneBinaryResult result)
     {
         _configuration.LastSceneProfileCharacterVisibleResult = result;

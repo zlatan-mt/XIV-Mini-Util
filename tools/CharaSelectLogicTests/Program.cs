@@ -660,6 +660,20 @@ Test("title background bridge warns when legacy shooting composition is still re
         && result.Warnings.Any(warning => warning.Contains("legacy shooting composition dependency still required", StringComparison.Ordinal));
 });
 
+Test("title background bridge applied camera is stored for settings ui", () =>
+{
+    var root = FindRepositoryRoot();
+    var charaSelectText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.cs"));
+    var titleBackgroundText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var settingsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+
+    return charaSelectText.Contains("MarkTitleBackgroundCharacterCompositionBridgeCameraApplied", StringComparison.Ordinal)
+        && charaSelectText.Contains("AppliedCamera = true", StringComparison.Ordinal)
+        && titleBackgroundText.Contains("MarkTitleBackgroundCharacterCompositionBridgeCameraApplied", StringComparison.Ordinal)
+        && titleBackgroundText.Contains("ResetTitleBackgroundCharacterCompositionBridgeSnapshot", StringComparison.Ordinal)
+        && settingsText.Contains("bridge.AppliedCamera", StringComparison.Ordinal);
+});
+
 Test("chara select scene phase3a does not introduce forbidden write paths", () =>
 {
     var root = FindRepositoryRoot();

@@ -233,6 +233,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         ReloadNativeIntegration();
         if (enabled && _configuration.TitleBackgroundIntegratedCompositionEnabled)
         {
+            _charaSelectService?.ResetTitleBackgroundCharacterCompositionBridgeSnapshot();
             // Integrated composition route: trigger CharaSelect scene reload so CreateScene fires
             // and applies the n4f4 override. This connects the flag to real scene processing.
             // RequestCharaSelectReload handles precondition checks (Ready state, CharaSelect map).
@@ -540,6 +541,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         // captured relative to the baseline saved in _quickCheckState.
         _integratedCompositionRouteInvoked = false;
         _integratedCompositionRouteLastReason = string.Empty;
+        _charaSelectService?.ResetTitleBackgroundCharacterCompositionBridgeSnapshot();
         if (_configuration.TitleBackgroundIntegratedCompositionEnabled)
         {
             // Invoke before saving the baseline so CreateScene fires before the user logs in.
@@ -2610,6 +2612,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             WriteCurvePointY(self, LobbyCameraExpandedMidPointOffset, curve.Mid);
             MarkPhase2GGenerationOverrideApplied(frame, "set-mid-applied");
             _phase2GGenerationOverrideSetMidAppliedCount++;
+            _charaSelectService?.MarkTitleBackgroundCharacterCompositionBridgeCameraApplied();
             _transitionDiagnostics.RecordPhase2GApply(
                 BuildTransitionSnapshot("Phase 2G setMid applied"),
                 _clientState.IsLoggedIn,
@@ -2655,6 +2658,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             WriteCurvePointY(self, LobbyCameraExpandedHighPointOffset, curve.High);
             MarkPhase2GGenerationOverrideApplied(frame, "low-high-applied");
             _phase2GGenerationOverrideLowHighAppliedCount++;
+            _charaSelectService?.MarkTitleBackgroundCharacterCompositionBridgeCameraApplied();
             _transitionDiagnostics.RecordPhase2GApply(
                 BuildTransitionSnapshot("Phase 2G lowHigh applied"),
                 _clientState.IsLoggedIn,
