@@ -102,7 +102,13 @@ internal readonly record struct TitleBackgroundQuickCheckInput(
     TitleBackgroundCharacterVisualStatus CharacterVisualStatus = TitleBackgroundCharacterVisualStatus.Unknown,
     TitleBackgroundCharaSelectCameraFramingMode CameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.Default,
     TitleBackgroundCharaSelectCameraFramingMode CandidateRecommendedFraming = TitleBackgroundCharaSelectCameraFramingMode.Default,
-    string CandidateRecommendedAction = "");
+    string CandidateRecommendedAction = "",
+    bool TitleBackgroundOverrideEnabledAtCheck = true,
+    bool TitleBackgroundCameraOverrideEnabledAtCheck = true,
+    bool LegacySceneCompositionEnabledAtCheck = false,
+    bool TitleBackgroundIntegratedCompositionEnabledAtCheck = true,
+    bool ShouldArmAdapterAtCheck = true,
+    string ShouldArmAdapterReasonAtCheck = "");
 
 internal readonly record struct TitleBackgroundQuickCheckResult(
     TitleBackgroundQuickCheckLevel Level,
@@ -250,9 +256,26 @@ internal static class TitleBackgroundQuickCheckEvaluator
             return "background mode does not apply scene override";
         }
 
+        if (!input.TitleBackgroundOverrideEnabledAtCheck)
+        {
+            return "Character Select Background is disabled";
+        }
+
+        if (!input.TitleBackgroundCameraOverrideEnabledAtCheck)
+        {
+            return "Title Background camera override is disabled";
+        }
+
+        if (!input.ShouldArmAdapterAtCheck)
+        {
+            return $"adapter was not armed: {NormalizeNone(input.ShouldArmAdapterReasonAtCheck)}";
+        }
+
         if (input.OverrideAppliedCount <= 0 || !input.BackgroundApplied || !input.BackgroundObserved)
         {
-            return "background was not applied";
+            return !input.TitleBackgroundIntegratedCompositionEnabledAtCheck
+                ? "integrated character composition was not armed"
+                : "background was not applied";
         }
 
         if (input.PluginOrHookError)
@@ -398,6 +421,12 @@ internal static class TitleBackgroundQuickCheckEvaluator
             $"postLogin.currentLobbyMapRemained={input.CurrentLobbyMapRemainedAfterLogin}",
             $"postLogin.loginTransitionStatus={NormalizeNone(result.LoginTransitionStatus)}",
             $"postLogin.leakStatus={NormalizeNone(result.PostLoginLeakStatus)}",
+            $"quickCheck.titleBackgroundOverrideEnabled={input.TitleBackgroundOverrideEnabledAtCheck}",
+            $"quickCheck.titleBackgroundCameraOverrideEnabled={input.TitleBackgroundCameraOverrideEnabledAtCheck}",
+            $"quickCheck.legacySceneCompositionEnabled={input.LegacySceneCompositionEnabledAtCheck}",
+            $"quickCheck.integratedCompositionEnabled={input.TitleBackgroundIntegratedCompositionEnabledAtCheck}",
+            $"quickCheck.shouldArmAdapter={input.ShouldArmAdapterAtCheck}",
+            $"quickCheck.shouldArmAdapter.reason={NormalizeNone(input.ShouldArmAdapterReasonAtCheck)}",
             $"quickCheck.runScoped={input.RunScoped}",
             $"quickCheck.startedLoggedIn={input.StartedLoggedIn}",
             $"quickCheck.charaSelectObserved={input.CharaSelectObserved}",

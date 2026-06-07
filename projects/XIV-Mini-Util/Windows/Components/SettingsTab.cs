@@ -859,7 +859,7 @@ public sealed class SettingsTab : ITabComponent
         DrawTitleBackgroundOverrideCandidateSelector(showManualSlot: false);
         DrawTitleBackgroundCameraFramingSelector();
         ImGui.TextDisabled("Camera framing is handled by Title Background.");
-        ImGui.TextDisabled("The legacy shooting composition setting is not required.");
+        ImGui.TextDisabled("Title Background uses integrated character composition.");
         DrawTitleBackgroundCharacterVisualStatusSelector();
 
         if (ImGui.Button("Start QuickCheck"))

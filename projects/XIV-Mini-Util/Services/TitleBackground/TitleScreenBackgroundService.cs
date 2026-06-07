@@ -214,6 +214,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _configuration.TitleBackgroundCameraOverrideEnabled = true;
         }
 
+        if (enabled && !_configuration.TitleBackgroundIntegratedCompositionEnabled)
+        {
+            // Integrated composition is the Title Background route for character scene composition.
+            // Auto-enable so diagnostics correctly reflect that this route is active.
+            _configuration.TitleBackgroundIntegratedCompositionEnabled = true;
+        }
+
         _configuration.Save();
         RecordTransitionEvent(enabled ? "title background feature enabled" : "title background feature disabled", "SetEnabled");
         ReloadNativeIntegration();
@@ -626,6 +633,15 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             && candidate.TerritoryId != 0
             && candidate.LayerFilterKey != 0;
 
+        var shouldArmAdapter = TitleBackgroundCharaSelectCameraLogic.ShouldArmAdapter(
+            _configuration.TitleBackgroundOverrideEnabled,
+            _configuration.TitleBackgroundCameraOverrideEnabled,
+            _configuration.TitleBackgroundRuntimeMode);
+        var shouldArmAdapterReason = TitleBackgroundCharaSelectCameraLogic.BuildShouldArmAdapterReason(
+            _configuration.TitleBackgroundOverrideEnabled,
+            _configuration.TitleBackgroundCameraOverrideEnabled,
+            _configuration.TitleBackgroundRuntimeMode);
+
         return new TitleBackgroundQuickCheckInput(
             runScoped,
             _quickCheckState.RunState,
@@ -671,7 +687,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _configuration.TitleBackgroundCharacterVisualStatus,
             _configuration.TitleBackgroundCharaSelectCameraFramingMode,
             candidate.RecommendedCameraFraming,
-            candidate.RecommendedAction);
+            candidate.RecommendedAction,
+            _configuration.TitleBackgroundOverrideEnabled,
+            _configuration.TitleBackgroundCameraOverrideEnabled,
+            _configuration.CharaSelectSceneCompositionEnabled,
+            _configuration.TitleBackgroundIntegratedCompositionEnabled,
+            shouldArmAdapter,
+            shouldArmAdapterReason);
     }
 
     private void SaveQuickCheckResult(TitleBackgroundQuickCheckResult result)

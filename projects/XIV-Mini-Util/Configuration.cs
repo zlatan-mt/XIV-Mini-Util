@@ -96,6 +96,7 @@ public sealed class Configuration : IPluginConfiguration
     // タイトル背景設定
     public bool TitleBackgroundOverrideEnabled { get; set; } = false;
     public bool TitleBackgroundCameraOverrideEnabled { get; set; } = false;
+    public bool TitleBackgroundIntegratedCompositionEnabled { get; set; } = false;
     public string TitleBackgroundSelectedPresetId { get; set; } = string.Empty;
     public string TitleBackgroundCharacterSelectOverrideCandidateId { get; set; } = string.Empty;
     public bool TitleBackgroundCharacterSelectManualCandidate1Enabled { get; set; } = false;
@@ -327,6 +328,7 @@ public sealed class Configuration : IPluginConfiguration
         CharaSelectLastDataCenterName = source.CharaSelectLastDataCenterName ?? string.Empty;
         TitleBackgroundOverrideEnabled = source.TitleBackgroundOverrideEnabled;
         TitleBackgroundCameraOverrideEnabled = source.TitleBackgroundCameraOverrideEnabled;
+        TitleBackgroundIntegratedCompositionEnabled = source.TitleBackgroundIntegratedCompositionEnabled;
         TitleBackgroundSelectedPresetId = TitleBackgroundBuiltInPresetCatalog.NormalizeId(source.TitleBackgroundSelectedPresetId);
         TitleBackgroundCharacterSelectOverrideCandidateId = NormalizeTitleBackgroundCharacterSelectOverrideCandidateId(source.TitleBackgroundCharacterSelectOverrideCandidateId);
         TitleBackgroundCharacterSelectManualCandidate1Enabled = source.TitleBackgroundCharacterSelectManualCandidate1Enabled;

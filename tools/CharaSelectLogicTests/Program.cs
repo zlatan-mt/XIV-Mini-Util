@@ -406,7 +406,7 @@ Test("title background camera framing note is independent of shooting compositio
     var root = FindRepositoryRoot();
     var settings = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
     return settings.Contains("Camera framing is handled by Title Background.", StringComparison.Ordinal)
-        && settings.Contains("The legacy shooting composition setting is not required.", StringComparison.Ordinal);
+        && settings.Contains("integrated character composition", StringComparison.Ordinal);
 });
 
 Test("title background set enabled auto-enables camera override", () =>
@@ -416,6 +416,101 @@ Test("title background set enabled auto-enables camera override", () =>
     // Verify auto-enable logic exists in SetEnabled
     return serviceText.Contains("TitleBackgroundCameraOverrideEnabled = true", StringComparison.Ordinal)
         && serviceText.Contains("Auto-enable so the adapter can arm correctly", StringComparison.Ordinal);
+});
+
+// --- 9.x integrated composition / adapter arm diagnostics ---
+
+Test("title background integrated composition on does not require legacy composition", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        titleBackgroundOverrideEnabled: true,
+        titleBackgroundCameraOverrideEnabled: true,
+        legacySceneCompositionEnabled: false,
+        integratedCompositionEnabled: true,
+        shouldArmAdapter: true,
+        overrideAppliedCount: 1,
+        backgroundApplied: true,
+        backgroundObserved: true));
+    return result.Level is TitleBackgroundQuickCheckLevel.OK
+        or TitleBackgroundQuickCheckLevel.WARN;
+});
+
+Test("title background integrated composition off blocks with specific ng reason", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        titleBackgroundOverrideEnabled: true,
+        titleBackgroundCameraOverrideEnabled: true,
+        integratedCompositionEnabled: false,
+        shouldArmAdapter: true,
+        overrideAppliedCount: 0,
+        backgroundApplied: false,
+        backgroundObserved: false));
+    return result.Level == TitleBackgroundQuickCheckLevel.NG
+        && result.Reason.Contains("integrated character composition was not armed", StringComparison.Ordinal);
+});
+
+Test("title background should arm adapter false surfaces blocking reason", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        titleBackgroundOverrideEnabled: true,
+        titleBackgroundCameraOverrideEnabled: true,
+        shouldArmAdapter: false,
+        shouldArmAdapterReason: "runtimeModeNotCharaSelectOnly",
+        overrideAppliedCount: 0,
+        backgroundApplied: false,
+        backgroundObserved: false));
+    return result.Level == TitleBackgroundQuickCheckLevel.NG
+        && result.Reason.Contains("adapter was not armed", StringComparison.Ordinal)
+        && result.Reason.Contains("runtimeModeNotCharaSelectOnly", StringComparison.Ordinal);
+});
+
+Test("title background legacy composition off alone is not ng", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        legacySceneCompositionEnabled: false,
+        overrideAppliedCount: 1,
+        backgroundApplied: true,
+        backgroundObserved: true));
+    return result.Level != TitleBackgroundQuickCheckLevel.NG;
+});
+
+Test("title background override disabled surfaces specific ng reason", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        titleBackgroundOverrideEnabled: false,
+        overrideAppliedCount: 0,
+        backgroundApplied: false,
+        backgroundObserved: false));
+    return result.Level == TitleBackgroundQuickCheckLevel.NG
+        && result.Reason.Contains("Character Select Background is disabled", StringComparison.Ordinal);
+});
+
+Test("title background camera override disabled surfaces specific ng reason", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        titleBackgroundOverrideEnabled: true,
+        titleBackgroundCameraOverrideEnabled: false,
+        overrideAppliedCount: 0,
+        backgroundApplied: false,
+        backgroundObserved: false));
+    return result.Level == TitleBackgroundQuickCheckLevel.NG
+        && result.Reason.Contains("Title Background camera override is disabled", StringComparison.Ordinal);
+});
+
+Test("title background quickcheck detail lines include state flags", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        titleBackgroundOverrideEnabled: true,
+        titleBackgroundCameraOverrideEnabled: true,
+        legacySceneCompositionEnabled: false,
+        integratedCompositionEnabled: true,
+        shouldArmAdapter: true));
+    return result.DetailLines.Any(l => l == "quickCheck.titleBackgroundOverrideEnabled=True")
+        && result.DetailLines.Any(l => l == "quickCheck.titleBackgroundCameraOverrideEnabled=True")
+        && result.DetailLines.Any(l => l == "quickCheck.legacySceneCompositionEnabled=False")
+        && result.DetailLines.Any(l => l == "quickCheck.integratedCompositionEnabled=True")
+        && result.DetailLines.Any(l => l == "quickCheck.shouldArmAdapter=True")
+        && result.DetailLines.Any(l => l.StartsWith("quickCheck.shouldArmAdapter.reason=", StringComparison.Ordinal));
 });
 
 Test("chara select scene phase3a does not introduce forbidden write paths", () =>
@@ -4173,7 +4268,13 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
     TitleBackgroundCharacterVisualStatus characterVisualStatus = TitleBackgroundCharacterVisualStatus.Unknown,
     TitleBackgroundCharaSelectCameraFramingMode cameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.Default,
     TitleBackgroundCharaSelectCameraFramingMode candidateRecommendedFraming = TitleBackgroundCharaSelectCameraFramingMode.Default,
-    string candidateRecommendedAction = "")
+    string candidateRecommendedAction = "",
+    bool titleBackgroundOverrideEnabled = true,
+    bool titleBackgroundCameraOverrideEnabled = true,
+    bool legacySceneCompositionEnabled = false,
+    bool integratedCompositionEnabled = true,
+    bool shouldArmAdapter = true,
+    string shouldArmAdapterReason = "")
 {
     return new TitleBackgroundQuickCheckInput(
         RunScoped: runScoped,
@@ -4220,7 +4321,13 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
         CharacterVisualStatus: characterVisualStatus,
         CameraFramingMode: cameraFramingMode,
         CandidateRecommendedFraming: candidateRecommendedFraming,
-        CandidateRecommendedAction: candidateRecommendedAction);
+        CandidateRecommendedAction: candidateRecommendedAction,
+        TitleBackgroundOverrideEnabledAtCheck: titleBackgroundOverrideEnabled,
+        TitleBackgroundCameraOverrideEnabledAtCheck: titleBackgroundCameraOverrideEnabled,
+        LegacySceneCompositionEnabledAtCheck: legacySceneCompositionEnabled,
+        TitleBackgroundIntegratedCompositionEnabledAtCheck: integratedCompositionEnabled,
+        ShouldArmAdapterAtCheck: shouldArmAdapter,
+        ShouldArmAdapterReasonAtCheck: shouldArmAdapterReason);
 }
 
 if (failures.Count > 0)

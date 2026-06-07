@@ -74,6 +74,32 @@ internal static class TitleBackgroundCharaSelectCameraLogic
             && runtimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly;
     }
 
+    /// <summary>
+    /// アダプターが arm できない場合の理由文字列を返す。arm 可能な場合は "none"。
+    /// </summary>
+    public static string BuildShouldArmAdapterReason(
+        bool overrideEnabled,
+        bool cameraAdaptationEnabled,
+        TitleBackgroundRuntimeMode runtimeMode)
+    {
+        if (!overrideEnabled)
+        {
+            return "titleBackgroundDisabled";
+        }
+
+        if (!cameraAdaptationEnabled)
+        {
+            return "cameraAdaptationDisabled";
+        }
+
+        if (runtimeMode != TitleBackgroundRuntimeMode.CharaSelectOnly)
+        {
+            return "runtimeModeNotCharaSelectOnly";
+        }
+
+        return "none";
+    }
+
     public static bool IsCharaSelectMap(GameLobbyType map)
     {
         return map == GameLobbyType.CharaSelect;
