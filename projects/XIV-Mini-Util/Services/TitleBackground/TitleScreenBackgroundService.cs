@@ -662,7 +662,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             actorSourceAmbiguous,
             zeroTransformStubs,
             _configuration.TitleBackgroundCharacterVisualStatus,
-            _configuration.TitleBackgroundCharaSelectCameraFramingMode);
+            _configuration.TitleBackgroundCharaSelectCameraFramingMode,
+            candidate.RecommendedCameraFraming,
+            candidate.RecommendedAction);
     }
 
     private void SaveQuickCheckResult(TitleBackgroundQuickCheckResult result)

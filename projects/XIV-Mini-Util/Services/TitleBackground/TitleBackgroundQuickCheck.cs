@@ -100,7 +100,9 @@ internal readonly record struct TitleBackgroundQuickCheckInput(
     bool ActorSourceAmbiguous,
     bool ObjectTableZeroTransformStubs,
     TitleBackgroundCharacterVisualStatus CharacterVisualStatus = TitleBackgroundCharacterVisualStatus.Unknown,
-    TitleBackgroundCharaSelectCameraFramingMode CameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.Default);
+    TitleBackgroundCharaSelectCameraFramingMode CameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.Default,
+    TitleBackgroundCharaSelectCameraFramingMode CandidateRecommendedFraming = TitleBackgroundCharaSelectCameraFramingMode.Default,
+    string CandidateRecommendedAction = "");
 
 internal readonly record struct TitleBackgroundQuickCheckResult(
     TitleBackgroundQuickCheckLevel Level,
@@ -165,10 +167,18 @@ internal static class TitleBackgroundQuickCheckEvaluator
         }
 
         if (input.CharacterVisualStatus is TitleBackgroundCharacterVisualStatus.VisibleButTooSmall
-                or TitleBackgroundCharacterVisualStatus.VisibleTopDown
-            && input.CameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.Default)
+                or TitleBackgroundCharacterVisualStatus.VisibleTopDown)
         {
-            warnings.Add("camera framing may need adjustment: character is visible but top-down or too small");
+            var framingDetail = input.CameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.Default
+                ? "try lower camera framing"
+                : "framing still needs tuning";
+            warnings.Add($"camera framing needs adjustment: character is top-down or too small / {framingDetail}");
+        }
+
+        if (input.CharacterVisualStatus is TitleBackgroundCharacterVisualStatus.NotVisible
+                or TitleBackgroundCharacterVisualStatus.Offscreen)
+        {
+            warnings.Add("character not visible or offscreen in frame; camera framing may be misaligned");
         }
 
         if (input.IsLoggedIn
@@ -306,9 +316,16 @@ internal static class TitleBackgroundQuickCheckEvaluator
             return "retry once from clean title screen if needed";
         }
 
-        if (warnings.Any(warning => warning.Contains("camera framing may need adjustment", StringComparison.Ordinal)))
+        if (warnings.Any(warning => warning.Contains("framing needs adjustment", StringComparison.Ordinal)))
         {
-            return "try Camera framing = Lower camera or n4f4 experimental";
+            return input.CameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.Default
+                ? "try Camera framing = Lower camera or n4f4 experimental"
+                : "framing still needs tuning; adjust preset offset";
+        }
+
+        if (warnings.Any(warning => warning.Contains("not visible or offscreen", StringComparison.Ordinal)))
+        {
+            return "try another camera framing or reset visual status after screenshot";
         }
 
         return "use background-only, or add a bright candidate";
@@ -365,6 +382,10 @@ internal static class TitleBackgroundQuickCheckEvaluator
             $"character.status={NormalizeNone(result.CharacterStatus)}",
             $"character.visualStatus={input.CharacterVisualStatus}",
             $"camera.framingMode={input.CameraFramingMode}",
+            $"camera.framingOffset={TitleBackgroundCharaSelectCameraLogic.GetCameraFramingCurveOffset(input.CameraFramingMode):F3}",
+            $"camera.profileSource={BuildCameraProfileSource(input)}",
+            $"camera.recommendedFraming={input.CandidateRecommendedFraming}",
+            $"camera.recommendedAction={NormalizeNone(input.CandidateRecommendedAction)}",
             $"knownLimitation.characterHidden={!input.CharacterExpectedVisible || input.CharacterKnownLimitation}",
             $"knownLimitation.foregroundPreserveUnavailable={input.ForegroundPreserveUnavailable}",
             $"knownLimitation.brightnessDark={input.ExpectedBrightness is TitleBackgroundCharacterSelectExpectedBrightness.Dark or TitleBackgroundCharacterSelectExpectedBrightness.TooDark}",
@@ -486,6 +507,23 @@ internal static class TitleBackgroundQuickCheckEvaluator
         }
 
         return NormalizeNone(input.CharacterObserved);
+    }
+
+    private static string BuildCameraProfileSource(TitleBackgroundQuickCheckInput input)
+    {
+        if (input.CameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.Default)
+        {
+            return "default";
+        }
+
+        if (input.CameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
+            || (input.CandidateRecommendedFraming != TitleBackgroundCharaSelectCameraFramingMode.Default
+                && input.CameraFramingMode == input.CandidateRecommendedFraming))
+        {
+            return "candidate-recommended";
+        }
+
+        return "user-selected";
     }
 
     private static string FormatTime(DateTimeOffset? value)

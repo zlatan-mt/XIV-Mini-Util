@@ -545,6 +545,81 @@ Test("title background quickcheck proper clean flow is ok", () =>
     return result.Level == TitleBackgroundQuickCheckLevel.OK;
 });
 
+Test("title background quickcheck warns when character visible top-down with default framing", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterVisualStatus: TitleBackgroundCharacterVisualStatus.VisibleTopDown,
+        cameraFramingMode: TitleBackgroundCharaSelectCameraFramingMode.Default));
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.Warnings.Any(w => w.Contains("framing needs adjustment", StringComparison.Ordinal))
+        && result.NextAction.Contains("Lower camera", StringComparison.Ordinal);
+});
+
+Test("title background quickcheck warns when character visible top-down with non-default framing", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterVisualStatus: TitleBackgroundCharacterVisualStatus.VisibleTopDown,
+        cameraFramingMode: TitleBackgroundCharaSelectCameraFramingMode.LowerCamera));
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.Warnings.Any(w => w.Contains("framing needs adjustment", StringComparison.Ordinal))
+        && result.NextAction.Contains("still needs tuning", StringComparison.Ordinal);
+});
+
+Test("title background quickcheck warns when character visible too small with default framing", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterVisualStatus: TitleBackgroundCharacterVisualStatus.VisibleButTooSmall,
+        cameraFramingMode: TitleBackgroundCharaSelectCameraFramingMode.Default));
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.NextAction.Contains("Lower camera", StringComparison.Ordinal);
+});
+
+Test("title background quickcheck warns when character not visible in frame", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterVisualStatus: TitleBackgroundCharacterVisualStatus.NotVisible));
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.Warnings.Any(w => w.Contains("not visible or offscreen", StringComparison.Ordinal))
+        && result.NextAction.Contains("try another camera framing", StringComparison.Ordinal);
+});
+
+Test("title background quickcheck warns when character offscreen", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterVisualStatus: TitleBackgroundCharacterVisualStatus.Offscreen));
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.NextAction.Contains("try another camera framing", StringComparison.Ordinal);
+});
+
+Test("title background quickcheck detail lines include framing offset and profile source", () =>
+{
+    var defaultResult = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        cameraFramingMode: TitleBackgroundCharaSelectCameraFramingMode.Default));
+    var lowerResult = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        cameraFramingMode: TitleBackgroundCharaSelectCameraFramingMode.LowerCamera));
+    var candidateResult = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        cameraFramingMode: TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended,
+        candidateRecommendedFraming: TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended));
+    return defaultResult.DetailLines.Any(l => l == "camera.framingOffset=0.000")
+        && defaultResult.DetailLines.Any(l => l == "camera.profileSource=default")
+        && lowerResult.DetailLines.Any(l => l == "camera.framingOffset=-0.300")
+        && lowerResult.DetailLines.Any(l => l == "camera.profileSource=user-selected")
+        && candidateResult.DetailLines.Any(l => l == "camera.profileSource=candidate-recommended")
+        && defaultResult.DetailLines.Any(l => l.StartsWith("camera.recommendedFraming=", StringComparison.Ordinal))
+        && defaultResult.DetailLines.Any(l => l.StartsWith("camera.recommendedAction=", StringComparison.Ordinal));
+});
+
+Test("title background quickcheck top-down does not become ng when background is safe", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterVisualStatus: TitleBackgroundCharacterVisualStatus.VisibleTopDown,
+        sceneOverrideActiveAfterLogin: false,
+        activeAfterLoginDetected: false,
+        phase2GAppliedAfterLogin: false));
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.Level != TitleBackgroundQuickCheckLevel.NG;
+});
+
 Test("title background quickcheck ui simple mode is bounded", () =>
 {
     var configuration = new Configuration
@@ -4077,7 +4152,11 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
     bool activeAfterLoginDetected = false,
     bool phase2GAppliedAfterLogin = false,
     bool actorSourceAmbiguous = false,
-    bool objectTableZeroTransformStubs = false)
+    bool objectTableZeroTransformStubs = false,
+    TitleBackgroundCharacterVisualStatus characterVisualStatus = TitleBackgroundCharacterVisualStatus.Unknown,
+    TitleBackgroundCharaSelectCameraFramingMode cameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.Default,
+    TitleBackgroundCharaSelectCameraFramingMode candidateRecommendedFraming = TitleBackgroundCharaSelectCameraFramingMode.Default,
+    string candidateRecommendedAction = "")
 {
     return new TitleBackgroundQuickCheckInput(
         RunScoped: runScoped,
@@ -4120,7 +4199,11 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
         Phase2GAppliedAfterLogin: phase2GAppliedAfterLogin,
         ForegroundPreserveUnavailable: true,
         ActorSourceAmbiguous: actorSourceAmbiguous,
-        ObjectTableZeroTransformStubs: objectTableZeroTransformStubs);
+        ObjectTableZeroTransformStubs: objectTableZeroTransformStubs,
+        CharacterVisualStatus: characterVisualStatus,
+        CameraFramingMode: cameraFramingMode,
+        CandidateRecommendedFraming: candidateRecommendedFraming,
+        CandidateRecommendedAction: candidateRecommendedAction);
 }
 
 if (failures.Count > 0)
