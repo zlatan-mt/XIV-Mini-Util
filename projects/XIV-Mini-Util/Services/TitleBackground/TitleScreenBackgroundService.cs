@@ -207,6 +207,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     public void SetEnabled(bool enabled)
     {
         _configuration.TitleBackgroundOverrideEnabled = enabled;
+        if (enabled && !_configuration.TitleBackgroundCameraOverrideEnabled)
+        {
+            // Camera framing (Phase2G generated curve override) is part of the Title Background
+            // feature and must be armed together. Auto-enable so the adapter can arm correctly.
+            _configuration.TitleBackgroundCameraOverrideEnabled = true;
+        }
+
         _configuration.Save();
         RecordTransitionEvent(enabled ? "title background feature enabled" : "title background feature disabled", "SetEnabled");
         ReloadNativeIntegration();

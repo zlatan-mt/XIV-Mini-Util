@@ -401,6 +401,23 @@ Test("chara select scene ui explains unchanged default background", () =>
         && settings.Contains("場所=変わらない", StringComparison.Ordinal);
 });
 
+Test("title background camera framing note is independent of shooting composition", () =>
+{
+    var root = FindRepositoryRoot();
+    var settings = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    return settings.Contains("Camera framing is handled by Title Background.", StringComparison.Ordinal)
+        && settings.Contains("The legacy shooting composition setting is not required.", StringComparison.Ordinal);
+});
+
+Test("title background set enabled auto-enables camera override", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    // Verify auto-enable logic exists in SetEnabled
+    return serviceText.Contains("TitleBackgroundCameraOverrideEnabled = true", StringComparison.Ordinal)
+        && serviceText.Contains("Auto-enable so the adapter can arm correctly", StringComparison.Ordinal);
+});
+
 Test("chara select scene phase3a does not introduce forbidden write paths", () =>
 {
     var root = FindRepositoryRoot();
