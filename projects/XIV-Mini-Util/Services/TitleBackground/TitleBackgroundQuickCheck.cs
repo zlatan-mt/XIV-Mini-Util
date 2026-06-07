@@ -107,6 +107,11 @@ internal readonly record struct TitleBackgroundQuickCheckResult(
     DateTimeOffset CompletedAt,
     string NextAction,
     string DetailFileName,
+    TitleBackgroundCharacterSelectBackgroundMode BackgroundMode,
+    string BackgroundStatus,
+    string LoginTransitionStatus,
+    string PostLoginLeakStatus,
+    string CharacterStatus,
     IReadOnlyList<string> Warnings,
     IReadOnlyList<string> DetailLines);
 
@@ -118,10 +123,16 @@ internal static class TitleBackgroundQuickCheckEvaluator
     {
         var warnings = new List<string>();
         var ngReason = GetNgReason(input);
+        var loginChecked = IsLoginTransitionChecked(input);
 
         if (!input.RunScoped)
         {
             warnings.Add("QuickCheck was not started; run-scoped confidence is limited");
+        }
+
+        if (!loginChecked)
+        {
+            warnings.Add("login transition has not been checked yet");
         }
 
         if (input.SceneReadyAcceptedCount > 1)
@@ -132,12 +143,6 @@ internal static class TitleBackgroundQuickCheckEvaluator
         if (!input.CandidateVerifiedInGame)
         {
             warnings.Add("selected candidate is unverified");
-        }
-
-        if (input.ExpectedBrightness is TitleBackgroundCharacterSelectExpectedBrightness.Dark
-            or TitleBackgroundCharacterSelectExpectedBrightness.TooDark)
-        {
-            warnings.Add("candidate brightness is dark");
         }
 
         if (input.VisualConfirmationRequired)
@@ -151,26 +156,6 @@ internal static class TitleBackgroundQuickCheckEvaluator
             warnings.Add("currentLobbyMap could not be read after login");
         }
 
-        if (!input.CharacterExpectedVisible || input.CharacterKnownLimitation)
-        {
-            warnings.Add("selected character is expected to be hidden with full-scene override");
-        }
-
-        if (input.ForegroundPreserveUnavailable)
-        {
-            warnings.Add("foreground preserve is unavailable");
-        }
-
-        if (input.ActorSourceAmbiguous)
-        {
-            warnings.Add("actor source is ambiguous");
-        }
-
-        if (input.ObjectTableZeroTransformStubs)
-        {
-            warnings.Add("ObjectTable candidates are zero-transform stubs and are not used as actor source");
-        }
-
         var level = !string.IsNullOrWhiteSpace(ngReason)
             ? TitleBackgroundQuickCheckLevel.NG
             : warnings.Count > 0
@@ -179,6 +164,7 @@ internal static class TitleBackgroundQuickCheckEvaluator
         var reason = level switch
         {
             TitleBackgroundQuickCheckLevel.NG => ngReason,
+            TitleBackgroundQuickCheckLevel.WARN when !loginChecked => "login transition has not been checked yet. Log in, then run QuickCheck again.",
             TitleBackgroundQuickCheckLevel.WARN => "background works with warnings",
             _ => "background-only works, no post-login leak",
         };
@@ -195,6 +181,11 @@ internal static class TitleBackgroundQuickCheckEvaluator
             input.CompletedAt,
             nextAction,
             DetailFileName,
+            input.BackgroundMode,
+            input.BackgroundApplied && input.BackgroundObserved ? "applied" : "not applied",
+            BuildLoginTransitionStatus(input, loginChecked, level),
+            BuildPostLoginLeakStatus(input, loginChecked),
+            BuildCharacterStatus(input),
             warnings,
             []);
 
@@ -271,14 +262,19 @@ internal static class TitleBackgroundQuickCheckEvaluator
                 : "check Settings UI candidate selection and transition diagnostics";
         }
 
+        if (warnings.Any(warning => warning.Contains("login transition has not been checked", StringComparison.Ordinal)))
+        {
+            return "log in, then run QuickCheck again";
+        }
+
+        if (warnings.Any(warning => warning.Contains("run-scoped confidence", StringComparison.Ordinal)))
+        {
+            return "start QuickCheck, enter Character Select, log in, then run check";
+        }
+
         if (warnings.Any(warning => warning.Contains("sceneReady accepted multiple", StringComparison.Ordinal)))
         {
             return "retry once from clean title screen if needed";
-        }
-
-        if (warnings.Any(warning => warning.Contains("brightness is dark", StringComparison.Ordinal)))
-        {
-            return "use as background-only or add a bright candidate";
         }
 
         return "use background-only, or add a bright candidate";
@@ -290,12 +286,16 @@ internal static class TitleBackgroundQuickCheckEvaluator
         {
             $"[XMU QuickCheck] {result.Level}",
             $"Candidate: {result.CandidateId}" + (result.CandidateDisplayName == "none" ? string.Empty : $" / {result.CandidateDisplayName}"),
-            $"Reason: {result.Reason}",
-            $"Next: {result.NextAction}",
+            $"Mode: {result.BackgroundMode}",
+            $"Background: {result.BackgroundStatus}",
+            $"Login transition: {result.LoginTransitionStatus}",
+            $"Post-login leak: {result.PostLoginLeakStatus}",
+            $"Character: {result.CharacterStatus}",
+            $"Reason: {result.Reason} / Next: {result.NextAction}",
             $"Details: {result.DetailFileName}",
         };
 
-        foreach (var warning in result.Warnings.Take(4))
+        foreach (var warning in result.Warnings.Take(Math.Max(0, 10 - lines.Count)))
         {
             lines.Insert(lines.Count - 2, $"Warning: {warning}");
         }
@@ -324,14 +324,23 @@ internal static class TitleBackgroundQuickCheckEvaluator
             $"override.layerFilterKey={input.OverrideLayerFilterKey}",
             $"background.applied={input.BackgroundApplied}",
             $"background.observed={input.BackgroundObserved}",
+            $"background.status={result.BackgroundStatus}",
             $"character.expectedVisible={input.CharacterExpectedVisible}",
             $"character.observed={NormalizeNone(input.CharacterObserved)}",
             $"character.knownLimitation={input.CharacterKnownLimitation}",
+            $"character.status={NormalizeNone(result.CharacterStatus)}",
+            $"knownLimitation.characterHidden={!input.CharacterExpectedVisible || input.CharacterKnownLimitation}",
+            $"knownLimitation.foregroundPreserveUnavailable={input.ForegroundPreserveUnavailable}",
+            $"knownLimitation.brightnessDark={input.ExpectedBrightness is TitleBackgroundCharacterSelectExpectedBrightness.Dark or TitleBackgroundCharacterSelectExpectedBrightness.TooDark}",
+            $"developerNote.actorSourceAmbiguous={input.ActorSourceAmbiguous}",
+            $"developerNote.objectTableZeroTransformStubs={input.ObjectTableZeroTransformStubs}",
             $"postLogin.sceneOverrideActive={input.SceneOverrideActiveAfterLogin}",
             $"postLogin.activeAfterLoginDetected={input.ActiveAfterLoginDetected}",
             $"postLogin.phase2GAppliedAfterLogin={input.Phase2GAppliedAfterLogin}",
             $"postLogin.currentLobbyMap={NormalizeNone(input.CurrentLobbyMap)}",
             $"postLogin.currentLobbyMapRemained={input.CurrentLobbyMapRemainedAfterLogin}",
+            $"postLogin.loginTransitionStatus={NormalizeNone(result.LoginTransitionStatus)}",
+            $"postLogin.leakStatus={NormalizeNone(result.PostLoginLeakStatus)}",
             $"quickCheck.runScoped={input.RunScoped}",
             $"quickCheck.state={result.RunState}",
             $"quickCheck.sceneReadyAcceptedCount={input.SceneReadyAcceptedCount}",
@@ -347,6 +356,66 @@ internal static class TitleBackgroundQuickCheckEvaluator
             "detail.placement=title-background-placementdiag.txt",
             "detail.delivery=title-background-deliverydiag.txt",
         ];
+    }
+
+    public static bool IsSafeAfterLoginAdapterState(string? state)
+    {
+        return NormalizeNone(state) is "Inactive" or "Stopping";
+    }
+
+    public static bool IsUnsafeAfterLoginAdapterState(string? state)
+    {
+        var normalized = NormalizeNone(state);
+        return normalized.Contains("Active", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("Running", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("Applying", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsLoginTransitionChecked(TitleBackgroundQuickCheckInput input)
+    {
+        return input.IsLoggedIn || input.RunState == TitleBackgroundQuickCheckRunState.LoggedInObserved;
+    }
+
+    private static string BuildLoginTransitionStatus(
+        TitleBackgroundQuickCheckInput input,
+        bool loginChecked,
+        TitleBackgroundQuickCheckLevel level)
+    {
+        if (!loginChecked)
+        {
+            return "not checked";
+        }
+
+        if (level == TitleBackgroundQuickCheckLevel.NG
+            && (input.SceneOverrideActiveAfterLogin
+                || input.ActiveAfterLoginDetected
+                || input.StaleCharaSelectStateAfterLogin
+                || input.Phase2GAppliedAfterLogin
+                || input.CurrentLobbyMapRemainedAfterLogin))
+        {
+            return "ng";
+        }
+
+        return input.SceneReadyAcceptedCount > 1 ? "warn" : "safe";
+    }
+
+    private static string BuildPostLoginLeakStatus(TitleBackgroundQuickCheckInput input, bool loginChecked)
+    {
+        if (!loginChecked)
+        {
+            return "not checked";
+        }
+
+        return input.SceneOverrideActiveAfterLogin || input.ActiveAfterLoginDetected
+            ? "detected"
+            : "none";
+    }
+
+    private static string BuildCharacterStatus(TitleBackgroundQuickCheckInput input)
+    {
+        return !input.CharacterExpectedVisible || input.CharacterKnownLimitation
+            ? "hidden / expected limitation"
+            : NormalizeNone(input.CharacterObserved);
     }
 
     private static string FormatTime(DateTimeOffset? value)
@@ -389,7 +458,9 @@ internal static class TitleBackgroundQuickCheckUiPresenter
             TitleBackgroundQuickCheckLevel.OK => "Status: OK - background-only works",
             TitleBackgroundQuickCheckLevel.WARN => $"Status: WARN - {reason}",
             TitleBackgroundQuickCheckLevel.NG => $"Status: NG - {reason}",
-            _ => "Status: Not checked yet",
+            _ => string.IsNullOrWhiteSpace(configuration.TitleBackgroundLastQuickCheckReason)
+                ? "Status: Not checked yet"
+                : $"Status: {reason}",
         };
 
         return new TitleBackgroundQuickCheckUiSummary(
@@ -413,10 +484,23 @@ internal static class TitleBackgroundQuickCheckUiPresenter
             "Enable Character Select Background",
             "Background Candidate",
             summary.StatusLine,
-            "Run QuickCheck",
+            "Start QuickCheck",
+            "Run Check",
             summary.LastResultLine,
             summary.KnownLimitationLine,
             summary.NextActionLine,
+        ];
+    }
+
+    public static IReadOnlyList<string> GetAdvancedModeItems(Configuration configuration)
+    {
+        return
+        [
+            "Runtime Mode",
+            "Background Mode",
+            "Lighting Mode",
+            "Effective Candidate Details",
+            "Clear",
         ];
     }
 

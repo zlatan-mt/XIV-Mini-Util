@@ -507,6 +507,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _configuration.TitleBackgroundCharacterSelectLightingMode,
             currentMap,
             _clientState.IsLoggedIn);
+        _configuration.TitleBackgroundLastQuickCheckResult = TitleBackgroundQuickCheckLevel.NotRun;
+        _configuration.TitleBackgroundLastQuickCheckCandidateId = candidate.Id;
+        _configuration.TitleBackgroundLastQuickCheckReason = "Armed: enter Character Select, log in, then run check";
+        _configuration.TitleBackgroundLastQuickCheckNextAction = "enter Character Select, log in, then run check";
+        _configuration.TitleBackgroundLastQuickCheckTime = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz");
+        _configuration.TitleBackgroundLastQuickCheckDetailFileName = TitleBackgroundQuickCheckEvaluator.DetailFileName;
+        _configuration.Save();
 
         return
         [
@@ -590,8 +597,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             && phase2MSummary.NonZeroPositionCandidateCount == 0;
         var backgroundApplied = overrideAppliedCount > 0
             || (_lastOverrideApplied && _lastOverrideLobbyType == GameLobbyType.CharaSelect);
+        var adapterState = _charaSelectCameraAdapter.State.ToString();
         var staleCharaSelectStateAfterLogin = _transitionDiagnostics.StaleAdapterStateAfterLogin
-            || (_clientState.IsLoggedIn && !string.Equals(_charaSelectCameraAdapter.State.ToString(), "Inactive", StringComparison.OrdinalIgnoreCase));
+            || (_clientState.IsLoggedIn && TitleBackgroundQuickCheckEvaluator.IsUnsafeAfterLoginAdapterState(adapterState));
         var activeAfterLoginDetected = _transitionDiagnostics.StaleSceneOverrideStateAfterLogin
             || (_clientState.IsLoggedIn && _activeSceneOverride);
         var pluginOrHookError = _state is TitleBackgroundServiceState.InvalidConfiguration

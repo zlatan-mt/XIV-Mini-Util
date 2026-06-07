@@ -782,7 +782,7 @@ public sealed class SettingsTab : ITabComponent
 
         DrawTitleBackgroundCharacterSelectDeliveryModes();
         ImGui.Spacing();
-        DrawTitleBackgroundOverrideCandidateSelector(showManualSlot: false);
+        DrawTitleBackgroundEffectiveCandidateDetails();
 
         if (ImGui.Button("解除"))
         {
@@ -858,7 +858,13 @@ public sealed class SettingsTab : ITabComponent
 
         DrawTitleBackgroundOverrideCandidateSelector(showManualSlot: false);
 
-        if (ImGui.Button("Run QuickCheck"))
+        if (ImGui.Button("Start QuickCheck"))
+        {
+            _titleScreenBackgroundService.StartQuickCheck();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Run Check"))
         {
             _titleScreenBackgroundService.RunQuickCheck();
         }
@@ -988,7 +994,8 @@ public sealed class SettingsTab : ITabComponent
 
         DrawTitleBackgroundCharacterSelectDeliveryModes();
         ImGui.Spacing();
-        DrawTitleBackgroundOverrideCandidateSelector(showManualSlot: true);
+        DrawTitleBackgroundEffectiveCandidateDetails();
+        DrawTitleBackgroundManualCandidateSlot1(BuildTitleBackgroundManualCandidateSlots()[0]);
         ImGui.Spacing();
 
         var territoryPath = _configuration.TitleBackgroundTerritoryPath;
@@ -1170,6 +1177,23 @@ public sealed class SettingsTab : ITabComponent
         {
             DrawTitleBackgroundManualCandidateSlot1(manualSlots[0]);
         }
+    }
+
+    private void DrawTitleBackgroundEffectiveCandidateDetails()
+    {
+        var manualSlots = BuildTitleBackgroundManualCandidateSlots();
+        var candidate = TitleBackgroundCharacterSelectOverrideCandidateRegistry.ResolveFromConfig(
+            _configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
+            _configuration.TitleBackgroundTerritoryPath,
+            _configuration.TitleBackgroundTerritoryTypeId,
+            _configuration.TitleBackgroundLayoutLayerFilterKey,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates(manualSlots));
+
+        ImGui.Text("Current effective candidate");
+        ImGui.TextWrapped(GetTitleBackgroundOverrideCandidateLabel(candidate));
+        ImGui.TextDisabled($"Path: {candidate.TerritoryPath}");
+        ImGui.TextDisabled($"TerritoryId: {candidate.TerritoryId} / LayerFilterKey: {candidate.LayerFilterKey}");
+        ImGui.TextDisabled($"Source: {candidate.Source} / Compatibility: {candidate.ExpectedCompatibility}");
     }
 
     private void ApplyTitleBackgroundOverrideCandidate(TitleBackgroundCharacterSelectOverrideCandidate candidate)

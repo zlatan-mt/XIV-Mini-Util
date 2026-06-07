@@ -424,14 +424,15 @@ Test("chara select scene phase3a does not introduce forbidden write paths", () =
 Test("title background quickcheck ok accepts known background-only limitations", () =>
 {
     var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        expectedBrightness: TitleBackgroundCharacterSelectExpectedBrightness.Dark,
         characterExpectedVisible: false,
         characterObserved: "not-observed",
         actorSourceAmbiguous: true,
         objectTableZeroTransformStubs: true));
 
-    return result.Level is TitleBackgroundQuickCheckLevel.WARN
+    return result.Level is TitleBackgroundQuickCheckLevel.OK
         && !string.IsNullOrWhiteSpace(result.Reason)
-        && result.Reason.Contains("warnings", StringComparison.Ordinal);
+        && result.Reason.Contains("background-only works", StringComparison.Ordinal);
 });
 
 Test("title background quickcheck warns on sceneReady multiple", () =>
@@ -446,8 +447,18 @@ Test("title background quickcheck dark brightness is not ng", () =>
 {
     var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
         expectedBrightness: TitleBackgroundCharacterSelectExpectedBrightness.Dark));
-    return result.Level is TitleBackgroundQuickCheckLevel.WARN
-        && result.Warnings.Any(warning => warning.Contains("brightness is dark", StringComparison.Ordinal));
+    return result.Level is TitleBackgroundQuickCheckLevel.OK
+        && result.DetailLines.Any(line => line == "knownLimitation.brightnessDark=True");
+});
+
+Test("title background quickcheck warns when login not checked", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        isLoggedIn: false,
+        runState: TitleBackgroundQuickCheckRunState.CharaSelectObserved));
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.Reason.Contains("login transition has not been checked", StringComparison.Ordinal)
+        && result.LoginTransitionStatus == "not checked";
 });
 
 Test("title background quickcheck ng when candidate missing", () =>
@@ -486,11 +497,18 @@ Test("title background quickcheck ng when phase2g applied after login", () =>
 Test("title background quickcheck known limitations are not ng", () =>
 {
     var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        expectedBrightness: TitleBackgroundCharacterSelectExpectedBrightness.Dark,
         characterExpectedVisible: false,
         characterObserved: "hidden",
         actorSourceAmbiguous: true,
         objectTableZeroTransformStubs: true));
-    return result.Level != TitleBackgroundQuickCheckLevel.NG;
+    return result.Level == TitleBackgroundQuickCheckLevel.OK;
+});
+
+Test("title background quickcheck adapter stopping after login is not ng", () =>
+{
+    return TitleBackgroundQuickCheckEvaluator.IsSafeAfterLoginAdapterState("Stopping")
+        && !TitleBackgroundQuickCheckEvaluator.IsUnsafeAfterLoginAdapterState("Stopping");
 });
 
 Test("title background quickcheck ui simple mode is bounded", () =>
@@ -502,9 +520,16 @@ Test("title background quickcheck ui simple mode is bounded", () =>
         TitleBackgroundLastQuickCheckReason = "background-only works",
     };
     var items = TitleBackgroundQuickCheckUiPresenter.GetSimpleModeItems(configuration);
-    return items.Count <= 7
-        && items.Any(item => item.Contains("Run QuickCheck", StringComparison.Ordinal))
+    return items.Contains("Start QuickCheck")
+        && items.Contains("Run Check")
         && !TitleBackgroundQuickCheckUiPresenter.IsExperimentalModeVisibleInSimple(TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground);
+});
+
+Test("title background quickcheck advanced mode does not duplicate candidate selector", () =>
+{
+    var advancedItems = TitleBackgroundQuickCheckUiPresenter.GetAdvancedModeItems(new Configuration());
+    return !advancedItems.Contains("Background Candidate")
+        && advancedItems.Contains("Effective Candidate Details");
 });
 
 Test("title background quickcheck candidate label includes useful metadata", () =>
@@ -4003,6 +4028,8 @@ TitleBackgroundTransitionDelta TrustedDelta(
 TitleBackgroundQuickCheckInput QuickCheckInput(
     string candidateId = "custom:n4f4",
     TitleBackgroundCharacterSelectExpectedBrightness expectedBrightness = TitleBackgroundCharacterSelectExpectedBrightness.Normal,
+    bool isLoggedIn = true,
+    TitleBackgroundQuickCheckRunState runState = TitleBackgroundQuickCheckRunState.LoggedInObserved,
     int sceneReadyAcceptedCount = 1,
     int overrideAppliedCount = 1,
     bool backgroundApplied = true,
@@ -4017,7 +4044,7 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
 {
     return new TitleBackgroundQuickCheckInput(
         RunScoped: true,
-        RunState: TitleBackgroundQuickCheckRunState.LoggedInObserved,
+        RunState: runState,
         StartedAt: DateTimeOffset.Now.AddMinutes(-2),
         CompletedAt: DateTimeOffset.Now,
         SceneGenerationStart: 1,
@@ -4027,7 +4054,7 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
         Phase2GApplyCount: 0,
         PluginOrHookError: false,
         PluginOrHookErrorReason: "none",
-        IsLoggedIn: true,
+        IsLoggedIn: isLoggedIn,
         CurrentLobbyMap: "None",
         CurrentLobbyMapRemainedAfterLogin: false,
         BackgroundMode: TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly,
