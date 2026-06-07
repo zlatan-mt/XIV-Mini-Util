@@ -182,6 +182,35 @@ internal static class TitleBackgroundCharaSelectCameraLogic
             TitleBackgroundPreset.SanitizeCoordinate(MagicHigh + y));
     }
 
+    public static float GetCameraFramingCurveOffset(TitleBackgroundCharaSelectCameraFramingMode framing)
+    {
+        return framing switch
+        {
+            TitleBackgroundCharaSelectCameraFramingMode.LowerCamera => -0.3f,
+            TitleBackgroundCharaSelectCameraFramingMode.CenterCharacter => -0.5f,
+            TitleBackgroundCharaSelectCameraFramingMode.CloserCharacter => -0.3f,
+            TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended => -0.7f,
+            TitleBackgroundCharaSelectCameraFramingMode.CustomExperimental => -0.7f,
+            _ => 0f,
+        };
+    }
+
+    public static TitleBackgroundCharaSelectCameraCurve ApplyCameraFramingOffset(
+        TitleBackgroundCharaSelectCameraCurve curve,
+        TitleBackgroundCharaSelectCameraFramingMode framing)
+    {
+        var offset = GetCameraFramingCurveOffset(framing);
+        if (offset == 0f)
+        {
+            return curve;
+        }
+
+        return new TitleBackgroundCharaSelectCameraCurve(
+            TitleBackgroundPreset.SanitizeCoordinate(curve.Low + offset),
+            TitleBackgroundPreset.SanitizeCoordinate(curve.Mid + offset),
+            TitleBackgroundPreset.SanitizeCoordinate(curve.High + offset));
+    }
+
     public static bool TryBuildPoseFromCameraFocus(
         Vector3 camera,
         Vector3 focus,

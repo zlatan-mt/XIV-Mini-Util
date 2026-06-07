@@ -857,6 +857,8 @@ public sealed class SettingsTab : ITabComponent
         }
 
         DrawTitleBackgroundOverrideCandidateSelector(showManualSlot: false);
+        DrawTitleBackgroundCameraFramingSelector();
+        DrawTitleBackgroundCharacterVisualStatusSelector();
 
         if (ImGui.Button("Start QuickCheck"))
         {
@@ -909,8 +911,8 @@ public sealed class SettingsTab : ITabComponent
     {
         ImGui.Spacing();
         ImGui.Text("Known limitation:");
-        ImGui.TextWrapped("Character model is expected to be hidden with the current full-scene override method.");
-        ImGui.TextDisabled("This is not treated as an error in QuickCheck.");
+        ImGui.TextWrapped("Character source is not resolved by diagnostics; visual confirmation is required.");
+        ImGui.TextDisabled("Character may appear off-center or too small depending on camera framing.");
     }
 
     private void DrawTitleBackgroundPresetSettings()
@@ -1748,6 +1750,71 @@ public sealed class SettingsTab : ITabComponent
             TitleBackgroundSettingsDisplayMode.DeveloperDiagnostics => "Developer Diagnostics",
             _ => mode.ToString(),
         };
+    }
+
+    private static string GetTitleBackgroundCameraFramingModeLabel(TitleBackgroundCharaSelectCameraFramingMode mode)
+    {
+        return mode switch
+        {
+            TitleBackgroundCharaSelectCameraFramingMode.Default => "Default",
+            TitleBackgroundCharaSelectCameraFramingMode.LowerCamera => "Lower camera",
+            TitleBackgroundCharaSelectCameraFramingMode.CenterCharacter => "Center character",
+            TitleBackgroundCharaSelectCameraFramingMode.CloserCharacter => "Closer character",
+            TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended => "n4f4 experimental",
+            TitleBackgroundCharaSelectCameraFramingMode.CustomExperimental => "Custom experimental",
+            _ => mode.ToString(),
+        };
+    }
+
+    private static string GetTitleBackgroundCharacterVisualStatusLabel(TitleBackgroundCharacterVisualStatus status)
+    {
+        return status switch
+        {
+            TitleBackgroundCharacterVisualStatus.Unknown => "Unknown",
+            TitleBackgroundCharacterVisualStatus.Visible => "Visible",
+            TitleBackgroundCharacterVisualStatus.VisibleButTooSmall => "Too small",
+            TitleBackgroundCharacterVisualStatus.VisibleTopDown => "Top-down",
+            TitleBackgroundCharacterVisualStatus.NotVisible => "Not visible",
+            TitleBackgroundCharacterVisualStatus.Offscreen => "Offscreen",
+            _ => status.ToString(),
+        };
+    }
+
+    private void DrawTitleBackgroundCameraFramingSelector()
+    {
+        var framingMode = _configuration.TitleBackgroundCharaSelectCameraFramingMode;
+        if (ImGui.BeginCombo("Camera framing##TitleBackgroundCameraFraming", GetTitleBackgroundCameraFramingModeLabel(framingMode)))
+        {
+            foreach (TitleBackgroundCharaSelectCameraFramingMode mode in Enum.GetValues(typeof(TitleBackgroundCharaSelectCameraFramingMode)))
+            {
+                if (ImGui.Selectable(GetTitleBackgroundCameraFramingModeLabel(mode), framingMode == mode))
+                {
+                    _configuration.TitleBackgroundCharaSelectCameraFramingMode = mode;
+                    _configuration.Save();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+    }
+
+    private void DrawTitleBackgroundCharacterVisualStatusSelector()
+    {
+        var visualStatus = _configuration.TitleBackgroundCharacterVisualStatus;
+        if (ImGui.BeginCombo("Character visual status##TitleBackgroundCharacterVisualStatus", GetTitleBackgroundCharacterVisualStatusLabel(visualStatus)))
+        {
+            foreach (TitleBackgroundCharacterVisualStatus status in Enum.GetValues(typeof(TitleBackgroundCharacterVisualStatus)))
+            {
+                if (ImGui.Selectable(GetTitleBackgroundCharacterVisualStatusLabel(status), visualStatus == status))
+                {
+                    _configuration.TitleBackgroundCharacterVisualStatus = status;
+                    _configuration.Save();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+        ImGui.TextDisabled("Manually record what you see in Character Select.");
     }
 
     private static string GetTitleBackgroundResolverModeLabel(TitleBackgroundResolverMode mode)

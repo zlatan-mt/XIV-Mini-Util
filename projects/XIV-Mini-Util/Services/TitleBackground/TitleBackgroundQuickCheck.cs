@@ -98,7 +98,9 @@ internal readonly record struct TitleBackgroundQuickCheckInput(
     bool Phase2GAppliedAfterLogin,
     bool ForegroundPreserveUnavailable,
     bool ActorSourceAmbiguous,
-    bool ObjectTableZeroTransformStubs);
+    bool ObjectTableZeroTransformStubs,
+    TitleBackgroundCharacterVisualStatus CharacterVisualStatus = TitleBackgroundCharacterVisualStatus.Unknown,
+    TitleBackgroundCharaSelectCameraFramingMode CameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.Default);
 
 internal readonly record struct TitleBackgroundQuickCheckResult(
     TitleBackgroundQuickCheckLevel Level,
@@ -160,6 +162,13 @@ internal static class TitleBackgroundQuickCheckEvaluator
         if (input.VisualConfirmationRequired)
         {
             warnings.Add("visual confirmation is required");
+        }
+
+        if (input.CharacterVisualStatus is TitleBackgroundCharacterVisualStatus.VisibleButTooSmall
+                or TitleBackgroundCharacterVisualStatus.VisibleTopDown
+            && input.CameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.Default)
+        {
+            warnings.Add("camera framing may need adjustment: character is visible but top-down or too small");
         }
 
         if (input.IsLoggedIn
@@ -297,6 +306,11 @@ internal static class TitleBackgroundQuickCheckEvaluator
             return "retry once from clean title screen if needed";
         }
 
+        if (warnings.Any(warning => warning.Contains("camera framing may need adjustment", StringComparison.Ordinal)))
+        {
+            return "try Camera framing = Lower camera or n4f4 experimental";
+        }
+
         return "use background-only, or add a bright candidate";
     }
 
@@ -349,6 +363,8 @@ internal static class TitleBackgroundQuickCheckEvaluator
             $"character.observed={NormalizeNone(input.CharacterObserved)}",
             $"character.knownLimitation={input.CharacterKnownLimitation}",
             $"character.status={NormalizeNone(result.CharacterStatus)}",
+            $"character.visualStatus={input.CharacterVisualStatus}",
+            $"camera.framingMode={input.CameraFramingMode}",
             $"knownLimitation.characterHidden={!input.CharacterExpectedVisible || input.CharacterKnownLimitation}",
             $"knownLimitation.foregroundPreserveUnavailable={input.ForegroundPreserveUnavailable}",
             $"knownLimitation.brightnessDark={input.ExpectedBrightness is TitleBackgroundCharacterSelectExpectedBrightness.Dark or TitleBackgroundCharacterSelectExpectedBrightness.TooDark}",
@@ -443,9 +459,33 @@ internal static class TitleBackgroundQuickCheckEvaluator
 
     private static string BuildCharacterStatus(TitleBackgroundQuickCheckInput input)
     {
-        return !input.CharacterExpectedVisible || input.CharacterKnownLimitation
-            ? "hidden / expected limitation"
-            : NormalizeNone(input.CharacterObserved);
+        var visualStatusLabel = input.CharacterVisualStatus switch
+        {
+            TitleBackgroundCharacterVisualStatus.Visible => "visible",
+            TitleBackgroundCharacterVisualStatus.VisibleButTooSmall => "visible / too small",
+            TitleBackgroundCharacterVisualStatus.VisibleTopDown => "visible / top-down",
+            TitleBackgroundCharacterVisualStatus.NotVisible => "not visible",
+            TitleBackgroundCharacterVisualStatus.Offscreen => "offscreen",
+            _ => null,
+        };
+
+        if (visualStatusLabel != null)
+        {
+            if (input.CharacterVisualStatus is TitleBackgroundCharacterVisualStatus.VisibleButTooSmall
+                    or TitleBackgroundCharacterVisualStatus.VisibleTopDown)
+            {
+                return $"{visualStatusLabel} / camera framing needs adjustment";
+            }
+
+            return visualStatusLabel;
+        }
+
+        if (!input.CharacterExpectedVisible || input.CharacterKnownLimitation)
+        {
+            return "not detected by diagnostics / visual confirmation required";
+        }
+
+        return NormalizeNone(input.CharacterObserved);
     }
 
     private static string FormatTime(DateTimeOffset? value)
@@ -503,7 +543,7 @@ internal static class TitleBackgroundQuickCheckUiPresenter
             $"Last Reason: {reason}",
             $"Next Action: {NormalizeForUi(configuration.TitleBackgroundLastQuickCheckNextAction, "Run QuickCheck after entering Character Select and logging in once.")}",
             $"Detail: {NormalizeForUi(configuration.TitleBackgroundLastQuickCheckDetailFileName, TitleBackgroundQuickCheckEvaluator.DetailFileName)}",
-            "Known limitation: selected character is expected to be hidden with the current full-scene override method.");
+            "Known limitation: character source is not resolved by diagnostics; visual confirmation is required. Character may appear off-center or too small with current camera framing.");
     }
 
     public static IReadOnlyList<string> GetSimpleModeItems(Configuration configuration)

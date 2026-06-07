@@ -660,7 +660,9 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _transitionDiagnostics.Phase2GAppliedAfterLogin,
             true,
             actorSourceAmbiguous,
-            zeroTransformStubs);
+            zeroTransformStubs,
+            _configuration.TitleBackgroundCharacterVisualStatus,
+            _configuration.TitleBackgroundCharaSelectCameraFramingMode);
     }
 
     private void SaveQuickCheckResult(TitleBackgroundQuickCheckResult result)
@@ -2609,7 +2611,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             return false;
         }
 
-        curve = _charaSelectCameraAdapter.RuntimeState.CurveAtRecord!.Value;
+        var baseCurve = _charaSelectCameraAdapter.RuntimeState.CurveAtRecord!.Value;
+        curve = TitleBackgroundCharaSelectCameraLogic.ApplyCameraFramingOffset(
+            baseCurve,
+            _configuration.TitleBackgroundCharaSelectCameraFramingMode);
         skippedReason = string.Empty;
         return true;
     }

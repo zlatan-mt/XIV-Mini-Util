@@ -17,7 +17,8 @@ internal readonly record struct TitleBackgroundCharacterSelectOverrideCandidate(
     string Source,
     string Warning,
     string KnownIssue,
-    string RecommendedAction);
+    string RecommendedAction,
+    TitleBackgroundCharaSelectCameraFramingMode RecommendedCameraFraming = TitleBackgroundCharaSelectCameraFramingMode.Default);
 
 internal readonly record struct TitleBackgroundCharacterSelectManualCandidateSlot(
     int SlotNumber,
@@ -48,9 +49,10 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
         false,
         true,
         "registry",
-        "full scene override works as background-only; selected character is not expected to be visible",
-        "selected character model is hidden with full scene override",
-        "add-bright-override-candidate or use-background-only");
+        "full scene override works as background-only; character may appear visually but camera framing may be top-down",
+        "initial camera is too high / top-down; character may appear very small near screen bottom",
+        "use Camera framing = CandidateRecommended or LowerCamera",
+        TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended);
 
     private static readonly TitleBackgroundCharacterSelectOverrideCandidate OldSharlayanOutdoorTest = new(
         "custom:old-sharlayan-k5t1",

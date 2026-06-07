@@ -108,6 +108,8 @@ public sealed class Configuration : IPluginConfiguration
     public TitleBackgroundCharacterSelectBackgroundMode TitleBackgroundCharacterSelectBackgroundMode { get; set; } = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly;
     public TitleBackgroundCharacterSelectLightingMode TitleBackgroundCharacterSelectLightingMode { get; set; } = TitleBackgroundCharacterSelectLightingMode.Default;
     public TitleBackgroundSettingsDisplayMode TitleBackgroundSettingsDisplayMode { get; set; } = TitleBackgroundSettingsDisplayMode.Simple;
+    public TitleBackgroundCharaSelectCameraFramingMode TitleBackgroundCharaSelectCameraFramingMode { get; set; } = TitleBackgroundCharaSelectCameraFramingMode.Default;
+    public TitleBackgroundCharacterVisualStatus TitleBackgroundCharacterVisualStatus { get; set; } = TitleBackgroundCharacterVisualStatus.Unknown;
     public TitleBackgroundQuickCheckLevel TitleBackgroundLastQuickCheckResult { get; set; } = TitleBackgroundQuickCheckLevel.NotRun;
     public string TitleBackgroundLastQuickCheckCandidateId { get; set; } = string.Empty;
     public string TitleBackgroundLastQuickCheckReason { get; set; } = string.Empty;
@@ -337,6 +339,8 @@ public sealed class Configuration : IPluginConfiguration
         TitleBackgroundCharacterSelectBackgroundMode = NormalizeTitleBackgroundCharacterSelectBackgroundMode(source.TitleBackgroundCharacterSelectBackgroundMode);
         TitleBackgroundCharacterSelectLightingMode = NormalizeTitleBackgroundCharacterSelectLightingMode(source.TitleBackgroundCharacterSelectLightingMode);
         TitleBackgroundSettingsDisplayMode = NormalizeTitleBackgroundSettingsDisplayMode(source.TitleBackgroundSettingsDisplayMode);
+        TitleBackgroundCharaSelectCameraFramingMode = NormalizeTitleBackgroundCameraFramingMode(source.TitleBackgroundCharaSelectCameraFramingMode);
+        TitleBackgroundCharacterVisualStatus = NormalizeTitleBackgroundCharacterVisualStatus(source.TitleBackgroundCharacterVisualStatus);
         TitleBackgroundLastQuickCheckResult = NormalizeTitleBackgroundQuickCheckLevel(source.TitleBackgroundLastQuickCheckResult);
         TitleBackgroundLastQuickCheckCandidateId = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckCandidateId);
         TitleBackgroundLastQuickCheckReason = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckReason);
@@ -718,6 +722,20 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        var normalizedCameraFramingMode = NormalizeTitleBackgroundCameraFramingMode(TitleBackgroundCharaSelectCameraFramingMode);
+        if (TitleBackgroundCharaSelectCameraFramingMode != normalizedCameraFramingMode)
+        {
+            TitleBackgroundCharaSelectCameraFramingMode = normalizedCameraFramingMode;
+            changed = true;
+        }
+
+        var normalizedCharacterVisualStatus = NormalizeTitleBackgroundCharacterVisualStatus(TitleBackgroundCharacterVisualStatus);
+        if (TitleBackgroundCharacterVisualStatus != normalizedCharacterVisualStatus)
+        {
+            TitleBackgroundCharacterVisualStatus = normalizedCharacterVisualStatus;
+            changed = true;
+        }
+
         var normalizedQuickCheckLevel = NormalizeTitleBackgroundQuickCheckLevel(TitleBackgroundLastQuickCheckResult);
         if (TitleBackgroundLastQuickCheckResult != normalizedQuickCheckLevel)
         {
@@ -960,6 +978,20 @@ public sealed class Configuration : IPluginConfiguration
         return Enum.IsDefined(typeof(TitleBackgroundResolverMode), mode)
             ? mode
             : TitleBackgroundResolverMode.AutoDiagnosticOnly;
+    }
+
+    private static TitleBackgroundCharaSelectCameraFramingMode NormalizeTitleBackgroundCameraFramingMode(TitleBackgroundCharaSelectCameraFramingMode mode)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundCharaSelectCameraFramingMode), mode)
+            ? mode
+            : TitleBackgroundCharaSelectCameraFramingMode.Default;
+    }
+
+    private static TitleBackgroundCharacterVisualStatus NormalizeTitleBackgroundCharacterVisualStatus(TitleBackgroundCharacterVisualStatus status)
+    {
+        return Enum.IsDefined(typeof(TitleBackgroundCharacterVisualStatus), status)
+            ? status
+            : TitleBackgroundCharacterVisualStatus.Unknown;
     }
 
     private static TitleBackgroundPhase2MExperimentalApplyMode NormalizeTitleBackgroundPhase2MExperimentalApplyMode(TitleBackgroundPhase2MExperimentalApplyMode mode)
