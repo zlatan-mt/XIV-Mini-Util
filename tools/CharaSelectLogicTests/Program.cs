@@ -4274,7 +4274,11 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
     bool legacySceneCompositionEnabled = false,
     bool integratedCompositionEnabled = true,
     bool shouldArmAdapter = true,
-    string shouldArmAdapterReason = "")
+    string shouldArmAdapterReason = "",
+    bool integratedCompositionRouteInvoked = false,
+    string integratedCompositionRouteReason = "",
+    bool cameraFramingApplied = false,
+    bool sceneOverrideApplyObserved = false)
 {
     return new TitleBackgroundQuickCheckInput(
         RunScoped: runScoped,
@@ -4327,8 +4331,69 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
         LegacySceneCompositionEnabledAtCheck: legacySceneCompositionEnabled,
         TitleBackgroundIntegratedCompositionEnabledAtCheck: integratedCompositionEnabled,
         ShouldArmAdapterAtCheck: shouldArmAdapter,
-        ShouldArmAdapterReasonAtCheck: shouldArmAdapterReason);
+        ShouldArmAdapterReasonAtCheck: shouldArmAdapterReason,
+        IntegratedCompositionRouteInvoked: integratedCompositionRouteInvoked,
+        IntegratedCompositionRouteReason: integratedCompositionRouteReason,
+        CameraFramingApplied: cameraFramingApplied,
+        SceneOverrideApplyObserved: sceneOverrideApplyObserved);
 }
+
+// Case 1: IntegratedCompositionEnabled=True and SceneOverrideNotYetObserved
+// → detail line integratedCompositionRouteRequired=True must be present
+Test("title background case 1 integrated composition route required in detail lines when override not observed", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        integratedCompositionEnabled: true,
+        sceneOverrideApplyObserved: false));
+    return result.DetailLines.Any(l => l == "quickCheck.integratedCompositionRouteRequired=True");
+});
+
+// Case 2: Legacy composition OFF + IntegratedCompositionEnabled=True
+// → ShouldArmAdapter must be true; legacy state is not a gate for the adapter
+Test("title background case 2 legacy composition off is not adapter arm blocker when integrated enabled", () =>
+{
+    var shouldArm = TitleBackgroundCharaSelectCameraLogic.ShouldArmAdapter(
+        overrideEnabled: true,
+        cameraAdaptationEnabled: true,
+        runtimeMode: TitleBackgroundRuntimeMode.CharaSelectOnly);
+    var reason = TitleBackgroundCharaSelectCameraLogic.BuildShouldArmAdapterReason(
+        overrideEnabled: true,
+        cameraAdaptationEnabled: true,
+        runtimeMode: TitleBackgroundRuntimeMode.CharaSelectOnly,
+        integratedCompositionEnabled: true,
+        candidateValid: true);
+    // legacy composition is not a parameter → adapter arms regardless of legacy state
+    return shouldArm && reason == "none";
+});
+
+// Case 3: IntegratedCompositionEnabled=True but route was attempted and did not fire
+// → NG "integrated composition flag is enabled but route was not invoked"
+Test("title background case 3 integrated composition route not invoked with non-empty reason surfaces specific ng", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        backgroundApplied: false,
+        backgroundObserved: false,
+        overrideAppliedCount: 0,
+        integratedCompositionEnabled: true,
+        integratedCompositionRouteInvoked: false,
+        integratedCompositionRouteReason: "available only in CharaSelect lobby"));
+    return result.Level == TitleBackgroundQuickCheckLevel.NG
+        && result.Reason.Contains("route was not invoked", StringComparison.Ordinal);
+});
+
+// Case 4: CameraFramingApplied=True but SceneOverrideObserved=False
+// → NG "camera framing applied but scene override was not observed"
+Test("title background case 4 camera framing applied but scene override not observed surfaces specific ng", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        backgroundApplied: false,
+        backgroundObserved: false,
+        overrideAppliedCount: 0,
+        cameraFramingApplied: true,
+        sceneOverrideApplyObserved: false));
+    return result.Level == TitleBackgroundQuickCheckLevel.NG
+        && result.Reason.Contains("camera framing applied but scene override was not observed", StringComparison.Ordinal);
+});
 
 if (failures.Count > 0)
 {

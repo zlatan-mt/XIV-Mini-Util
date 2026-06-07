@@ -108,7 +108,11 @@ internal readonly record struct TitleBackgroundQuickCheckInput(
     bool LegacySceneCompositionEnabledAtCheck = false,
     bool TitleBackgroundIntegratedCompositionEnabledAtCheck = true,
     bool ShouldArmAdapterAtCheck = true,
-    string ShouldArmAdapterReasonAtCheck = "");
+    string ShouldArmAdapterReasonAtCheck = "",
+    bool IntegratedCompositionRouteInvoked = false,
+    string IntegratedCompositionRouteReason = "",
+    bool CameraFramingApplied = false,
+    bool SceneOverrideApplyObserved = false);
 
 internal readonly record struct TitleBackgroundQuickCheckResult(
     TitleBackgroundQuickCheckLevel Level,
@@ -273,9 +277,28 @@ internal static class TitleBackgroundQuickCheckEvaluator
 
         if (input.OverrideAppliedCount <= 0 || !input.BackgroundApplied || !input.BackgroundObserved)
         {
-            return !input.TitleBackgroundIntegratedCompositionEnabledAtCheck
-                ? "integrated character composition was not armed"
-                : "background was not applied";
+            if (input.CameraFramingApplied && !input.SceneOverrideApplyObserved)
+            {
+                return "camera framing applied but scene override was not observed";
+            }
+
+            if (input.IntegratedCompositionRouteInvoked && !input.SceneOverrideApplyObserved)
+            {
+                return "integrated composition route was invoked but scene override was not observed";
+            }
+
+            if (!input.TitleBackgroundIntegratedCompositionEnabledAtCheck)
+            {
+                return "integrated character composition was not armed";
+            }
+
+            if (!input.IntegratedCompositionRouteInvoked
+                && !string.IsNullOrWhiteSpace(input.IntegratedCompositionRouteReason))
+            {
+                return "integrated composition flag is enabled but route was not invoked";
+            }
+
+            return "background was not applied";
         }
 
         if (input.PluginOrHookError)
@@ -425,6 +448,14 @@ internal static class TitleBackgroundQuickCheckEvaluator
             $"quickCheck.titleBackgroundCameraOverrideEnabled={input.TitleBackgroundCameraOverrideEnabledAtCheck}",
             $"quickCheck.legacySceneCompositionEnabled={input.LegacySceneCompositionEnabledAtCheck}",
             $"quickCheck.integratedCompositionEnabled={input.TitleBackgroundIntegratedCompositionEnabledAtCheck}",
+            $"quickCheck.integratedCompositionRouteRequired={input.TitleBackgroundIntegratedCompositionEnabledAtCheck && !input.SceneOverrideApplyObserved}",
+            $"quickCheck.integratedCompositionRouteInvoked={input.IntegratedCompositionRouteInvoked}",
+            $"quickCheck.integratedCompositionRoute.reason={NormalizeNone(input.IntegratedCompositionRouteReason)}",
+            $"quickCheck.legacyCompositionUiToggle={input.LegacySceneCompositionEnabledAtCheck}",
+            $"quickCheck.legacyCompositionDependency={input.LegacySceneCompositionEnabledAtCheck && !input.TitleBackgroundIntegratedCompositionEnabledAtCheck}",
+            $"quickCheck.characterCompositionObserved={input.SceneOverrideApplyObserved}",
+            $"quickCheck.cameraFramingApplied={input.CameraFramingApplied}",
+            $"quickCheck.sceneOverrideApplyObserved={input.SceneOverrideApplyObserved}",
             $"quickCheck.shouldArmAdapter={input.ShouldArmAdapterAtCheck}",
             $"quickCheck.shouldArmAdapter.reason={NormalizeNone(input.ShouldArmAdapterReasonAtCheck)}",
             $"quickCheck.runScoped={input.RunScoped}",

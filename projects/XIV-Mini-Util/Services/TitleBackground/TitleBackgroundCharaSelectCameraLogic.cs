@@ -80,7 +80,11 @@ internal static class TitleBackgroundCharaSelectCameraLogic
     public static string BuildShouldArmAdapterReason(
         bool overrideEnabled,
         bool cameraAdaptationEnabled,
-        TitleBackgroundRuntimeMode runtimeMode)
+        TitleBackgroundRuntimeMode runtimeMode,
+        bool integratedCompositionEnabled = true,
+        bool candidateValid = true,
+        bool hookReady = true,
+        bool sceneRouteReady = true)
     {
         if (!overrideEnabled)
         {
@@ -90,6 +94,26 @@ internal static class TitleBackgroundCharaSelectCameraLogic
         if (!cameraAdaptationEnabled)
         {
             return "cameraAdaptationDisabled";
+        }
+
+        if (!integratedCompositionEnabled)
+        {
+            return "integratedCompositionDisabled";
+        }
+
+        if (!candidateValid)
+        {
+            return "candidateInvalid";
+        }
+
+        if (!hookReady)
+        {
+            return "hookNotReady";
+        }
+
+        if (!sceneRouteReady)
+        {
+            return "sceneRouteNotReady";
         }
 
         if (runtimeMode != TitleBackgroundRuntimeMode.CharaSelectOnly)

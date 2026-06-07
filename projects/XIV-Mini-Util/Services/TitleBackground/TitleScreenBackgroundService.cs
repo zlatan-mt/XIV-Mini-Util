@@ -153,6 +153,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private string _phase2GGenerationOverrideLastStatus = "not-run";
     private string _phase2GGenerationOverrideLastSkippedReason = string.Empty;
     private int _quickCheckOverrideAppliedCount;
+    private bool _integratedCompositionRouteInvoked;
+    private string _integratedCompositionRouteLastReason = string.Empty;
     private string _lastCurrentLobbyMapResetReason = "none";
     private bool _postLoginDiagnosticSeen;
     private TitleBackgroundSelfTestSession? _selfTestSession;
@@ -224,6 +226,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _configuration.Save();
         RecordTransitionEvent(enabled ? "title background feature enabled" : "title background feature disabled", "SetEnabled");
         ReloadNativeIntegration();
+        if (enabled && _configuration.TitleBackgroundIntegratedCompositionEnabled)
+        {
+            // Integrated composition route: trigger CharaSelect scene reload so CreateScene fires
+            // and applies the n4f4 override. This connects the flag to real scene processing.
+            // RequestCharaSelectReload handles precondition checks (Ready state, CharaSelect map).
+            TryInvokeIntegratedCompositionRoute();
+        }
     }
 
     public void SetCameraOverrideEnabled(bool enabled)
@@ -363,6 +372,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     public string RequestCharaSelectReload()
     {
         return RequestCharaSelectReload(startedBySelfTest: false);
+    }
+
+    /// <summary>
+    /// Integrated composition route: CharaSelect scene reload を要求して CreateScene を発火させる。
+    /// RouteInvoked は "reload requested" が返った場合のみ true になる。
+    /// </summary>
+    private void TryInvokeIntegratedCompositionRoute()
+    {
+        var reason = RequestCharaSelectReload(startedBySelfTest: false);
+        _integratedCompositionRouteLastReason = reason;
+        _integratedCompositionRouteInvoked = string.Equals(reason, "reload requested", StringComparison.Ordinal);
+        RecordTransitionEvent("integrated composition route", reason);
     }
 
     private string RequestCharaSelectReload(bool startedBySelfTest)
@@ -508,6 +529,17 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     {
         var currentMap = TryReadCurrentLobbyMap(out var map) ? map.ToString() : "unknown";
         var candidate = ResolveCurrentOverrideCandidate();
+        // Reset integrated composition route tracking for this run before recording the baseline.
+        // Route invocation below may trigger a scene reload; the override counter change will be
+        // captured relative to the baseline saved in _quickCheckState.
+        _integratedCompositionRouteInvoked = false;
+        _integratedCompositionRouteLastReason = string.Empty;
+        if (_configuration.TitleBackgroundIntegratedCompositionEnabled)
+        {
+            // Invoke before saving the baseline so CreateScene fires before the user logs in.
+            TryInvokeIntegratedCompositionRoute();
+        }
+
         _quickCheckState = new TitleBackgroundQuickCheckState(
             TitleBackgroundQuickCheckRunState.Armed,
             DateTimeOffset.Now,
@@ -633,6 +665,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             && candidate.TerritoryId != 0
             && candidate.LayerFilterKey != 0;
 
+        var serviceReady = _state == TitleBackgroundServiceState.Ready;
         var shouldArmAdapter = TitleBackgroundCharaSelectCameraLogic.ShouldArmAdapter(
             _configuration.TitleBackgroundOverrideEnabled,
             _configuration.TitleBackgroundCameraOverrideEnabled,
@@ -640,7 +673,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var shouldArmAdapterReason = TitleBackgroundCharaSelectCameraLogic.BuildShouldArmAdapterReason(
             _configuration.TitleBackgroundOverrideEnabled,
             _configuration.TitleBackgroundCameraOverrideEnabled,
-            _configuration.TitleBackgroundRuntimeMode);
+            _configuration.TitleBackgroundRuntimeMode,
+            _configuration.TitleBackgroundIntegratedCompositionEnabled,
+            candidateFieldsValid,
+            serviceReady,
+            serviceReady);
+        var sceneOverrideApplyObserved = overrideAppliedCount > 0;
+        var cameraFramingApplied = phase2GApplyCount > 0;
 
         return new TitleBackgroundQuickCheckInput(
             runScoped,
@@ -693,7 +732,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _configuration.CharaSelectSceneCompositionEnabled,
             _configuration.TitleBackgroundIntegratedCompositionEnabled,
             shouldArmAdapter,
-            shouldArmAdapterReason);
+            shouldArmAdapterReason,
+            _integratedCompositionRouteInvoked,
+            _integratedCompositionRouteLastReason,
+            cameraFramingApplied,
+            sceneOverrideApplyObserved);
     }
 
     private void SaveQuickCheckResult(TitleBackgroundQuickCheckResult result)
