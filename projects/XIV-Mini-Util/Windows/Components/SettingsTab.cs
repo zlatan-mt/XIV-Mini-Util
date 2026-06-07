@@ -783,6 +783,8 @@ public sealed class SettingsTab : ITabComponent
         DrawTitleBackgroundCharacterSelectDeliveryModes();
         ImGui.Spacing();
         DrawTitleBackgroundEffectiveCandidateDetails();
+        ImGui.Spacing();
+        DrawTitleBackgroundCharacterCompositionBridgeDiagnostics();
 
         if (ImGui.Button("解除"))
         {
@@ -920,6 +922,19 @@ public sealed class SettingsTab : ITabComponent
         ImGui.Text("Known limitation:");
         ImGui.TextWrapped("Character source is not resolved by diagnostics; visual confirmation is required.");
         ImGui.TextDisabled("Character may appear off-center or too small depending on camera framing.");
+    }
+
+    private void DrawTitleBackgroundCharacterCompositionBridgeDiagnostics()
+    {
+        var bridge = _charaSelectService.GetTitleBackgroundCharacterCompositionBridgeSnapshot();
+        ImGui.Text("Character Composition Bridge");
+        ImGui.TextDisabled($"Integrated composition: {_configuration.TitleBackgroundIntegratedCompositionEnabled}");
+        ImGui.TextDisabled($"Bridge enabled: {bridge.Enabled}");
+        ImGui.TextDisabled($"Bridge invoked: {bridge.Invoked}");
+        ImGui.TextDisabled($"Bridge source: {bridge.Source}");
+        ImGui.TextDisabled($"Bridge reason: {bridge.Reason}");
+        ImGui.TextDisabled($"Applied stage/character/camera: {bridge.AppliedStage}/{bridge.AppliedCharacter}/{bridge.AppliedCamera}");
+        ImGui.TextDisabled($"Legacy shooting composition: {_configuration.CharaSelectSceneCompositionEnabled}");
     }
 
     private void DrawTitleBackgroundPresetSettings()

@@ -1,6 +1,8 @@
 // Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundQuickCheck.cs
 // Description: Character Select 背景 QuickCheck の状態、判定、UI表示文字列をまとめる
 // Reason: /xmutbgdiag の累積診断に頼らず、1回の確認結果を OK/WARN/NG で出すため
+using XivMiniUtil.Services.CharaSelect;
+
 namespace XivMiniUtil.Services.TitleBackground;
 
 public enum TitleBackgroundQuickCheckLevel
@@ -113,7 +115,8 @@ internal readonly record struct TitleBackgroundQuickCheckInput(
     string IntegratedCompositionRouteReason = "",
     bool CameraFramingApplied = false,
     bool SceneOverrideApplyObserved = false,
-    bool IntegratedCompositionAutoEnabled = false);
+    bool IntegratedCompositionAutoEnabled = false,
+    TitleBackgroundCharacterCompositionBridgeSnapshot CharacterCompositionBridge = default);
 
 internal readonly record struct TitleBackgroundQuickCheckResult(
     TitleBackgroundQuickCheckLevel Level,
@@ -190,6 +193,19 @@ internal static class TitleBackgroundQuickCheckEvaluator
                 or TitleBackgroundCharacterVisualStatus.Offscreen)
         {
             warnings.Add("character not visible or offscreen in frame; camera framing may be misaligned");
+        }
+
+        var bridgeIssue = CharaSelectSceneCompositionPlanner.BuildTitleBackgroundCharacterCompositionBridgeMissingReason(
+            input.CharacterCompositionBridge);
+        if (input.LegacySceneCompositionEnabledAtCheck && input.TitleBackgroundOverrideEnabledAtCheck)
+        {
+            warnings.Add("legacy shooting composition dependency still required");
+        }
+
+        if (bridgeIssue != "none"
+            && bridgeIssue != "bridge applied camera only but not character/stage")
+        {
+            warnings.Add(bridgeIssue);
         }
 
         if (input.IsLoggedIn
@@ -302,6 +318,14 @@ internal static class TitleBackgroundQuickCheckEvaluator
             return "background was not applied";
         }
 
+        var bridgeReason = CharaSelectSceneCompositionPlanner.BuildTitleBackgroundCharacterCompositionBridgeMissingReason(
+            input.CharacterCompositionBridge);
+        if (bridgeReason == "bridge applied camera only but not character/stage"
+            || bridgeReason == "bridge invoked but character composition not applied")
+        {
+            return bridgeReason;
+        }
+
         if (input.PluginOrHookError)
         {
             return $"plugin or hook error: {NormalizeNone(input.PluginOrHookErrorReason)}";
@@ -373,6 +397,17 @@ internal static class TitleBackgroundQuickCheckEvaluator
         if (warnings.Any(warning => warning.Contains("not visible or offscreen", StringComparison.Ordinal)))
         {
             return "try another camera framing or reset visual status after screenshot";
+        }
+
+        if (warnings.Any(warning => warning.Contains("bridge not invoked", StringComparison.Ordinal)))
+        {
+            return "enter Character Select with Character Select Background enabled, then run Start QuickCheck again";
+        }
+
+        if (warnings.Any(warning => warning.Contains("character composition", StringComparison.Ordinal)
+                || warning.Contains("character/stage", StringComparison.Ordinal)))
+        {
+            return "check character composition bridge diagnostics";
         }
 
         return "use background-only, or add a bright candidate";
@@ -458,6 +493,16 @@ internal static class TitleBackgroundQuickCheckEvaluator
             $"quickCheck.characterCompositionObserved={input.SceneOverrideApplyObserved}",
             $"quickCheck.cameraFramingApplied={input.CameraFramingApplied}",
             $"quickCheck.sceneOverrideApplyObserved={input.SceneOverrideApplyObserved}",
+            $"quickCheck.characterCompositionBridge.enabled={input.CharacterCompositionBridge.Enabled}",
+            $"quickCheck.characterCompositionBridge.required={input.CharacterCompositionBridge.Required}",
+            $"quickCheck.characterCompositionBridge.invoked={input.CharacterCompositionBridge.Invoked}",
+            $"quickCheck.characterCompositionBridge.reason={NormalizeNone(input.CharacterCompositionBridge.Reason)}",
+            $"quickCheck.characterCompositionBridge.source={NormalizeNone(input.CharacterCompositionBridge.Source)}",
+            $"quickCheck.characterCompositionBridge.appliedStage={input.CharacterCompositionBridge.AppliedStage}",
+            $"quickCheck.characterCompositionBridge.appliedCharacter={input.CharacterCompositionBridge.AppliedCharacter}",
+            $"quickCheck.characterCompositionBridge.appliedCamera={input.CharacterCompositionBridge.AppliedCamera}",
+            $"quickCheck.characterVisualExpected={input.CharacterCompositionBridge.CharacterVisualExpected}",
+            $"quickCheck.characterVisualKnownByBridge={input.CharacterCompositionBridge.CharacterVisualKnownByBridge}",
             $"quickCheck.shouldArmAdapter={input.ShouldArmAdapterAtCheck}",
             $"quickCheck.shouldArmAdapter.reason={NormalizeNone(input.ShouldArmAdapterReasonAtCheck)}",
             $"quickCheck.runScoped={input.RunScoped}",

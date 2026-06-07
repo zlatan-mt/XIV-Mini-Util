@@ -146,7 +146,8 @@ public sealed class Plugin : IDalamudPlugin
             dataManager,
             pluginLog,
             pluginInterface.ConfigDirectory.FullName,
-            _configuration);
+            _configuration,
+            _charaSelectService);
         _titleScreenBackgroundService.SelfTestCompleted += OnTitleBackgroundSelfTestCompleted;
 
         _materiaService = new MateriaExtractService(

@@ -513,6 +513,153 @@ Test("title background quickcheck detail lines include state flags", () =>
         && result.DetailLines.Any(l => l.StartsWith("quickCheck.shouldArmAdapter.reason=", StringComparison.Ordinal));
 });
 
+Test("title background bridge case 1 legacy shooting composition on path is discoverable", () =>
+{
+    var configuration = new Configuration
+    {
+        CharaSelectSceneCompositionEnabled = true,
+        CharaSelectSceneUseProfileTerritory = true,
+        CharaSelectSceneStageStrategy = CharaSelectStageStrategy.ClientSelectDataTerritoryPatch,
+    };
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.cs"));
+    return CharaSelectSceneCompositionPlanner.ResolveCompositionCaller(configuration) == "legacy-shooting-composition"
+        && CharaSelectSceneCompositionPlanner.UsesClientSelectDataTerritoryPatch(configuration)
+        && serviceText.Contains("TryPatchOverrideDisplayData", StringComparison.Ordinal)
+        && serviceText.Contains("UpdateCharaSelectDisplayDetour", StringComparison.Ordinal);
+});
+
+Test("title background bridge case 2 required for title background n4f4", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundOverrideEnabled = true,
+        TitleBackgroundIntegratedCompositionEnabled = true,
+        TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.CharaSelectOnly,
+        TitleBackgroundCharacterSelectOverrideCandidateId = "custom:n4f4",
+        CharaSelectSceneCompositionEnabled = false,
+    };
+    return CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeRequired(configuration);
+});
+
+Test("title background bridge case 3 invoked and character applied is ok", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        legacySceneCompositionEnabled: false,
+        overrideAppliedCount: 1,
+        backgroundApplied: true,
+        backgroundObserved: true,
+        cameraFramingApplied: true,
+        sceneOverrideApplyObserved: true,
+        characterCompositionBridge: new TitleBackgroundCharacterCompositionBridgeSnapshot(
+            true,
+            true,
+            true,
+            "TitleBackgroundCharacterVisibility",
+            "title-background-integrated",
+            true,
+            true,
+            true,
+            true,
+            true)));
+
+    return result.Level == TitleBackgroundQuickCheckLevel.OK;
+});
+
+Test("title background bridge case 4 missing warns with bridge not invoked", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        legacySceneCompositionEnabled: false,
+        overrideAppliedCount: 1,
+        backgroundApplied: true,
+        backgroundObserved: true,
+        cameraFramingApplied: true,
+        sceneOverrideApplyObserved: true,
+        characterCompositionBridge: new TitleBackgroundCharacterCompositionBridgeSnapshot(
+            true,
+            true,
+            false,
+            "not-run",
+            "none",
+            false,
+            false,
+            true,
+            true,
+            false)));
+
+    return result.Level is TitleBackgroundQuickCheckLevel.WARN or TitleBackgroundQuickCheckLevel.NG
+        && result.Reason.Contains("background works with warnings", StringComparison.Ordinal)
+        && result.Warnings.Any(warning => warning.Contains("bridge not invoked", StringComparison.Ordinal));
+});
+
+Test("title background bridge case 5 camera only is not enough", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        overrideAppliedCount: 1,
+        backgroundApplied: true,
+        backgroundObserved: true,
+        cameraFramingApplied: true,
+        sceneOverrideApplyObserved: true,
+        characterCompositionBridge: new TitleBackgroundCharacterCompositionBridgeSnapshot(
+            true,
+            true,
+            true,
+            "camera-only",
+            "title-background-integrated",
+            false,
+            false,
+            true,
+            true,
+            false)));
+
+    return result.Level is TitleBackgroundQuickCheckLevel.WARN or TitleBackgroundQuickCheckLevel.NG
+        && result.Reason.Contains("camera only", StringComparison.Ordinal);
+});
+
+Test("title background bridge detail lines include bridge status", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterCompositionBridge: new TitleBackgroundCharacterCompositionBridgeSnapshot(
+            true,
+            true,
+            true,
+            "TitleBackgroundCharacterVisibility",
+            "title-background-integrated",
+            true,
+            true,
+            true,
+            true,
+            true)));
+
+    return result.DetailLines.Any(l => l == "quickCheck.characterCompositionBridge.enabled=True")
+        && result.DetailLines.Any(l => l == "quickCheck.characterCompositionBridge.invoked=True")
+        && result.DetailLines.Any(l => l == "quickCheck.characterCompositionBridge.source=title-background-integrated")
+        && result.DetailLines.Any(l => l == "quickCheck.characterCompositionBridge.appliedStage=True")
+        && result.DetailLines.Any(l => l == "quickCheck.characterCompositionBridge.appliedCharacter=True")
+        && result.DetailLines.Any(l => l == "quickCheck.characterCompositionBridge.appliedCamera=True")
+        && result.DetailLines.Any(l => l == "quickCheck.characterVisualKnownByBridge=True");
+});
+
+Test("title background bridge warns when legacy shooting composition is still required", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        legacySceneCompositionEnabled: true,
+        characterCompositionBridge: new TitleBackgroundCharacterCompositionBridgeSnapshot(
+            true,
+            true,
+            true,
+            "TitleBackgroundCharacterVisibility",
+            "legacy-shooting-composition",
+            true,
+            true,
+            true,
+            true,
+            true)));
+
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.Warnings.Any(warning => warning.Contains("legacy shooting composition dependency still required", StringComparison.Ordinal));
+});
+
 Test("chara select scene phase3a does not introduce forbidden write paths", () =>
 {
     var root = FindRepositoryRoot();
@@ -4278,7 +4425,8 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
     bool integratedCompositionRouteInvoked = false,
     string integratedCompositionRouteReason = "",
     bool cameraFramingApplied = false,
-    bool sceneOverrideApplyObserved = false)
+    bool sceneOverrideApplyObserved = false,
+    TitleBackgroundCharacterCompositionBridgeSnapshot characterCompositionBridge = default)
 {
     return new TitleBackgroundQuickCheckInput(
         RunScoped: runScoped,
@@ -4335,7 +4483,8 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
         IntegratedCompositionRouteInvoked: integratedCompositionRouteInvoked,
         IntegratedCompositionRouteReason: integratedCompositionRouteReason,
         CameraFramingApplied: cameraFramingApplied,
-        SceneOverrideApplyObserved: sceneOverrideApplyObserved);
+        SceneOverrideApplyObserved: sceneOverrideApplyObserved,
+        CharacterCompositionBridge: characterCompositionBridge);
 }
 
 // ── New fix cases ──────────────────────────────────────────────────────────

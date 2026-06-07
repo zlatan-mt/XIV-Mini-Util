@@ -69,6 +69,7 @@ public sealed unsafe class CharaSelectService : IDisposable
     private IReadOnlyList<string> _lastVoiceDiagnosticLines = [];
     private CharaSelectSceneLastObservation _lastSceneObservation = CharaSelectSceneLastObservation.Empty;
     private CharaSelectStageProbeSnapshot _lastStageProbe = CharaSelectStageProbeSnapshot.Empty;
+    private TitleBackgroundCharacterCompositionBridgeSnapshot _lastTitleBackgroundBridgeSnapshot = TitleBackgroundCharacterCompositionBridgeSnapshot.Empty;
 
     public CharaSelectService(
         IGameInteropProvider gameInteropProvider,
@@ -114,6 +115,34 @@ public sealed unsafe class CharaSelectService : IDisposable
     public IReadOnlyList<CharaSelectSceneProfile> SceneProfiles => CharaSelectSceneProfileRegistry.All;
 
     public CharaSelectSceneProfile CurrentSceneProfile => CharaSelectSceneCompositionPlanner.ResolveProfile(_configuration);
+
+    internal TitleBackgroundCharacterCompositionBridgeSnapshot GetTitleBackgroundCharacterCompositionBridgeSnapshot()
+    {
+        var enabled = CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeEnabled(_configuration);
+        var required = CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeRequired(_configuration);
+        if (!enabled)
+        {
+            return TitleBackgroundCharacterCompositionBridgeSnapshot.Empty with
+            {
+                Reason = _configuration.CharaSelectSceneCompositionEnabled
+                    ? "legacy shooting composition enabled"
+                    : "disabled",
+            };
+        }
+
+        return _lastTitleBackgroundBridgeSnapshot with
+        {
+            Enabled = true,
+            Required = required,
+            Reason = string.IsNullOrWhiteSpace(_lastTitleBackgroundBridgeSnapshot.Reason)
+                ? "not-run"
+                : _lastTitleBackgroundBridgeSnapshot.Reason,
+            Source = string.IsNullOrWhiteSpace(_lastTitleBackgroundBridgeSnapshot.Source)
+                ? "none"
+                : _lastTitleBackgroundBridgeSnapshot.Source,
+            CharacterVisualExpected = required,
+        };
+    }
 
     public string GetCurrentSceneProfileLabel()
     {
@@ -215,6 +244,24 @@ public sealed unsafe class CharaSelectService : IDisposable
         CharaSelectSceneCompositionPlanner.SetTitleBackgroundRouteEnabled(_configuration, true);
         _configuration.Save();
         ApplySceneCompositionRuntimeState();
+    }
+
+    internal void ApplyTitleBackgroundCharacterCompositionBridgeRuntimeState()
+    {
+        if (!CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeEnabled(_configuration))
+        {
+            _lastTitleBackgroundBridgeSnapshot = GetTitleBackgroundCharacterCompositionBridgeSnapshot();
+            return;
+        }
+
+        ApplyLoginWaitHookState();
+        ApplyTitleBackgroundBridgePrefetch();
+        MarkTitleBackgroundBridge(
+            invoked: true,
+            reason: "runtime-state-requested",
+            appliedStage: false,
+            appliedCharacter: _currentEntry != null && _currentEntry.Character != null);
+        RefreshCharaSelectDisplay();
     }
 
     public void SetSceneCharacterVisibleResult(CharaSelectSceneBinaryResult result)
@@ -782,11 +829,12 @@ public sealed unsafe class CharaSelectService : IDisposable
         contentId = 0;
         originalClientSelectData = default;
 
+        var hasLegacyRoute = CharaSelectSceneCompositionPlanner.UsesClientSelectDataTerritoryPatch(_configuration);
+        var hasTitleBackgroundBridge = CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeEnabled(_configuration);
         if (agent == null
             || _clientState.IsLoggedIn
-            || !CharaSelectSceneCompositionPlanner.UsesClientSelectDataTerritoryPatch(_configuration)
-            || !_configuration.CharaSelectOverrideTerritoryEnabled
-            || _configuration.CharaSelectOverrideTerritoryTypeId == 0)
+            || (!hasLegacyRoute && !hasTitleBackgroundBridge)
+            || !TryResolveBridgeTerritoryTypeId(hasTitleBackgroundBridge, out var territoryTypeId))
         {
             return false;
         }
@@ -812,7 +860,6 @@ public sealed unsafe class CharaSelectService : IDisposable
             return false;
         }
 
-        var territoryTypeId = NormalizeHousingTerritory(_configuration.CharaSelectOverrideTerritoryTypeId);
         if (territoryTypeId == 0)
         {
             return false;
@@ -834,6 +881,11 @@ public sealed unsafe class CharaSelectService : IDisposable
             patchedTerritoryType: territoryTypeId,
             patchedZoneId: patchedZoneId,
             patchAttempted: true);
+        MarkTitleBackgroundBridge(
+            invoked: hasTitleBackgroundBridge,
+            reason: "client-select-data-probe",
+            appliedStage: false,
+            appliedCharacter: CharaSelectCharacterList.GetCurrentCharacter() != null);
         if (entry->ClientSelectData.TerritoryType == territoryTypeId
             && (patchedZoneId == 0 || entry->ClientSelectData.ZoneId == patchedZoneId))
         {
@@ -850,6 +902,11 @@ public sealed unsafe class CharaSelectService : IDisposable
                 patchedZoneId: patchedZoneId,
                 patchAttempted: true,
                 patchApplied: false);
+            MarkTitleBackgroundBridge(
+                invoked: hasTitleBackgroundBridge,
+                reason: "client-select-data-not-needed",
+                appliedStage: true,
+                appliedCharacter: CharaSelectCharacterList.GetCurrentCharacter() != null);
             return false;
         }
 
@@ -874,7 +931,44 @@ public sealed unsafe class CharaSelectService : IDisposable
             patchedZoneId: entry->ClientSelectData.ZoneId,
             patchAttempted: true,
             patchApplied: true);
+        MarkTitleBackgroundBridge(
+            invoked: hasTitleBackgroundBridge,
+            reason: CharaSelectSceneCompositionPlanner.TitleBackgroundCharacterVisibilityReason,
+            appliedStage: true,
+            appliedCharacter: CharaSelectCharacterList.GetCurrentCharacter() != null);
         return true;
+    }
+
+    private bool TryResolveBridgeTerritoryTypeId(bool titleBackgroundBridge, out ushort territoryTypeId)
+    {
+        territoryTypeId = 0;
+        if (!titleBackgroundBridge)
+        {
+            if (!_configuration.CharaSelectOverrideTerritoryEnabled
+                || _configuration.CharaSelectOverrideTerritoryTypeId == 0)
+            {
+                return false;
+            }
+
+            territoryTypeId = NormalizeHousingTerritory(_configuration.CharaSelectOverrideTerritoryTypeId);
+            return territoryTypeId != 0;
+        }
+
+        var raw = _configuration.TitleBackgroundLayoutTerritoryTypeId != 0
+            ? _configuration.TitleBackgroundLayoutTerritoryTypeId
+            : _configuration.TitleBackgroundTerritoryTypeId;
+        if (raw == 0 || raw > ushort.MaxValue)
+        {
+            MarkTitleBackgroundBridge(
+                invoked: true,
+                reason: "title-background-territory-missing",
+                appliedStage: false,
+                appliedCharacter: _currentEntry != null && _currentEntry.Character != null);
+            return false;
+        }
+
+        territoryTypeId = NormalizeHousingTerritory((ushort)raw);
+        return territoryTypeId != 0;
     }
 
     private void RestorePatchedOverrideDisplayData(
@@ -1070,6 +1164,11 @@ public sealed unsafe class CharaSelectService : IDisposable
             "read-only-observation",
             originalTerritoryType: entry->ClientSelectData.TerritoryType,
             originalZoneId: entry->ClientSelectData.ZoneId);
+        MarkTitleBackgroundBridge(
+            invoked: CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeEnabled(_configuration),
+            reason: "character-observed",
+            appliedStage: _lastTitleBackgroundBridgeSnapshot.AppliedStage,
+            appliedCharacter: true);
         RecordSceneObservation(true, entry->ContentId, normalizedIndex, false);
 
         var isFirstEntry = _currentEntry == null;
@@ -1773,6 +1872,12 @@ public sealed unsafe class CharaSelectService : IDisposable
 
     private void ApplyOverrideTerritoryPrefetch()
     {
+        if (CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeEnabled(_configuration))
+        {
+            ApplyTitleBackgroundBridgePrefetch();
+            return;
+        }
+
         if (_configuration.CharaSelectSceneCompositionEnabled
             && !CharaSelectSceneCompositionPlanner.UsesClientSelectDataTerritoryPatch(_configuration))
         {
@@ -1792,6 +1897,43 @@ public sealed unsafe class CharaSelectService : IDisposable
         TryLoadPrefetchLayout(
             NormalizeHousingTerritory(_configuration.CharaSelectOverrideTerritoryTypeId),
             CharaSelectPrefetchOwner.OverrideDisplay);
+    }
+
+    private void ApplyTitleBackgroundBridgePrefetch()
+    {
+        if (!TryResolveBridgeTerritoryTypeId(titleBackgroundBridge: true, out var territoryTypeId))
+        {
+            return;
+        }
+
+        TryLoadPrefetchLayout(territoryTypeId, CharaSelectPrefetchOwner.OverrideDisplay);
+    }
+
+    private void MarkTitleBackgroundBridge(
+        bool invoked,
+        string reason,
+        bool appliedStage,
+        bool appliedCharacter)
+    {
+        if (!CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeEnabled(_configuration))
+        {
+            return;
+        }
+
+        var required = CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeRequired(_configuration);
+        var stage = appliedStage || _lastTitleBackgroundBridgeSnapshot.AppliedStage;
+        var character = appliedCharacter || _lastTitleBackgroundBridgeSnapshot.AppliedCharacter;
+        _lastTitleBackgroundBridgeSnapshot = new TitleBackgroundCharacterCompositionBridgeSnapshot(
+            true,
+            required,
+            invoked || _lastTitleBackgroundBridgeSnapshot.Invoked,
+            string.IsNullOrWhiteSpace(reason) ? "none" : reason,
+            CharaSelectSceneCompositionPlanner.TitleBackgroundIntegratedCaller,
+            stage,
+            character,
+            _lastTitleBackgroundBridgeSnapshot.AppliedCamera,
+            required,
+            stage && character);
     }
 
     private void TryLoadPrefetchLayout(ushort territoryTypeId, CharaSelectPrefetchOwner owner)

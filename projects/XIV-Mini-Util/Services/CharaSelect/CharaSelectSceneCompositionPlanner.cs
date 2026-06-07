@@ -1,6 +1,8 @@
 // Path: projects/XIV-Mini-Util/Services/CharaSelect/CharaSelectSceneCompositionPlanner.cs
 // Description: CharaSelect scene profile を既存設定へ安全に反映する純粋ロジック
 // Reason: runtime hook に触れずに profile 適用・診断・安全境界をテストするため
+using XivMiniUtil.Services.TitleBackground;
+
 namespace XivMiniUtil.Services.CharaSelect;
 
 internal readonly record struct CharaSelectVisualLocationDiagnostic(
@@ -105,6 +107,31 @@ internal readonly record struct CharaSelectStageProbeSnapshot(
         "select-stage-strategy");
 }
 
+internal readonly record struct TitleBackgroundCharacterCompositionBridgeSnapshot(
+    bool Enabled,
+    bool Required,
+    bool Invoked,
+    string Reason,
+    string Source,
+    bool AppliedStage,
+    bool AppliedCharacter,
+    bool AppliedCamera,
+    bool CharacterVisualExpected,
+    bool CharacterVisualKnownByBridge)
+{
+    public static TitleBackgroundCharacterCompositionBridgeSnapshot Empty { get; } = new(
+        false,
+        false,
+        false,
+        "not-run",
+        "none",
+        false,
+        false,
+        false,
+        false,
+        false);
+}
+
 internal readonly record struct CharaSelectSceneCompositionDiagnostic(
     bool Enabled,
     bool TitleBackgroundConflict,
@@ -144,6 +171,9 @@ internal static class CharaSelectSceneCompositionPlanner
 {
     public const string ForegroundPreservingRoute = "foreground-preserving";
     public const string ClientSelectDataTerritoryPatchRoute = "ClientSelectDataTerritoryPatch";
+    public const string LegacyShootingCompositionCaller = "legacy-shooting-composition";
+    public const string TitleBackgroundIntegratedCaller = "title-background-integrated";
+    public const string TitleBackgroundCharacterVisibilityReason = "TitleBackgroundCharacterVisibility";
 
     public static CharaSelectSceneProfile ResolveProfile(Configuration configuration)
     {
@@ -160,6 +190,63 @@ internal static class CharaSelectSceneCompositionPlanner
         return configuration.CharaSelectSceneCompositionEnabled
             && configuration.CharaSelectSceneStageStrategy == CharaSelectStageStrategy.ClientSelectDataTerritoryPatch
             && configuration.CharaSelectSceneUseProfileTerritory;
+    }
+
+    public static bool IsTitleBackgroundCharacterCompositionBridgeEnabled(Configuration configuration)
+    {
+        return configuration.TitleBackgroundOverrideEnabled
+            && configuration.TitleBackgroundIntegratedCompositionEnabled
+            && !configuration.CharaSelectSceneCompositionEnabled
+            && configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly;
+    }
+
+    public static bool IsTitleBackgroundCharacterCompositionBridgeRequired(Configuration configuration)
+    {
+        return IsTitleBackgroundCharacterCompositionBridgeEnabled(configuration)
+            && string.Equals(
+                string.IsNullOrWhiteSpace(configuration.TitleBackgroundCharacterSelectOverrideCandidateId)
+                    ? "custom:n4f4"
+                    : configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
+                "custom:n4f4",
+                StringComparison.Ordinal);
+    }
+
+    public static string ResolveCompositionCaller(Configuration configuration)
+    {
+        if (configuration.CharaSelectSceneCompositionEnabled)
+        {
+            return LegacyShootingCompositionCaller;
+        }
+
+        return IsTitleBackgroundCharacterCompositionBridgeEnabled(configuration)
+            ? TitleBackgroundIntegratedCaller
+            : "none";
+    }
+
+    public static string BuildTitleBackgroundCharacterCompositionBridgeMissingReason(
+        TitleBackgroundCharacterCompositionBridgeSnapshot snapshot)
+    {
+        if (!snapshot.Required)
+        {
+            return "none";
+        }
+
+        if (!snapshot.Invoked)
+        {
+            return "bridge not invoked";
+        }
+
+        if (snapshot.AppliedCamera && !snapshot.AppliedCharacter && !snapshot.AppliedStage)
+        {
+            return "bridge applied camera only but not character/stage";
+        }
+
+        if (!snapshot.AppliedCharacter || !snapshot.AppliedStage)
+        {
+            return "bridge invoked but character composition not applied";
+        }
+
+        return "none";
     }
 
     public static void ApplyProfileToConfiguration(Configuration configuration, CharaSelectSceneProfile profile)

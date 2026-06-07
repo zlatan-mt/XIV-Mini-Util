@@ -11,6 +11,7 @@ using System.Runtime.InteropServices;
 using System.Numerics;
 using System.Text;
 using ClientVector3 = FFXIVClientStructs.FFXIV.Common.Math.Vector3;
+using XivMiniUtil.Services.CharaSelect;
 
 namespace XivMiniUtil.Services.TitleBackground;
 
@@ -25,6 +26,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
     private readonly IPluginLog _log;
     private readonly string _configDirectory;
     private readonly Configuration _configuration;
+    private readonly CharaSelectService? _charaSelectService;
     private readonly TitleBackgroundAddressResolver _addressResolver = new();
     private readonly TitleBackgroundCameraCaptureService _cameraCaptureService;
     private readonly TitleBackgroundCharaSelectCameraAdapter _charaSelectCameraAdapter = new();
@@ -186,7 +188,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         IDataManager dataManager,
         IPluginLog log,
         string configDirectory,
-        Configuration configuration)
+        Configuration configuration,
+        CharaSelectService? charaSelectService = null)
     {
         _gameInteropProvider = gameInteropProvider;
         _sigScanner = sigScanner;
@@ -197,6 +200,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         _log = log;
         _configDirectory = configDirectory;
         _configuration = configuration;
+        _charaSelectService = charaSelectService;
         _cameraCaptureService = new TitleBackgroundCameraCaptureService(clientState, objectTable, dataManager, log);
         _framework.Update += OnFrameworkUpdate;
 
@@ -233,6 +237,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             // and applies the n4f4 override. This connects the flag to real scene processing.
             // RequestCharaSelectReload handles precondition checks (Ready state, CharaSelect map).
             TryInvokeIntegratedCompositionRoute();
+            _charaSelectService?.ApplyTitleBackgroundCharacterCompositionBridgeRuntimeState();
         }
     }
 
@@ -539,6 +544,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         {
             // Invoke before saving the baseline so CreateScene fires before the user logs in.
             TryInvokeIntegratedCompositionRoute();
+            _charaSelectService?.ApplyTitleBackgroundCharacterCompositionBridgeRuntimeState();
         }
 
         _quickCheckState = new TitleBackgroundQuickCheckState(
@@ -681,6 +687,13 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var shouldArmAdapter = shouldArmAdapterReason == "none";
         var sceneOverrideApplyObserved = overrideAppliedCount > 0;
         var cameraFramingApplied = phase2GApplyCount > 0;
+        var bridgeSnapshotBase = _charaSelectService?.GetTitleBackgroundCharacterCompositionBridgeSnapshot()
+            ?? TitleBackgroundCharacterCompositionBridgeSnapshot.Empty;
+        var bridgeSnapshot = bridgeSnapshotBase with
+        {
+            AppliedCamera = cameraFramingApplied,
+            CharacterVisualKnownByBridge = bridgeSnapshotBase.CharacterVisualKnownByBridge && cameraFramingApplied,
+        };
 
         return new TitleBackgroundQuickCheckInput(
             runScoped,
@@ -738,7 +751,8 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             _integratedCompositionRouteLastReason,
             cameraFramingApplied,
             sceneOverrideApplyObserved,
-            _integratedCompositionAutoEnabled);
+            _integratedCompositionAutoEnabled,
+            bridgeSnapshot);
     }
 
     private void SaveQuickCheckResult(TitleBackgroundQuickCheckResult result)
