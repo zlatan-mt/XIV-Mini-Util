@@ -260,6 +260,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         return TitleBackgroundQuickCheckUiPresenter.BuildSimpleSummary(_configuration);
     }
 
+    internal TitleBackgroundSimpleUiSummary RunSimpleCheck()
+    {
+        if (!_quickCheckState.StartedAt.HasValue
+            || _quickCheckState.RunState == TitleBackgroundQuickCheckRunState.Idle)
+        {
+            StartQuickCheck();
+        }
+
+        RunQuickCheck();
+        return TitleBackgroundQuickCheckUiPresenter.BuildSimpleSummary(_configuration);
+    }
+
     public void SetCameraOverrideEnabled(bool enabled)
     {
         _configuration.TitleBackgroundCameraOverrideEnabled = enabled;

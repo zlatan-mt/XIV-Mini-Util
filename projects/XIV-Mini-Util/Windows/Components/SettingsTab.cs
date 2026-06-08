@@ -859,7 +859,7 @@ public sealed class SettingsTab : ITabComponent
         ImGui.SameLine();
         if (ImGui.Button("Check##TitleBackgroundSimpleCheck"))
         {
-            _titleScreenBackgroundService.RunQuickCheck();
+            _titleScreenBackgroundService.RunSimpleCheck();
         }
     }
 

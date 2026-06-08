@@ -1173,6 +1173,20 @@ Test("title background settings simple panel hides advanced diagnostics", () =>
         && !simplePanel.Contains("Reset Check", StringComparison.Ordinal);
 });
 
+Test("title background settings simple check uses one-button quickcheck entrypoint", () =>
+{
+    var root = FindRepositoryRoot();
+    var settingsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
+    var simpleCheck = ExtractMethodBody(serviceText, "internal TitleBackgroundSimpleUiSummary RunSimpleCheck()");
+
+    return simplePanel.Contains("RunSimpleCheck()", StringComparison.Ordinal)
+        && !simplePanel.Contains("RunQuickCheck()", StringComparison.Ordinal)
+        && simpleCheck.Contains("StartQuickCheck()", StringComparison.Ordinal)
+        && simpleCheck.Contains("RunQuickCheck()", StringComparison.Ordinal);
+});
+
 Test("title background simple auto setup configures n4f4 recommended route", () =>
 {
     var configuration = new Configuration

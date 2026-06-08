@@ -906,7 +906,7 @@ internal static class TitleBackgroundQuickCheckUiPresenter
                 TitleBackgroundSimpleUiStatus.Working,
                 level,
                 "Status: Working",
-                "OK: n4f4 background and character visibility are confirmed.",
+                BuildSimpleCheckResultLine(level, configuration.TitleBackgroundLastQuickCheckReason),
                 "No action needed."),
             TitleBackgroundQuickCheckLevel.WARN => new TitleBackgroundSimpleUiSummary(
                 TitleBackgroundSimpleUiStatus.Failed,
