@@ -1,7 +1,38 @@
 // Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundCharacterSelectOverrideCandidateRegistry.cs
 // Description: Character Select 背景のみ override 候補のレジストリ
 // Reason: custom override target を preset と混同せず、UI/診断/テストで同じ候補情報を使うため
+using System.Numerics;
+
 namespace XivMiniUtil.Services.TitleBackground;
+
+internal readonly record struct TitleBackgroundCharacterSelectCameraProfile(
+    string ProfileId,
+    string ProfileSource,
+    float YawOffset,
+    float PitchOffset,
+    float DistanceMultiplier,
+    float DistanceOffset,
+    Vector3 LookAtOffset,
+    Vector3 PositionOffset,
+    float CurveLowOffset,
+    float CurveMidOffset,
+    float CurveHighOffset)
+{
+    public bool HasProfile => !string.IsNullOrWhiteSpace(ProfileId);
+
+    public static TitleBackgroundCharacterSelectCameraProfile None { get; } = new(
+        string.Empty,
+        string.Empty,
+        0f,
+        0f,
+        1f,
+        0f,
+        Vector3.Zero,
+        Vector3.Zero,
+        0f,
+        0f,
+        0f);
+}
 
 internal readonly record struct TitleBackgroundCharacterSelectOverrideCandidate(
     string Id,
@@ -50,8 +81,8 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
         true,
         "registry",
         "full scene override works as background-only; character may appear visually but camera framing may be top-down",
-        "initial camera is too high / top-down; character may appear very small near screen bottom",
-        "use Camera framing = CandidateRecommended or LowerCamera",
+        "current Y-only framing does not frame character reliably; initial camera is too high / top-down",
+        "use n4f4 visible camera profile / CandidateRecommended",
         TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended);
 
     private static readonly TitleBackgroundCharacterSelectOverrideCandidate OldSharlayanOutdoorTest = new(
@@ -95,6 +126,35 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
     public static TitleBackgroundCharacterSelectOverrideCandidate GetDefault()
     {
         return CustomN4F4;
+    }
+
+    public static bool TryGetRecommendedCameraProfile(
+        string? candidateId,
+        TitleBackgroundCharaSelectCameraFramingMode framingMode,
+        out TitleBackgroundCharacterSelectCameraProfile profile)
+    {
+        var normalizedId = NormalizeId(candidateId);
+        if (string.Equals(normalizedId, DefaultCandidateId, StringComparison.Ordinal)
+            && framingMode is TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
+                or TitleBackgroundCharaSelectCameraFramingMode.CustomExperimental)
+        {
+            profile = new TitleBackgroundCharacterSelectCameraProfile(
+                "n4f4-visible",
+                "candidate",
+                0f,
+                -0.18f,
+                0.72f,
+                0f,
+                new Vector3(0f, -0.7f, 0f),
+                Vector3.Zero,
+                -0.7f,
+                -0.7f,
+                -0.7f);
+            return true;
+        }
+
+        profile = TitleBackgroundCharacterSelectCameraProfile.None;
+        return false;
     }
 
     public static TitleBackgroundCharacterSelectOverrideCandidate ResolveFromConfig(

@@ -296,6 +296,21 @@ internal static class TitleBackgroundCharaSelectCameraLogic
             TitleBackgroundPreset.SanitizeCoordinate(curve.High + offset));
     }
 
+    public static TitleBackgroundCharaSelectCameraCurve ApplyCameraProfileCurveOffset(
+        TitleBackgroundCharaSelectCameraCurve curve,
+        TitleBackgroundCharacterSelectCameraProfile profile)
+    {
+        if (!profile.HasProfile)
+        {
+            return curve;
+        }
+
+        return new TitleBackgroundCharaSelectCameraCurve(
+            TitleBackgroundPreset.SanitizeCoordinate(curve.Low + profile.CurveLowOffset),
+            TitleBackgroundPreset.SanitizeCoordinate(curve.Mid + profile.CurveMidOffset),
+            TitleBackgroundPreset.SanitizeCoordinate(curve.High + profile.CurveHighOffset));
+    }
+
     public static bool TryBuildPoseFromCameraFocus(
         Vector3 camera,
         Vector3 focus,

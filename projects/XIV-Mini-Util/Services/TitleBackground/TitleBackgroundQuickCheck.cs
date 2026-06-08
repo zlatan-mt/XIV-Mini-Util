@@ -116,7 +116,19 @@ internal readonly record struct TitleBackgroundQuickCheckInput(
     bool CameraFramingApplied = false,
     bool SceneOverrideApplyObserved = false,
     bool IntegratedCompositionAutoEnabled = false,
-    TitleBackgroundCharacterCompositionBridgeSnapshot CharacterCompositionBridge = default);
+    TitleBackgroundCharacterCompositionBridgeSnapshot CharacterCompositionBridge = default,
+    string CameraProfileId = "",
+    string CameraProfileSource = "",
+    string CameraYaw = "",
+    string CameraPitch = "",
+    string CameraDistance = "",
+    string CameraLookAtOffset = "",
+    string CameraPositionOffset = "",
+    string CameraFramesCharacter = "",
+    string CameraFinalYawPitchDistanceMatchesProfile = "",
+    bool CameraVisibleProfileApplied = false,
+    bool BridgeCharacterCompositionApplied = false,
+    bool BridgeCameraProfileApplied = false);
 
 internal readonly record struct TitleBackgroundQuickCheckResult(
     TitleBackgroundQuickCheckLevel Level,
@@ -195,6 +207,38 @@ internal static class TitleBackgroundQuickCheckEvaluator
             warnings.Add("character not visible or offscreen in frame; camera framing may be misaligned");
         }
 
+        if (input.CharacterCompositionBridge.AppliedCharacter
+            && input.CharacterVisualStatus == TitleBackgroundCharacterVisualStatus.Unknown)
+        {
+            warnings.Add("background works but character visibility is not visually confirmed; camera framing may still be wrong");
+        }
+
+        if (input.CharacterCompositionBridge.AppliedCharacter
+            && IsFalseOrNotObserved(input.CameraFramesCharacter))
+        {
+            warnings.Add("camera does not frame the character");
+        }
+
+        if (IsCustomN4F4(input.CandidateId)
+            && input.CameraFramingMode is TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
+                or TitleBackgroundCharaSelectCameraFramingMode.CustomExperimental
+            && !input.CameraVisibleProfileApplied)
+        {
+            warnings.Add("n4f4 visible camera profile is not applied; Y-only framing is not enough");
+        }
+
+        if (input.CameraFramingApplied
+            && IsFalseOrNotObserved(input.CameraFinalYawPitchDistanceMatchesProfile))
+        {
+            warnings.Add("camera does not frame the character; final yaw/pitch/distance does not match profile");
+        }
+
+        if (input.CharacterCompositionBridge.CharacterVisualKnownByBridge
+            && input.CharacterVisualStatus != TitleBackgroundCharacterVisualStatus.Visible)
+        {
+            warnings.Add("characterVisualKnownByBridge is true but visualStatus is not Visible");
+        }
+
         var bridgeIssue = CharaSelectSceneCompositionPlanner.BuildTitleBackgroundCharacterCompositionBridgeMissingReason(
             input.CharacterCompositionBridge);
         if (input.LegacySceneCompositionEnabledAtCheck && input.TitleBackgroundOverrideEnabledAtCheck)
@@ -222,6 +266,9 @@ internal static class TitleBackgroundQuickCheckEvaluator
         var reason = level switch
         {
             TitleBackgroundQuickCheckLevel.NG => ngReason,
+            TitleBackgroundQuickCheckLevel.WARN when warnings.Any(warning => warning.Contains("camera does not frame the character", StringComparison.Ordinal)) => "camera does not frame the character",
+            TitleBackgroundQuickCheckLevel.WARN when warnings.Any(warning => warning.Contains("visual confirmation", StringComparison.Ordinal)
+                || warning.Contains("visibility is not visually confirmed", StringComparison.Ordinal)) => "background works but character visibility is not visually confirmed",
             TitleBackgroundQuickCheckLevel.WARN when input.RunScoped && input.StartedLoggedIn => "QuickCheck started while already logged in. Start from title/character select for a clean run.",
             TitleBackgroundQuickCheckLevel.WARN when input.RunScoped && !input.CharaSelectObserved => "Character Select was not observed during this QuickCheck run.",
             TitleBackgroundQuickCheckLevel.WARN when !loginChecked => "login transition has not been checked yet. Log in, then run QuickCheck again.",
@@ -399,6 +446,14 @@ internal static class TitleBackgroundQuickCheckEvaluator
             return "try another camera framing or reset visual status after screenshot";
         }
 
+        if (warnings.Any(warning => warning.Contains("n4f4 visible camera profile", StringComparison.Ordinal)
+                || warning.Contains("camera does not frame the character", StringComparison.Ordinal)
+                || warning.Contains("visual confirmation", StringComparison.Ordinal)
+                || warning.Contains("visibility is not visually confirmed", StringComparison.Ordinal)))
+        {
+            return "try n4f4 visible camera profile or compare legacy shooting composition camera";
+        }
+
         if (warnings.Any(warning => warning.Contains("bridge not invoked", StringComparison.Ordinal)))
         {
             return "enter Character Select with Character Select Background enabled, then run Start QuickCheck again";
@@ -465,9 +520,20 @@ internal static class TitleBackgroundQuickCheckEvaluator
             $"character.visualStatus={input.CharacterVisualStatus}",
             $"camera.framingMode={input.CameraFramingMode}",
             $"camera.framingOffset={TitleBackgroundCharaSelectCameraLogic.GetCameraFramingCurveOffset(input.CameraFramingMode):F3}",
+            $"camera.profileId={NormalizeNone(input.CameraProfileId)}",
             $"camera.profileSource={BuildCameraProfileSource(input)}",
+            $"camera.yaw={NormalizeNone(input.CameraYaw)}",
+            $"camera.pitch={NormalizeNone(input.CameraPitch)}",
+            $"camera.distance={NormalizeNone(input.CameraDistance)}",
+            $"camera.lookAtOffset={NormalizeNone(input.CameraLookAtOffset)}",
+            $"camera.positionOffset={NormalizeNone(input.CameraPositionOffset)}",
+            $"camera.framesCharacter={NormalizeTriState(input.CameraFramesCharacter)}",
+            $"camera.finalYawPitchDistanceMatchesProfile={NormalizeTriState(input.CameraFinalYawPitchDistanceMatchesProfile)}",
+            $"camera.visibleProfileApplied={input.CameraVisibleProfileApplied}",
             $"camera.recommendedFraming={input.CandidateRecommendedFraming}",
             $"camera.recommendedAction={NormalizeNone(input.CandidateRecommendedAction)}",
+            $"bridge.characterCompositionApplied={input.BridgeCharacterCompositionApplied}",
+            $"bridge.cameraProfileApplied={input.BridgeCameraProfileApplied}",
             $"knownLimitation.characterHidden={!input.CharacterExpectedVisible || input.CharacterKnownLimitation}",
             $"knownLimitation.foregroundPreserveUnavailable={input.ForegroundPreserveUnavailable}",
             $"knownLimitation.brightnessDark={input.ExpectedBrightness is TitleBackgroundCharacterSelectExpectedBrightness.Dark or TitleBackgroundCharacterSelectExpectedBrightness.TooDark}",
@@ -618,6 +684,11 @@ internal static class TitleBackgroundQuickCheckEvaluator
 
     private static string BuildCameraProfileSource(TitleBackgroundQuickCheckInput input)
     {
+        if (!string.IsNullOrWhiteSpace(input.CameraProfileSource))
+        {
+            return input.CameraProfileSource.Trim();
+        }
+
         if (input.CameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.Default)
         {
             return "default";
@@ -631,6 +702,30 @@ internal static class TitleBackgroundQuickCheckEvaluator
         }
 
         return "user-selected";
+    }
+
+    private static bool IsCustomN4F4(string candidateId)
+    {
+        return string.Equals(candidateId, TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId, StringComparison.Ordinal);
+    }
+
+    private static bool IsFalseOrNotObserved(string? value)
+    {
+        var normalized = NormalizeNone(value);
+        return normalized.Equals("False", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("not-observed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeTriState(string? value)
+    {
+        var normalized = NormalizeNone(value);
+        return normalized.Equals("observed", StringComparison.OrdinalIgnoreCase)
+            ? "True"
+            : normalized.Equals("not-observed", StringComparison.OrdinalIgnoreCase)
+                ? "False"
+                : normalized.Equals("none", StringComparison.OrdinalIgnoreCase)
+                    ? "Unknown"
+                    : normalized;
     }
 
     private static string FormatTime(DateTimeOffset? value)

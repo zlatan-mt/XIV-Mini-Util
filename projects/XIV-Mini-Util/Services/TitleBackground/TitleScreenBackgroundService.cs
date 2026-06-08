@@ -696,6 +696,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             AppliedCamera = cameraFramingApplied,
             CharacterVisualKnownByBridge = bridgeSnapshotBase.CharacterVisualKnownByBridge && cameraFramingApplied,
         };
+        var cameraProfile = ResolveCurrentTitleBackgroundCameraProfile(candidate.Id);
+        var hasLatestTimelineSample = TryGetLatestPhase2CTimelineSnapshot(out var latestTimelineSample);
+        var finalYawPitchDistanceMatchesProfile = cameraProfile.HasProfile && hasLatestTimelineSample
+            ? BuildPhase2GFinalCameraStateMatchesPresetVerdict(latestTimelineSample)
+            : "unknown";
 
         return new TitleBackgroundQuickCheckInput(
             runScoped,
@@ -754,7 +759,100 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             cameraFramingApplied,
             sceneOverrideApplyObserved,
             _integratedCompositionAutoEnabled,
-            bridgeSnapshot);
+            bridgeSnapshot,
+            cameraProfile.ProfileId,
+            cameraProfile.ProfileSource,
+            FormatFloat(_charaSelectCameraAdapter.GetRestoredYaw() ?? _charaSelectCameraAdapter.RuntimeState.Yaw),
+            FormatFloat(_charaSelectCameraAdapter.RuntimeState.Pitch),
+            FormatFloat(_charaSelectCameraAdapter.RuntimeState.Distance),
+            FormatVector(cameraProfile.LookAtOffset),
+            FormatVector(cameraProfile.PositionOffset),
+            Phase2MStatusToQuickCheckTriState(phase2MSummary.CameraFramesActor),
+            VerdictToQuickCheckTriState(finalYawPitchDistanceMatchesProfile),
+            cameraProfile.HasProfile,
+            bridgeSnapshot.AppliedStage && bridgeSnapshot.AppliedCharacter,
+            cameraProfile.HasProfile && cameraFramingApplied);
+    }
+
+    private TitleBackgroundCharacterSelectCameraProfile ResolveCurrentTitleBackgroundCameraProfile(string? candidateId = null)
+    {
+        var resolvedCandidateId = string.IsNullOrWhiteSpace(candidateId)
+            ? ResolveCurrentOverrideCandidate().Id
+            : candidateId;
+        return TitleBackgroundCharacterSelectOverrideCandidateRegistry.TryGetRecommendedCameraProfile(
+                resolvedCandidateId,
+                _configuration.TitleBackgroundCharaSelectCameraFramingMode,
+                out var profile)
+            ? profile
+            : TitleBackgroundCharacterSelectCameraProfile.None;
+    }
+
+    public IReadOnlyList<string> GetTitleBackgroundCameraProfileDiagnosticLines()
+    {
+        var cameraProfile = ResolveCurrentTitleBackgroundCameraProfile();
+        var titleBackgroundProfileLabel = cameraProfile.HasProfile
+            ? $"{cameraProfile.ProfileId} / {cameraProfile.ProfileSource}"
+            : "none";
+        var poseAvailable = TryBuildPresetCameraRuntimePose(out var titlePose, out var poseError);
+        var hasCurrent = TryGetLatestPhase2CTimelineSnapshot(out var current);
+        var currentDirH = hasCurrent ? current.LobbyDirH ?? current.DirH : null;
+        var currentDirV = hasCurrent ? current.LobbyDirV ?? current.DirV : null;
+        var currentDistance = hasCurrent ? current.LobbyDistance ?? current.Distance : null;
+        var currentPosition = hasCurrent ? current.SceneCameraPosition : _lastPostFixOnSceneCameraPosition;
+        var currentLookAt = hasCurrent ? current.SceneCameraLookAtVector ?? current.LobbyLastLookAtVector : _lastPostFixOnLookAtVector;
+
+        return
+        [
+            "Legacy shooting composition camera profile: none observed in reusable profile resolver",
+            $"Title Background camera profile: {titleBackgroundProfileLabel}",
+            $"Title Background camera profile yaw={FormatFloat(poseAvailable ? titlePose.Yaw : null)}",
+            $"Title Background camera profile pitch={FormatFloat(poseAvailable ? titlePose.Pitch : null)}",
+            $"Title Background camera profile distance={FormatFloat(poseAvailable ? titlePose.Distance : null)}",
+            $"Title Background camera profile lookAtOffset={FormatVector(cameraProfile.LookAtOffset)}",
+            $"Title Background camera profile positionOffset={FormatVector(cameraProfile.PositionOffset)}",
+            $"Title Background camera profile error={FormatNone(poseAvailable ? string.Empty : poseError)}",
+            "Difference yaw delta=unknown",
+            "Difference pitch delta=unknown",
+            "Difference distance delta=unknown",
+            "Difference lookAt delta=unknown",
+            $"current camera capture currentDirH={FormatFloat(currentDirH)}",
+            $"current camera capture currentDirV={FormatFloat(currentDirV)}",
+            $"current camera capture currentDistance={FormatFloat(currentDistance)}",
+            $"current camera capture currentPosition={FormatVector(currentPosition)}",
+            $"current camera capture currentLookAt={FormatVector(currentLookAt)}",
+        ];
+    }
+
+    private bool TryGetLatestPhase2CTimelineSnapshot(out TitleBackgroundPhase2CTimelineSnapshot snapshot)
+    {
+        if (_phase2CTimelineSnapshots.Count == 0)
+        {
+            snapshot = default;
+            return false;
+        }
+
+        snapshot = _phase2CTimelineSnapshots.Values
+            .OrderByDescending(sample => sample.Frame)
+            .First();
+        return true;
+    }
+
+    private static string Phase2MStatusToQuickCheckTriState(string status)
+    {
+        return status.Equals("observed", StringComparison.OrdinalIgnoreCase)
+            ? "True"
+            : status.Equals("not-observed", StringComparison.OrdinalIgnoreCase)
+                ? "False"
+                : "Unknown";
+    }
+
+    private static string VerdictToQuickCheckTriState(string verdict)
+    {
+        return verdict.Equals("observed", StringComparison.OrdinalIgnoreCase)
+            ? "True"
+            : verdict.Equals("not-observed", StringComparison.OrdinalIgnoreCase)
+                ? "False"
+                : "Unknown";
     }
 
     private void SaveQuickCheckResult(TitleBackgroundQuickCheckResult result)
@@ -2706,9 +2804,12 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
 
         var baseCurve = _charaSelectCameraAdapter.RuntimeState.CurveAtRecord!.Value;
-        curve = TitleBackgroundCharaSelectCameraLogic.ApplyCameraFramingOffset(
-            baseCurve,
-            _configuration.TitleBackgroundCharaSelectCameraFramingMode);
+        var cameraProfile = ResolveCurrentTitleBackgroundCameraProfile();
+        curve = cameraProfile.HasProfile
+            ? TitleBackgroundCharaSelectCameraLogic.ApplyCameraProfileCurveOffset(baseCurve, cameraProfile)
+            : TitleBackgroundCharaSelectCameraLogic.ApplyCameraFramingOffset(
+                baseCurve,
+                _configuration.TitleBackgroundCharaSelectCameraFramingMode);
         skippedReason = string.Empty;
         return true;
     }
@@ -4653,10 +4754,6 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             return false;
         }
 
-        var expectedFocus = new Vector3(
-            _configuration.TitleBackgroundFocusX,
-            _configuration.TitleBackgroundFocusY,
-            _configuration.TitleBackgroundFocusZ);
         var curve = _charaSelectCameraAdapter.Curve;
         var restoredYaw = runtimeState.GetRestoredYaw(_charaSelectCameraAdapter.Input.CharacterRotation);
         return restoredYaw.HasValue
@@ -4665,7 +4762,7 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             && IsNear(runtimeState.Pitch.Value, expectedPose.Pitch)
             && runtimeState.Distance.HasValue
             && IsNear(runtimeState.Distance.Value, expectedPose.Distance)
-            && TitleBackgroundCameraMath.CalculateVectorDelta(runtimeState.LookAt, expectedFocus) is { } focusDelta
+            && TitleBackgroundCameraMath.CalculateVectorDelta(runtimeState.LookAt, expectedPose.LookAt) is { } focusDelta
             && Math.Abs(focusDelta.X) <= TitleBackgroundCameraProbeReport.StabilizationVectorTolerance
             && Math.Abs(focusDelta.Y) <= TitleBackgroundCameraProbeReport.StabilizationVectorTolerance
             && Math.Abs(focusDelta.Z) <= TitleBackgroundCameraProbeReport.StabilizationVectorTolerance
@@ -4696,6 +4793,18 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
                 out errorMessage))
         {
             return false;
+        }
+
+        var cameraProfile = ResolveCurrentTitleBackgroundCameraProfile();
+        if (cameraProfile.HasProfile)
+        {
+            yaw = TitleBackgroundCharaSelectCameraLogic.NormalizeRadians(yaw + cameraProfile.YawOffset);
+            pitch = Math.Clamp(pitch + cameraProfile.PitchOffset, -MathF.PI / 2f, MathF.PI / 2f);
+            distance = TitleBackgroundCharaSelectCameraLogic.SanitizeOptionalDistance(
+                    (distance * cameraProfile.DistanceMultiplier) + cameraProfile.DistanceOffset)
+                ?? distance;
+            focus = TitleBackgroundCharaSelectCameraLogic.SanitizeVector(focus + cameraProfile.LookAtOffset);
+            lookAtY = TitleBackgroundPreset.SanitizeCoordinate(focus.Y);
         }
 
         pose = new TitleBackgroundRuntimeCameraPose(

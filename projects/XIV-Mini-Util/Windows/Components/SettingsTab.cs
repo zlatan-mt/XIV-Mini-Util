@@ -935,6 +935,12 @@ public sealed class SettingsTab : ITabComponent
         ImGui.TextDisabled($"Bridge reason: {bridge.Reason}");
         ImGui.TextDisabled($"Applied stage/character/camera: {bridge.AppliedStage}/{bridge.AppliedCharacter}/{bridge.AppliedCamera}");
         ImGui.TextDisabled($"Legacy shooting composition: {_configuration.CharaSelectSceneCompositionEnabled}");
+        ImGui.Spacing();
+        ImGui.Text("Camera Profile Compare");
+        foreach (var line in _titleScreenBackgroundService.GetTitleBackgroundCameraProfileDiagnosticLines())
+        {
+            ImGui.TextDisabled(line);
+        }
     }
 
     private void DrawTitleBackgroundPresetSettings()

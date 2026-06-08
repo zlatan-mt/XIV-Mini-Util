@@ -551,6 +551,14 @@ Test("title background bridge case 3 invoked and character applied is ok", () =>
         backgroundObserved: true,
         cameraFramingApplied: true,
         sceneOverrideApplyObserved: true,
+        characterVisualStatus: TitleBackgroundCharacterVisualStatus.Visible,
+        cameraProfileId: "n4f4-visible",
+        cameraProfileSource: "candidate",
+        cameraFramesCharacter: "True",
+        cameraFinalYawPitchDistanceMatchesProfile: "True",
+        cameraVisibleProfileApplied: true,
+        bridgeCharacterCompositionApplied: true,
+        bridgeCameraProfileApplied: true,
         characterCompositionBridge: new TitleBackgroundCharacterCompositionBridgeSnapshot(
             true,
             true,
@@ -658,6 +666,97 @@ Test("title background bridge warns when legacy shooting composition is still re
 
     return result.Level == TitleBackgroundQuickCheckLevel.WARN
         && result.Warnings.Any(warning => warning.Contains("legacy shooting composition dependency still required", StringComparison.Ordinal));
+});
+
+Test("title background camera profile case 1 bridge applied but visual unknown is warn", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        cameraFramingApplied: true,
+        sceneOverrideApplyObserved: true,
+        characterVisualStatus: TitleBackgroundCharacterVisualStatus.Unknown,
+        cameraProfileId: "n4f4-visible",
+        cameraProfileSource: "candidate",
+        cameraFramesCharacter: "Unknown",
+        cameraFinalYawPitchDistanceMatchesProfile: "Unknown",
+        cameraVisibleProfileApplied: true,
+        bridgeCharacterCompositionApplied: true,
+        bridgeCameraProfileApplied: true,
+        characterCompositionBridge: new TitleBackgroundCharacterCompositionBridgeSnapshot(
+            true,
+            true,
+            true,
+            "TitleBackgroundCharacterVisibility",
+            "title-background-integrated",
+            true,
+            true,
+            true,
+            true,
+            true)));
+
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.Level != TitleBackgroundQuickCheckLevel.OK
+        && result.Reason.Contains("visual", StringComparison.Ordinal)
+        && result.NextAction.Contains("n4f4 visible camera profile", StringComparison.Ordinal);
+});
+
+Test("title background camera profile case 2 n4f4 candidate recommended requires visible profile", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        cameraFramingMode: TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended,
+        candidateRecommendedFraming: TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended,
+        cameraFramingApplied: true,
+        sceneOverrideApplyObserved: true,
+        cameraVisibleProfileApplied: false));
+
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.Level != TitleBackgroundQuickCheckLevel.OK
+        && result.NextAction.Contains("n4f4 visible camera profile", StringComparison.Ordinal);
+});
+
+Test("title background camera profile case 3 visible profile and visual visible is ok", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        cameraFramingMode: TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended,
+        candidateRecommendedFraming: TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended,
+        cameraFramingApplied: true,
+        sceneOverrideApplyObserved: true,
+        characterVisualStatus: TitleBackgroundCharacterVisualStatus.Visible,
+        cameraProfileId: "n4f4-visible",
+        cameraProfileSource: "candidate",
+        cameraFramesCharacter: "True",
+        cameraFinalYawPitchDistanceMatchesProfile: "True",
+        cameraVisibleProfileApplied: true,
+        bridgeCharacterCompositionApplied: true,
+        bridgeCameraProfileApplied: true,
+        characterCompositionBridge: new TitleBackgroundCharacterCompositionBridgeSnapshot(
+            true,
+            true,
+            true,
+            "TitleBackgroundCharacterVisibility",
+            "title-background-integrated",
+            true,
+            true,
+            true,
+            true,
+            true)));
+
+    return result.Level == TitleBackgroundQuickCheckLevel.OK;
+});
+
+Test("title background camera profile case 4 y only framing is not enough", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        cameraFramingApplied: true,
+        sceneOverrideApplyObserved: true,
+        cameraProfileId: "n4f4-visible",
+        cameraProfileSource: "candidate",
+        cameraFramesCharacter: "False",
+        cameraFinalYawPitchDistanceMatchesProfile: "False",
+        cameraVisibleProfileApplied: true));
+
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.Reason == "camera does not frame the character"
+        && result.Warnings.Any(warning => warning.Contains("camera does not frame the character", StringComparison.Ordinal));
 });
 
 Test("title background bridge applied camera is stored for settings ui", () =>
@@ -4440,7 +4539,14 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
     string integratedCompositionRouteReason = "",
     bool cameraFramingApplied = false,
     bool sceneOverrideApplyObserved = false,
-    TitleBackgroundCharacterCompositionBridgeSnapshot characterCompositionBridge = default)
+    TitleBackgroundCharacterCompositionBridgeSnapshot characterCompositionBridge = default,
+    string cameraProfileId = "",
+    string cameraProfileSource = "",
+    string cameraFramesCharacter = "",
+    string cameraFinalYawPitchDistanceMatchesProfile = "",
+    bool cameraVisibleProfileApplied = false,
+    bool bridgeCharacterCompositionApplied = false,
+    bool bridgeCameraProfileApplied = false)
 {
     return new TitleBackgroundQuickCheckInput(
         RunScoped: runScoped,
@@ -4498,7 +4604,19 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
         IntegratedCompositionRouteReason: integratedCompositionRouteReason,
         CameraFramingApplied: cameraFramingApplied,
         SceneOverrideApplyObserved: sceneOverrideApplyObserved,
-        CharacterCompositionBridge: characterCompositionBridge);
+        CharacterCompositionBridge: characterCompositionBridge,
+        CameraProfileId: cameraProfileId,
+        CameraProfileSource: cameraProfileSource,
+        CameraYaw: "",
+        CameraPitch: "",
+        CameraDistance: "",
+        CameraLookAtOffset: "",
+        CameraPositionOffset: "",
+        CameraFramesCharacter: cameraFramesCharacter,
+        CameraFinalYawPitchDistanceMatchesProfile: cameraFinalYawPitchDistanceMatchesProfile,
+        CameraVisibleProfileApplied: cameraVisibleProfileApplied,
+        BridgeCharacterCompositionApplied: bridgeCharacterCompositionApplied,
+        BridgeCameraProfileApplied: bridgeCameraProfileApplied);
 }
 
 // ── New fix cases ──────────────────────────────────────────────────────────
