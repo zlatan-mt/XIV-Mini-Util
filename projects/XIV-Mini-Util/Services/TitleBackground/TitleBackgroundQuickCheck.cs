@@ -126,7 +126,21 @@ internal readonly record struct TitleBackgroundQuickCheckInput(
     string CameraPositionOffset = "",
     string CameraFramesCharacter = "",
     string CameraFinalYawPitchDistanceMatchesProfile = "",
+    bool CameraVisibleProfileResolved = false,
     bool CameraVisibleProfileApplied = false,
+    string CameraVisibleProfileAppliedState = "",
+    string CameraProfileApplyRoute = "",
+    bool CameraCapturedProfileEnabled = false,
+    string CameraCapturedProfileDirH = "",
+    string CameraCapturedProfileDirV = "",
+    string CameraCapturedProfileDistance = "",
+    string CameraCapturedProfilePosition = "",
+    string CameraCapturedProfileLookAt = "",
+    string CameraCurrentDirH = "",
+    string CameraCurrentDirV = "",
+    string CameraCurrentDistance = "",
+    string CameraCurrentPosition = "",
+    string CameraCurrentLookAt = "",
     bool BridgeCharacterCompositionApplied = false,
     bool BridgeCameraProfileApplied = false);
 
@@ -217,6 +231,12 @@ internal static class TitleBackgroundQuickCheckEvaluator
             && IsFalseOrNotObserved(input.CameraFramesCharacter))
         {
             warnings.Add("camera does not frame the character");
+        }
+
+        if (input.CameraVisibleProfileResolved
+            && (!HasValue(input.CameraYaw) || !HasValue(input.CameraPitch) || !HasValue(input.CameraDistance)))
+        {
+            warnings.Add("visible camera profile resolved but yaw/pitch/distance was not applied");
         }
 
         if (IsCustomN4F4(input.CandidateId)
@@ -448,10 +468,11 @@ internal static class TitleBackgroundQuickCheckEvaluator
 
         if (warnings.Any(warning => warning.Contains("n4f4 visible camera profile", StringComparison.Ordinal)
                 || warning.Contains("camera does not frame the character", StringComparison.Ordinal)
+                || warning.Contains("yaw/pitch/distance was not applied", StringComparison.Ordinal)
                 || warning.Contains("visual confirmation", StringComparison.Ordinal)
                 || warning.Contains("visibility is not visually confirmed", StringComparison.Ordinal)))
         {
-            return "try n4f4 visible camera profile or compare legacy shooting composition camera";
+            return "capture legacy visible camera profile or compare legacy shooting composition camera";
         }
 
         if (warnings.Any(warning => warning.Contains("bridge not invoked", StringComparison.Ordinal)))
@@ -529,7 +550,20 @@ internal static class TitleBackgroundQuickCheckEvaluator
             $"camera.positionOffset={NormalizeNone(input.CameraPositionOffset)}",
             $"camera.framesCharacter={NormalizeTriState(input.CameraFramesCharacter)}",
             $"camera.finalYawPitchDistanceMatchesProfile={NormalizeTriState(input.CameraFinalYawPitchDistanceMatchesProfile)}",
-            $"camera.visibleProfileApplied={input.CameraVisibleProfileApplied}",
+            $"camera.visibleProfileResolved={input.CameraVisibleProfileResolved}",
+            $"camera.visibleProfileApplied={BuildVisibleProfileAppliedState(input)}",
+            $"camera.profileApplyRoute={NormalizeNone(input.CameraProfileApplyRoute)}",
+            $"camera.capturedProfile.enabled={input.CameraCapturedProfileEnabled}",
+            $"camera.capturedProfile.dirH={NormalizeNone(input.CameraCapturedProfileDirH)}",
+            $"camera.capturedProfile.dirV={NormalizeNone(input.CameraCapturedProfileDirV)}",
+            $"camera.capturedProfile.distance={NormalizeNone(input.CameraCapturedProfileDistance)}",
+            $"camera.capturedProfile.position={NormalizeNone(input.CameraCapturedProfilePosition)}",
+            $"camera.capturedProfile.lookAt={NormalizeNone(input.CameraCapturedProfileLookAt)}",
+            $"camera.current.dirH={NormalizeNone(input.CameraCurrentDirH)}",
+            $"camera.current.dirV={NormalizeNone(input.CameraCurrentDirV)}",
+            $"camera.current.distance={NormalizeNone(input.CameraCurrentDistance)}",
+            $"camera.current.position={NormalizeNone(input.CameraCurrentPosition)}",
+            $"camera.current.lookAt={NormalizeNone(input.CameraCurrentLookAt)}",
             $"camera.recommendedFraming={input.CandidateRecommendedFraming}",
             $"camera.recommendedAction={NormalizeNone(input.CandidateRecommendedAction)}",
             $"bridge.characterCompositionApplied={input.BridgeCharacterCompositionApplied}",
@@ -714,6 +748,23 @@ internal static class TitleBackgroundQuickCheckEvaluator
         var normalized = NormalizeNone(value);
         return normalized.Equals("False", StringComparison.OrdinalIgnoreCase)
             || normalized.Equals("not-observed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasValue(string? value)
+    {
+        var normalized = NormalizeNone(value);
+        return !normalized.Equals("none", StringComparison.OrdinalIgnoreCase)
+            && !normalized.Equals("unknown", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildVisibleProfileAppliedState(TitleBackgroundQuickCheckInput input)
+    {
+        if (!string.IsNullOrWhiteSpace(input.CameraVisibleProfileAppliedState))
+        {
+            return input.CameraVisibleProfileAppliedState.Trim();
+        }
+
+        return input.CameraVisibleProfileApplied ? "True" : "False";
     }
 
     private static string NormalizeTriState(string? value)

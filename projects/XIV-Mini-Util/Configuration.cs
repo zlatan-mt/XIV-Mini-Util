@@ -111,6 +111,18 @@ public sealed class Configuration : IPluginConfiguration
     public TitleBackgroundSettingsDisplayMode TitleBackgroundSettingsDisplayMode { get; set; } = TitleBackgroundSettingsDisplayMode.Simple;
     public TitleBackgroundCharaSelectCameraFramingMode TitleBackgroundCharaSelectCameraFramingMode { get; set; } = TitleBackgroundCharaSelectCameraFramingMode.Default;
     public TitleBackgroundCharacterVisualStatus TitleBackgroundCharacterVisualStatus { get; set; } = TitleBackgroundCharacterVisualStatus.Unknown;
+    public bool TitleBackgroundCapturedCameraProfileEnabled { get; set; } = false;
+    public string TitleBackgroundCapturedCameraProfileSource { get; set; } = string.Empty;
+    public float TitleBackgroundCapturedDirH { get; set; } = 0f;
+    public float TitleBackgroundCapturedDirV { get; set; } = 0f;
+    public float TitleBackgroundCapturedDistance { get; set; } = 0f;
+    public float TitleBackgroundCapturedPositionX { get; set; } = 0f;
+    public float TitleBackgroundCapturedPositionY { get; set; } = 0f;
+    public float TitleBackgroundCapturedPositionZ { get; set; } = 0f;
+    public float TitleBackgroundCapturedLookAtX { get; set; } = 0f;
+    public float TitleBackgroundCapturedLookAtY { get; set; } = 0f;
+    public float TitleBackgroundCapturedLookAtZ { get; set; } = 0f;
+    public string TitleBackgroundCapturedCameraProfileCapturedAt { get; set; } = string.Empty;
     public TitleBackgroundQuickCheckLevel TitleBackgroundLastQuickCheckResult { get; set; } = TitleBackgroundQuickCheckLevel.NotRun;
     public string TitleBackgroundLastQuickCheckCandidateId { get; set; } = string.Empty;
     public string TitleBackgroundLastQuickCheckReason { get; set; } = string.Empty;
@@ -343,6 +355,18 @@ public sealed class Configuration : IPluginConfiguration
         TitleBackgroundSettingsDisplayMode = NormalizeTitleBackgroundSettingsDisplayMode(source.TitleBackgroundSettingsDisplayMode);
         TitleBackgroundCharaSelectCameraFramingMode = NormalizeTitleBackgroundCameraFramingMode(source.TitleBackgroundCharaSelectCameraFramingMode);
         TitleBackgroundCharacterVisualStatus = NormalizeTitleBackgroundCharacterVisualStatus(source.TitleBackgroundCharacterVisualStatus);
+        TitleBackgroundCapturedCameraProfileEnabled = source.TitleBackgroundCapturedCameraProfileEnabled;
+        TitleBackgroundCapturedCameraProfileSource = NormalizeShortDiagnostic(source.TitleBackgroundCapturedCameraProfileSource);
+        TitleBackgroundCapturedDirH = SanitizeCoordinate(source.TitleBackgroundCapturedDirH);
+        TitleBackgroundCapturedDirV = SanitizeCoordinate(source.TitleBackgroundCapturedDirV);
+        TitleBackgroundCapturedDistance = SanitizeCoordinate(source.TitleBackgroundCapturedDistance);
+        TitleBackgroundCapturedPositionX = SanitizeCoordinate(source.TitleBackgroundCapturedPositionX);
+        TitleBackgroundCapturedPositionY = SanitizeCoordinate(source.TitleBackgroundCapturedPositionY);
+        TitleBackgroundCapturedPositionZ = SanitizeCoordinate(source.TitleBackgroundCapturedPositionZ);
+        TitleBackgroundCapturedLookAtX = SanitizeCoordinate(source.TitleBackgroundCapturedLookAtX);
+        TitleBackgroundCapturedLookAtY = SanitizeCoordinate(source.TitleBackgroundCapturedLookAtY);
+        TitleBackgroundCapturedLookAtZ = SanitizeCoordinate(source.TitleBackgroundCapturedLookAtZ);
+        TitleBackgroundCapturedCameraProfileCapturedAt = NormalizeShortDiagnostic(source.TitleBackgroundCapturedCameraProfileCapturedAt);
         TitleBackgroundLastQuickCheckResult = NormalizeTitleBackgroundQuickCheckLevel(source.TitleBackgroundLastQuickCheckResult);
         TitleBackgroundLastQuickCheckCandidateId = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckCandidateId);
         TitleBackgroundLastQuickCheckReason = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckReason);
@@ -804,6 +828,43 @@ public sealed class Configuration : IPluginConfiguration
         if (TitleBackgroundFovY != normalizedTitleFovY)
         {
             TitleBackgroundFovY = normalizedTitleFovY;
+            changed = true;
+        }
+
+        var normalizedCapturedProfileSource = NormalizeShortDiagnostic(TitleBackgroundCapturedCameraProfileSource);
+        var normalizedCapturedAt = NormalizeShortDiagnostic(TitleBackgroundCapturedCameraProfileCapturedAt);
+        var normalizedCapturedDirH = SanitizeCoordinate(TitleBackgroundCapturedDirH);
+        var normalizedCapturedDirV = SanitizeCoordinate(TitleBackgroundCapturedDirV);
+        var normalizedCapturedDistance = SanitizeCoordinate(TitleBackgroundCapturedDistance);
+        var normalizedCapturedPositionX = SanitizeCoordinate(TitleBackgroundCapturedPositionX);
+        var normalizedCapturedPositionY = SanitizeCoordinate(TitleBackgroundCapturedPositionY);
+        var normalizedCapturedPositionZ = SanitizeCoordinate(TitleBackgroundCapturedPositionZ);
+        var normalizedCapturedLookAtX = SanitizeCoordinate(TitleBackgroundCapturedLookAtX);
+        var normalizedCapturedLookAtY = SanitizeCoordinate(TitleBackgroundCapturedLookAtY);
+        var normalizedCapturedLookAtZ = SanitizeCoordinate(TitleBackgroundCapturedLookAtZ);
+        if (TitleBackgroundCapturedCameraProfileSource != normalizedCapturedProfileSource
+            || TitleBackgroundCapturedCameraProfileCapturedAt != normalizedCapturedAt
+            || TitleBackgroundCapturedDirH != normalizedCapturedDirH
+            || TitleBackgroundCapturedDirV != normalizedCapturedDirV
+            || TitleBackgroundCapturedDistance != normalizedCapturedDistance
+            || TitleBackgroundCapturedPositionX != normalizedCapturedPositionX
+            || TitleBackgroundCapturedPositionY != normalizedCapturedPositionY
+            || TitleBackgroundCapturedPositionZ != normalizedCapturedPositionZ
+            || TitleBackgroundCapturedLookAtX != normalizedCapturedLookAtX
+            || TitleBackgroundCapturedLookAtY != normalizedCapturedLookAtY
+            || TitleBackgroundCapturedLookAtZ != normalizedCapturedLookAtZ)
+        {
+            TitleBackgroundCapturedCameraProfileSource = normalizedCapturedProfileSource;
+            TitleBackgroundCapturedCameraProfileCapturedAt = normalizedCapturedAt;
+            TitleBackgroundCapturedDirH = normalizedCapturedDirH;
+            TitleBackgroundCapturedDirV = normalizedCapturedDirV;
+            TitleBackgroundCapturedDistance = normalizedCapturedDistance;
+            TitleBackgroundCapturedPositionX = normalizedCapturedPositionX;
+            TitleBackgroundCapturedPositionY = normalizedCapturedPositionY;
+            TitleBackgroundCapturedPositionZ = normalizedCapturedPositionZ;
+            TitleBackgroundCapturedLookAtX = normalizedCapturedLookAtX;
+            TitleBackgroundCapturedLookAtY = normalizedCapturedLookAtY;
+            TitleBackgroundCapturedLookAtZ = normalizedCapturedLookAtZ;
             changed = true;
         }
 

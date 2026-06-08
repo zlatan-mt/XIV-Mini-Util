@@ -8,6 +8,11 @@ namespace XivMiniUtil.Services.TitleBackground;
 internal readonly record struct TitleBackgroundCharacterSelectCameraProfile(
     string ProfileId,
     string ProfileSource,
+    float? Yaw,
+    float? Pitch,
+    float? Distance,
+    Vector3? LookAt,
+    Vector3? Position,
     float YawOffset,
     float PitchOffset,
     float DistanceMultiplier,
@@ -23,6 +28,11 @@ internal readonly record struct TitleBackgroundCharacterSelectCameraProfile(
     public static TitleBackgroundCharacterSelectCameraProfile None { get; } = new(
         string.Empty,
         string.Empty,
+        null,
+        null,
+        null,
+        null,
+        null,
         0f,
         0f,
         1f,
@@ -133,14 +143,68 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
         TitleBackgroundCharaSelectCameraFramingMode framingMode,
         out TitleBackgroundCharacterSelectCameraProfile profile)
     {
+        return TryGetPreferredCameraProfile(
+            candidateId,
+            framingMode,
+            false,
+            null,
+            null,
+            null,
+            null,
+            null,
+            out profile);
+    }
+
+    public static bool TryGetPreferredCameraProfile(
+        string? candidateId,
+        TitleBackgroundCharaSelectCameraFramingMode framingMode,
+        bool capturedProfileEnabled,
+        float? capturedDirH,
+        float? capturedDirV,
+        float? capturedDistance,
+        Vector3? capturedPosition,
+        Vector3? capturedLookAt,
+        out TitleBackgroundCharacterSelectCameraProfile profile)
+    {
         var normalizedId = NormalizeId(candidateId);
         if (string.Equals(normalizedId, DefaultCandidateId, StringComparison.Ordinal)
             && framingMode is TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
                 or TitleBackgroundCharaSelectCameraFramingMode.CustomExperimental)
         {
+            if (capturedProfileEnabled
+                && capturedDirH.HasValue
+                && capturedDirV.HasValue
+                && capturedDistance.HasValue
+                && capturedDistance.Value > 0f)
+            {
+                profile = new TitleBackgroundCharacterSelectCameraProfile(
+                    "n4f4-visible-captured",
+                    "captured",
+                    TitleBackgroundCharaSelectCameraLogic.NormalizeRadians(capturedDirH.Value),
+                    Math.Clamp(capturedDirV.Value, -MathF.PI / 2f, MathF.PI / 2f),
+                    TitleBackgroundCharaSelectCameraLogic.SanitizeOptionalDistance(capturedDistance.Value),
+                    capturedLookAt,
+                    capturedPosition,
+                    0f,
+                    0f,
+                    1f,
+                    0f,
+                    Vector3.Zero,
+                    Vector3.Zero,
+                    -0.7f,
+                    -0.7f,
+                    -0.7f);
+                return true;
+            }
+
             profile = new TitleBackgroundCharacterSelectCameraProfile(
                 "n4f4-visible",
                 "candidate",
+                null,
+                null,
+                null,
+                null,
+                null,
                 0f,
                 -0.18f,
                 0.72f,

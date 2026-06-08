@@ -48,6 +48,8 @@ public sealed class SettingsTab : ITabComponent
     private Vector4 _titleBackgroundPresetMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
     private string _titleBackgroundSceneCopyMessage = string.Empty;
     private Vector4 _titleBackgroundSceneCopyMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
+    private string _titleBackgroundCameraProfileMessage = string.Empty;
+    private Vector4 _titleBackgroundCameraProfileMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
 
     // Submarine Settings State
 
@@ -937,6 +939,33 @@ public sealed class SettingsTab : ITabComponent
         ImGui.TextDisabled($"Legacy shooting composition: {_configuration.CharaSelectSceneCompositionEnabled}");
         ImGui.Spacing();
         ImGui.Text("Camera Profile Compare");
+        if (ImGui.Button("Capture legacy visible camera##TitleBackgroundCaptureLegacyCamera"))
+        {
+            if (_titleScreenBackgroundService.CaptureLegacyVisibleCameraProfile(out var message))
+            {
+                _titleBackgroundCameraProfileMessage = message;
+                _titleBackgroundCameraProfileMessageColor = new Vector4(0.3f, 0.8f, 0.45f, 1f);
+            }
+            else
+            {
+                _titleBackgroundCameraProfileMessage = message;
+                _titleBackgroundCameraProfileMessageColor = new Vector4(1f, 0.45f, 0.45f, 1f);
+            }
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Clear captured profile##TitleBackgroundClearCapturedCamera"))
+        {
+            _titleScreenBackgroundService.ClearLegacyVisibleCameraProfile();
+            _titleBackgroundCameraProfileMessage = "captured profile cleared";
+            _titleBackgroundCameraProfileMessageColor = new Vector4(0.7f, 0.7f, 0.7f, 1f);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_titleBackgroundCameraProfileMessage))
+        {
+            ImGui.TextColored(_titleBackgroundCameraProfileMessageColor, _titleBackgroundCameraProfileMessage);
+        }
+
         foreach (var line in _titleScreenBackgroundService.GetTitleBackgroundCameraProfileDiagnosticLines())
         {
             ImGui.TextDisabled(line);
