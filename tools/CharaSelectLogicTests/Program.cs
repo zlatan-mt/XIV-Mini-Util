@@ -1140,9 +1140,124 @@ Test("title background quickcheck ui simple mode is bounded", () =>
         TitleBackgroundLastQuickCheckReason = "background-only works",
     };
     var items = TitleBackgroundQuickCheckUiPresenter.GetSimpleModeItems(configuration);
-    return items.Contains("Start QuickCheck")
-        && items.Contains("Run Check")
+    return items.Contains("Character Select Background")
+        && items.Contains("Status")
+        && items.Contains("Auto Setup")
+        && items.Contains("Check")
+        && !items.Contains("Start QuickCheck")
+        && !items.Contains("Run Check")
+        && !items.Contains("Capture legacy visible camera")
+        && !items.Contains("Save as n4f4 visible profile")
+        && !items.Contains("Clear captured profile")
+        && !items.Contains("raw bridge diagnostics")
+        && !items.Contains("raw camera delta")
         && !TitleBackgroundQuickCheckUiPresenter.IsExperimentalModeVisibleInSimple(TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground);
+});
+
+Test("title background settings simple panel hides advanced diagnostics", () =>
+{
+    var root = FindRepositoryRoot();
+    var settingsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
+
+    return simplePanel.Contains("Character Select Background", StringComparison.Ordinal)
+        && simplePanel.Contains("Auto Setup", StringComparison.Ordinal)
+        && simplePanel.Contains("Check", StringComparison.Ordinal)
+        && !simplePanel.Contains("Capture legacy visible camera", StringComparison.Ordinal)
+        && !simplePanel.Contains("Save as n4f4 visible profile", StringComparison.Ordinal)
+        && !simplePanel.Contains("Clear captured profile", StringComparison.Ordinal)
+        && !simplePanel.Contains("DrawTitleBackgroundCharacterCompositionBridgeDiagnostics", StringComparison.Ordinal)
+        && !simplePanel.Contains("DrawTitleBackgroundCameraFramingSelector", StringComparison.Ordinal)
+        && !simplePanel.Contains("DrawTitleBackgroundCharacterVisualStatusSelector", StringComparison.Ordinal)
+        && !simplePanel.Contains("Start QuickCheck", StringComparison.Ordinal)
+        && !simplePanel.Contains("Reset Check", StringComparison.Ordinal);
+});
+
+Test("title background simple auto setup configures n4f4 recommended route", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundOverrideEnabled = false,
+        TitleBackgroundCameraOverrideEnabled = false,
+        TitleBackgroundIntegratedCompositionEnabled = false,
+        TitleBackgroundCharacterSelectOverrideCandidateId = string.Empty,
+        TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.ResolveOnly,
+        TitleBackgroundCharaSelectCameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.Default,
+    };
+
+    TitleBackgroundQuickCheckUiPresenter.ApplySimpleAutoSetup(configuration);
+    return configuration.TitleBackgroundOverrideEnabled
+        && configuration.TitleBackgroundCameraOverrideEnabled
+        && configuration.TitleBackgroundIntegratedCompositionEnabled
+        && configuration.TitleBackgroundCharacterSelectOverrideCandidateId == "custom:n4f4"
+        && configuration.TitleBackgroundCharaSelectCameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
+        && configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly;
+});
+
+Test("title background simple check summarizes quickcheck levels", () =>
+{
+    var ok = TitleBackgroundQuickCheckUiPresenter.BuildSimpleCheckResultLine(
+        TitleBackgroundQuickCheckLevel.OK,
+        "n4f4 background is working");
+    var warn = TitleBackgroundQuickCheckUiPresenter.BuildSimpleCheckResultLine(
+        TitleBackgroundQuickCheckLevel.WARN,
+        "camera does not frame the character");
+    var ng = TitleBackgroundQuickCheckUiPresenter.BuildSimpleCheckResultLine(
+        TitleBackgroundQuickCheckLevel.NG,
+        "candidate is not selected");
+
+    return ok.StartsWith("OK:", StringComparison.Ordinal)
+        && warn.StartsWith("WARN:", StringComparison.Ordinal)
+        && warn.Contains("camera", StringComparison.Ordinal)
+        && ng.StartsWith("NG:", StringComparison.Ordinal);
+});
+
+Test("title background simple status reflects quickcheck ok warn ng", () =>
+{
+    static Configuration Config(TitleBackgroundQuickCheckLevel level, string reason) => new()
+    {
+        TitleBackgroundOverrideEnabled = true,
+        TitleBackgroundCameraOverrideEnabled = true,
+        TitleBackgroundIntegratedCompositionEnabled = true,
+        TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.CharaSelectOnly,
+        TitleBackgroundCharacterSelectOverrideCandidateId = "custom:n4f4",
+        TitleBackgroundCharaSelectCameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended,
+        TitleBackgroundLastQuickCheckResult = level,
+        TitleBackgroundLastQuickCheckReason = reason,
+    };
+
+    var ok = TitleBackgroundQuickCheckUiPresenter.BuildSimpleSummary(Config(TitleBackgroundQuickCheckLevel.OK, "visible"));
+    var warn = TitleBackgroundQuickCheckUiPresenter.BuildSimpleSummary(Config(TitleBackgroundQuickCheckLevel.WARN, "camera does not frame the character"));
+    var ng = TitleBackgroundQuickCheckUiPresenter.BuildSimpleSummary(Config(TitleBackgroundQuickCheckLevel.NG, "setup failed"));
+
+    return ok.Status == TitleBackgroundSimpleUiStatus.Working
+        && ok.ResultLine.StartsWith("OK:", StringComparison.Ordinal)
+        && warn.Status == TitleBackgroundSimpleUiStatus.Failed
+        && warn.ResultLine.StartsWith("WARN:", StringComparison.Ordinal)
+        && ng.Status == TitleBackgroundSimpleUiStatus.Failed
+        && ng.ResultLine.StartsWith("NG:", StringComparison.Ordinal);
+});
+
+Test("title background simple missing captured profile does not show legacy capture procedure", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundOverrideEnabled = true,
+        TitleBackgroundCameraOverrideEnabled = true,
+        TitleBackgroundIntegratedCompositionEnabled = true,
+        TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.CharaSelectOnly,
+        TitleBackgroundCharacterSelectOverrideCandidateId = "custom:n4f4",
+        TitleBackgroundCharaSelectCameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended,
+        TitleBackgroundCapturedCameraProfileEnabled = false,
+        TitleBackgroundLastQuickCheckResult = TitleBackgroundQuickCheckLevel.WARN,
+        TitleBackgroundLastQuickCheckReason = "camera profile missing",
+        TitleBackgroundLastQuickCheckNextAction = "Enable legacy shooting composition, confirm character is visible, then click Capture legacy visible camera.",
+    };
+
+    var summary = TitleBackgroundQuickCheckUiPresenter.BuildSimpleSummary(configuration);
+    return !summary.NextActionLine.Contains("legacy", StringComparison.OrdinalIgnoreCase)
+        && !summary.NextActionLine.Contains("Capture", StringComparison.Ordinal)
+        && summary.NextActionLine.Contains("Advanced", StringComparison.Ordinal);
 });
 
 Test("title background quickcheck advanced mode does not duplicate candidate selector", () =>
@@ -4208,6 +4323,40 @@ string FindRepositoryRoot()
     }
 
     return Directory.GetCurrentDirectory();
+}
+
+string ExtractMethodBody(string source, string signature)
+{
+    var signatureIndex = source.IndexOf(signature, StringComparison.Ordinal);
+    if (signatureIndex < 0)
+    {
+        return string.Empty;
+    }
+
+    var bodyStart = source.IndexOf('{', signatureIndex);
+    if (bodyStart < 0)
+    {
+        return string.Empty;
+    }
+
+    var depth = 0;
+    for (var index = bodyStart; index < source.Length; index++)
+    {
+        if (source[index] == '{')
+        {
+            depth++;
+        }
+        else if (source[index] == '}')
+        {
+            depth--;
+            if (depth == 0)
+            {
+                return source.Substring(bodyStart, index - bodyStart + 1);
+            }
+        }
+    }
+
+    return source[bodyStart..];
 }
 
 TitleBackgroundPhase2NDeliverySummary Phase2N(

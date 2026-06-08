@@ -242,6 +242,24 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         }
     }
 
+    internal TitleBackgroundSimpleUiSummary RunSimpleAutoSetup()
+    {
+        if (_configuration.CharaSelectSceneCompositionEnabled)
+        {
+            _charaSelectService?.DisableSceneCompositionForTitleBackgroundRoute();
+        }
+
+        TitleBackgroundQuickCheckUiPresenter.ApplySimpleAutoSetup(_configuration);
+        _configuration.Save();
+        RecordTransitionEvent("simple auto setup applied", "n4f4 recommended");
+        ReloadNativeIntegration();
+        _charaSelectService?.ResetTitleBackgroundCharacterCompositionBridgeSnapshot();
+        TryInvokeIntegratedCompositionRoute();
+        _charaSelectService?.ApplyTitleBackgroundCharacterCompositionBridgeRuntimeState();
+        StartQuickCheck();
+        return TitleBackgroundQuickCheckUiPresenter.BuildSimpleSummary(_configuration);
+    }
+
     public void SetCameraOverrideEnabled(bool enabled)
     {
         _configuration.TitleBackgroundCameraOverrideEnabled = enabled;
@@ -885,23 +903,33 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             ?? CharaSelectCompositionRouteRuntimeSnapshot.Empty;
         var bridgeRoute = _charaSelectService?.GetTitleBackgroundBridgeRouteSnapshot()
             ?? CharaSelectCompositionRouteRuntimeSnapshot.Empty;
+        var capturedProfileAvailable = _configuration.TitleBackgroundCapturedCameraProfileEnabled
+            && _configuration.TitleBackgroundCapturedDistance > 0f;
+        float? legacyDirH = capturedProfileAvailable ? _configuration.TitleBackgroundCapturedDirH : currentDirH;
+        float? legacyDirV = capturedProfileAvailable ? _configuration.TitleBackgroundCapturedDirV : currentDirV;
+        float? legacyDistance = capturedProfileAvailable ? _configuration.TitleBackgroundCapturedDistance : currentDistance;
+        Vector3? legacyPosition = capturedProfileAvailable ? BuildCapturedProfilePosition() : currentPosition;
+        Vector3? legacyLookAt = capturedProfileAvailable ? BuildCapturedProfileLookAt() : currentLookAt;
+        var legacyProfileId = capturedProfileAvailable
+            ? "n4f4-visible-captured"
+            : FormatNone(legacyRoute.ProfileId);
 
         return
         [
             "Legacy composition ON snapshot",
             $"legacy.enabled={legacyRoute.LegacyEnabled}",
             $"legacy.characterVisible={BuildCharacterVisibleLabel()}",
-            $"legacy.currentDirH={FormatFloat(currentDirH)}",
-            $"legacy.currentDirV={FormatFloat(currentDirV)}",
-            $"legacy.currentDistance={FormatFloat(currentDistance)}",
-            $"legacy.currentPosition={FormatVector(currentPosition)}",
-            $"legacy.currentLookAt={FormatVector(currentLookAt)}",
-            $"legacy.profileId={FormatNone(legacyRoute.ProfileId)}",
+            $"legacy.currentDirH={FormatFloat(legacyDirH)}",
+            $"legacy.currentDirV={FormatFloat(legacyDirV)}",
+            $"legacy.currentDistance={FormatFloat(legacyDistance)}",
+            $"legacy.currentPosition={FormatVector(legacyPosition)}",
+            $"legacy.currentLookAt={FormatVector(legacyLookAt)}",
+            $"legacy.profileId={legacyProfileId}",
             $"legacy.applyRoute={FormatNone(legacyRoute.ApplyRoute)}",
             $"legacy.clientSelectDataPatched={legacyRoute.ClientSelectDataPatched}",
             $"legacy.refreshDisplayCalled={legacyRoute.RefreshDisplayCalled}",
             $"legacy.updateDisplayDetourCalled={legacyRoute.UpdateDisplayDetourCalled}",
-            $"legacy.cameraSource={legacyRoute.CameraSource}",
+            $"legacy.cameraSource={(capturedProfileAvailable ? "LobbyCamera" : legacyRoute.CameraSource)}",
             "Title Background bridge snapshot",
             $"bridge.enabled={bridgeRoute.BridgeEnabled}",
             $"bridge.characterVisible={BuildCharacterVisibleLabel()}",
@@ -917,11 +945,11 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"bridge.updateDisplayDetourCalled={bridgeRoute.UpdateDisplayDetourCalled}",
             $"bridge.cameraSource={bridgeRoute.CameraSource}",
             "Delta",
-            "dirH.delta=none",
-            "dirV.delta=none",
-            "distance.delta=none",
-            "position.delta=none",
-            "lookAt.delta=none",
+            $"dirH.delta={FormatFloatDelta(currentDirH, legacyDirH)}",
+            $"dirV.delta={FormatFloatDelta(currentDirV, legacyDirV)}",
+            $"distance.delta={FormatFloatDelta(currentDistance, legacyDistance)}",
+            $"position.delta={FormatVectorDelta(currentPosition, legacyPosition)}",
+            $"lookAt.delta={FormatVectorDelta(currentLookAt, legacyLookAt)}",
             "Legacy shooting composition camera profile: none observed in reusable profile resolver",
             $"Title Background camera profile: {titleBackgroundProfileLabel}",
             $"Captured camera profile enabled={_configuration.TitleBackgroundCapturedCameraProfileEnabled}",
@@ -938,10 +966,10 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
             $"Title Background camera profile lookAtOffset={FormatVector(cameraProfile.LookAtOffset)}",
             $"Title Background camera profile positionOffset={FormatVector(cameraProfile.PositionOffset)}",
             $"Title Background camera profile error={FormatNone(poseAvailable ? string.Empty : poseError)}",
-            "Difference yaw delta=unknown",
-            "Difference pitch delta=unknown",
-            "Difference distance delta=unknown",
-            "Difference lookAt delta=unknown",
+            $"Difference yaw delta={FormatFloatDelta(currentDirH, legacyDirH)}",
+            $"Difference pitch delta={FormatFloatDelta(currentDirV, legacyDirV)}",
+            $"Difference distance delta={FormatFloatDelta(currentDistance, legacyDistance)}",
+            $"Difference lookAt delta={FormatVectorDelta(currentLookAt, legacyLookAt)}",
             $"current camera capture currentDirH={FormatFloat(currentDirH)}",
             $"current camera capture currentDirV={FormatFloat(currentDirV)}",
             $"current camera capture currentDistance={FormatFloat(currentDistance)}",

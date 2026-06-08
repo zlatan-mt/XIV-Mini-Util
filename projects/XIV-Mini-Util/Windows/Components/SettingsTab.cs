@@ -745,17 +745,19 @@ public sealed class SettingsTab : ITabComponent
     private void DrawTitleBackgroundSettings()
     {
         ImGui.Text("Title Background");
-        ImGui.TextWrapped("Character Select の背景だけを差し替えます。選択キャラクター本体は表示されない想定です。");
+        ImGui.TextWrapped("Character Select の背景を n4f4 recommended に設定します。");
+
+        if (_configuration.TitleBackgroundSettingsDisplayMode == TitleBackgroundSettingsDisplayMode.Simple)
+        {
+            DrawTitleBackgroundSimplePanel();
+            DrawTitleBackgroundAdvancedDrawer();
+            return;
+        }
 
         DrawTitleBackgroundStatusSummary();
         DrawTitleBackgroundQuickActions();
         DrawTitleBackgroundDisplayModeSelector();
         DrawTitleBackgroundKnownLimitation();
-
-        if (_configuration.TitleBackgroundSettingsDisplayMode == TitleBackgroundSettingsDisplayMode.Simple)
-        {
-            return;
-        }
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -817,6 +819,60 @@ public sealed class SettingsTab : ITabComponent
         DrawTitleBackgroundPhase2Settings();
         ImGui.Spacing();
         DrawTitleBackgroundAdvancedSettings();
+    }
+
+    private void DrawTitleBackgroundSimplePanel()
+    {
+        var summary = TitleBackgroundQuickCheckUiPresenter.BuildSimpleSummary(_configuration);
+        var statusColor = summary.Status switch
+        {
+            TitleBackgroundSimpleUiStatus.Working => new Vector4(0.3f, 0.8f, 0.45f, 1f),
+            TitleBackgroundSimpleUiStatus.Failed => new Vector4(1f, 0.45f, 0.45f, 1f),
+            TitleBackgroundSimpleUiStatus.Ready => new Vector4(0.3f, 0.65f, 1f, 1f),
+            _ => new Vector4(1f, 0.75f, 0.35f, 1f),
+        };
+
+        ImGui.Spacing();
+        ImGui.Text("Character Select Background");
+        var offSelected = !_configuration.TitleBackgroundOverrideEnabled;
+        if (ImGui.RadioButton("OFF##TitleBackgroundSimpleOff", offSelected))
+        {
+            _titleScreenBackgroundService.SetEnabled(false);
+        }
+
+        ImGui.SameLine();
+        var recommendedSelected = TitleBackgroundQuickCheckUiPresenter.IsSimpleAutoSetupConfigured(_configuration);
+        if (ImGui.RadioButton("n4f4 recommended##TitleBackgroundSimpleN4F4", recommendedSelected))
+        {
+            _titleScreenBackgroundService.RunSimpleAutoSetup();
+        }
+
+        ImGui.TextColored(statusColor, summary.StatusLine);
+        ImGui.TextWrapped(summary.ResultLine);
+        ImGui.TextDisabled(summary.NextActionLine);
+
+        if (ImGui.Button("Auto Setup##TitleBackgroundSimpleAutoSetup"))
+        {
+            _titleScreenBackgroundService.RunSimpleAutoSetup();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Check##TitleBackgroundSimpleCheck"))
+        {
+            _titleScreenBackgroundService.RunQuickCheck();
+        }
+    }
+
+    private void DrawTitleBackgroundAdvancedDrawer()
+    {
+        ImGui.Spacing();
+        if (!ImGui.CollapsingHeader("Advanced##TitleBackgroundAdvancedDrawer"))
+        {
+            return;
+        }
+
+        DrawTitleBackgroundDisplayModeSelector();
+        ImGui.TextDisabled("Switch to Advanced or Developer Diagnostics to inspect raw QuickCheck and camera details.");
     }
 
     private void DrawTitleBackgroundStatusSummary()

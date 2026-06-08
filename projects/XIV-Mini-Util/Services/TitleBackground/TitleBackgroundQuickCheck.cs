@@ -820,8 +820,27 @@ internal readonly record struct TitleBackgroundQuickCheckUiSummary(
     string DetailLine,
     string KnownLimitationLine);
 
+internal enum TitleBackgroundSimpleUiStatus
+{
+    NeedsSetup,
+    Ready,
+    Working,
+    Failed,
+}
+
+internal readonly record struct TitleBackgroundSimpleUiSummary(
+    TitleBackgroundSimpleUiStatus Status,
+    TitleBackgroundQuickCheckLevel LastCheckLevel,
+    string StatusLine,
+    string ResultLine,
+    string NextActionLine);
+
 internal static class TitleBackgroundQuickCheckUiPresenter
 {
+    private const string SimpleCandidateId = TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId;
+    private const string SimpleSetupAction = "Click Auto Setup.";
+    private const string SimpleAdvancedAction = "Open Advanced diagnostics.";
+
     public static TitleBackgroundQuickCheckUiSummary BuildSummary(Configuration configuration)
     {
         var level = NormalizeLevel(configuration.TitleBackgroundLastQuickCheckResult);
@@ -859,18 +878,101 @@ internal static class TitleBackgroundQuickCheckUiPresenter
 
     public static IReadOnlyList<string> GetSimpleModeItems(Configuration configuration)
     {
-        var summary = BuildSummary(configuration);
         return
         [
-            "Enable Character Select Background",
-            "Background Candidate",
-            summary.StatusLine,
-            "Start QuickCheck",
-            "Run Check",
-            summary.LastResultLine,
-            summary.KnownLimitationLine,
-            summary.NextActionLine,
+            "Character Select Background",
+            "Status",
+            "Auto Setup",
+            "Check",
         ];
+    }
+
+    public static TitleBackgroundSimpleUiSummary BuildSimpleSummary(Configuration configuration)
+    {
+        if (!IsSimpleAutoSetupConfigured(configuration))
+        {
+            return new TitleBackgroundSimpleUiSummary(
+                TitleBackgroundSimpleUiStatus.NeedsSetup,
+                NormalizeLevel(configuration.TitleBackgroundLastQuickCheckResult),
+                "Status: Needs setup",
+                "Character Select Background is not configured for n4f4 recommended.",
+                SimpleSetupAction);
+        }
+
+        var level = NormalizeLevel(configuration.TitleBackgroundLastQuickCheckResult);
+        return level switch
+        {
+            TitleBackgroundQuickCheckLevel.OK => new TitleBackgroundSimpleUiSummary(
+                TitleBackgroundSimpleUiStatus.Working,
+                level,
+                "Status: Working",
+                "OK: n4f4 background and character visibility are confirmed.",
+                "No action needed."),
+            TitleBackgroundQuickCheckLevel.WARN => new TitleBackgroundSimpleUiSummary(
+                TitleBackgroundSimpleUiStatus.Failed,
+                level,
+                "Status: Failed",
+                BuildSimpleCheckResultLine(level, configuration.TitleBackgroundLastQuickCheckReason),
+                SimpleAdvancedAction),
+            TitleBackgroundQuickCheckLevel.NG => new TitleBackgroundSimpleUiSummary(
+                TitleBackgroundSimpleUiStatus.Failed,
+                level,
+                "Status: Failed",
+                BuildSimpleCheckResultLine(level, configuration.TitleBackgroundLastQuickCheckReason),
+                SimpleAdvancedAction),
+            _ => new TitleBackgroundSimpleUiSummary(
+                TitleBackgroundSimpleUiStatus.Ready,
+                level,
+                "Status: Ready",
+                "n4f4 recommended is ready. Click Check after opening Character Select.",
+                "Click Check."),
+        };
+    }
+
+    public static string BuildSimpleCheckResultLine(TitleBackgroundQuickCheckLevel level, string? reason)
+    {
+        var normalizedLevel = NormalizeLevel(level);
+        var normalizedReason = NormalizeForUi(reason, normalizedLevel switch
+        {
+            TitleBackgroundQuickCheckLevel.OK => "n4f4 background is working.",
+            TitleBackgroundQuickCheckLevel.WARN => "background works but character visibility is not confirmed.",
+            TitleBackgroundQuickCheckLevel.NG => "setup failed.",
+            _ => "not checked yet.",
+        });
+
+        return normalizedLevel switch
+        {
+            TitleBackgroundQuickCheckLevel.OK => $"OK: {normalizedReason}",
+            TitleBackgroundQuickCheckLevel.WARN => $"WARN: {BuildSimpleWarningReason(normalizedReason)}",
+            TitleBackgroundQuickCheckLevel.NG => $"NG: {normalizedReason}",
+            _ => "Not checked yet.",
+        };
+    }
+
+    public static bool IsSimpleAutoSetupConfigured(Configuration configuration)
+    {
+        return configuration.TitleBackgroundOverrideEnabled
+            && configuration.TitleBackgroundCameraOverrideEnabled
+            && configuration.TitleBackgroundIntegratedCompositionEnabled
+            && configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
+            && configuration.TitleBackgroundCharaSelectCameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
+            && string.Equals(configuration.TitleBackgroundCharacterSelectOverrideCandidateId, SimpleCandidateId, StringComparison.Ordinal);
+    }
+
+    public static bool ApplySimpleAutoSetup(Configuration configuration)
+    {
+        var changed = !IsSimpleAutoSetupConfigured(configuration)
+            || configuration.TitleBackgroundCharacterSelectBackgroundMode != TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly;
+
+        var candidate = TitleBackgroundCharacterSelectOverrideCandidateRegistry.GetDefault();
+        TitleBackgroundCharacterSelectOverrideCandidateRegistry.ApplyToConfiguration(configuration, candidate);
+        configuration.TitleBackgroundOverrideEnabled = true;
+        configuration.TitleBackgroundCameraOverrideEnabled = true;
+        configuration.TitleBackgroundIntegratedCompositionEnabled = true;
+        configuration.TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.CharaSelectOnly;
+        configuration.TitleBackgroundCharacterSelectBackgroundMode = TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly;
+        configuration.TitleBackgroundCharaSelectCameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended;
+        return changed;
     }
 
     public static IReadOnlyList<string> GetAdvancedModeItems(Configuration configuration)
@@ -932,6 +1034,19 @@ internal static class TitleBackgroundQuickCheckUiPresenter
         return Enum.IsDefined(typeof(TitleBackgroundQuickCheckLevel), level)
             ? level
             : TitleBackgroundQuickCheckLevel.NotRun;
+    }
+
+    private static string BuildSimpleWarningReason(string reason)
+    {
+        if (reason.Contains("camera", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("frame", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("visual", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("visible", StringComparison.OrdinalIgnoreCase))
+        {
+            return reason;
+        }
+
+        return "background works but character visibility is not visually confirmed.";
     }
 
     private static string NormalizeForUi(string? value, string fallback)
