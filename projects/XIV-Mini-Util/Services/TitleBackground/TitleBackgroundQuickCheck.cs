@@ -233,6 +233,12 @@ internal static class TitleBackgroundQuickCheckEvaluator
             warnings.Add("camera does not frame the character");
         }
 
+        var capturedProfileMissing = IsCapturedLegacyProfileMissing(input);
+        if (capturedProfileMissing)
+        {
+            warnings.Add("captured legacy visible camera profile is missing or not applied");
+        }
+
         if (input.CameraVisibleProfileResolved
             && (!HasValue(input.CameraYaw) || !HasValue(input.CameraPitch) || !HasValue(input.CameraDistance)))
         {
@@ -240,8 +246,8 @@ internal static class TitleBackgroundQuickCheckEvaluator
         }
 
         if (IsCustomN4F4(input.CandidateId)
-            && input.CameraFramingMode is TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
-                or TitleBackgroundCharaSelectCameraFramingMode.CustomExperimental
+            && (input.CameraFramingMode is TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
+                or TitleBackgroundCharaSelectCameraFramingMode.CustomExperimental)
             && !input.CameraVisibleProfileApplied)
         {
             warnings.Add("n4f4 visible camera profile is not applied; Y-only framing is not enough");
@@ -286,6 +292,7 @@ internal static class TitleBackgroundQuickCheckEvaluator
         var reason = level switch
         {
             TitleBackgroundQuickCheckLevel.NG => ngReason,
+            TitleBackgroundQuickCheckLevel.WARN when capturedProfileMissing => "captured legacy visible camera profile is missing",
             TitleBackgroundQuickCheckLevel.WARN when warnings.Any(warning => warning.Contains("camera does not frame the character", StringComparison.Ordinal)) => "camera does not frame the character",
             TitleBackgroundQuickCheckLevel.WARN when warnings.Any(warning => warning.Contains("visual confirmation", StringComparison.Ordinal)
                 || warning.Contains("visibility is not visually confirmed", StringComparison.Ordinal)) => "background works but character visibility is not visually confirmed",
@@ -469,10 +476,11 @@ internal static class TitleBackgroundQuickCheckEvaluator
         if (warnings.Any(warning => warning.Contains("n4f4 visible camera profile", StringComparison.Ordinal)
                 || warning.Contains("camera does not frame the character", StringComparison.Ordinal)
                 || warning.Contains("yaw/pitch/distance was not applied", StringComparison.Ordinal)
+                || warning.Contains("captured legacy visible camera profile", StringComparison.Ordinal)
                 || warning.Contains("visual confirmation", StringComparison.Ordinal)
                 || warning.Contains("visibility is not visually confirmed", StringComparison.Ordinal)))
         {
-            return "capture legacy visible camera profile or compare legacy shooting composition camera";
+            return "Enable legacy shooting composition, confirm character is visible, then click Capture legacy visible camera.";
         }
 
         if (warnings.Any(warning => warning.Contains("bridge not invoked", StringComparison.Ordinal)))
@@ -741,6 +749,18 @@ internal static class TitleBackgroundQuickCheckEvaluator
     private static bool IsCustomN4F4(string candidateId)
     {
         return string.Equals(candidateId, TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId, StringComparison.Ordinal);
+    }
+
+    private static bool IsCapturedLegacyProfileMissing(TitleBackgroundQuickCheckInput input)
+    {
+        return IsCustomN4F4(input.CandidateId)
+            && (input.CameraFramingMode is TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
+                or TitleBackgroundCharaSelectCameraFramingMode.CustomExperimental)
+            && !input.CameraCapturedProfileEnabled
+            && string.Equals(NormalizeNone(input.CameraProfileSource), "candidate", StringComparison.OrdinalIgnoreCase)
+            && (!HasValue(input.CameraYaw) || !HasValue(input.CameraPitch) || !HasValue(input.CameraDistance))
+            && IsFalseOrNotObserved(input.CameraFramesCharacter)
+            && !input.BridgeCameraProfileApplied;
     }
 
     private static bool IsFalseOrNotObserved(string? value)

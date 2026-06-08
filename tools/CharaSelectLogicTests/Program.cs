@@ -697,7 +697,7 @@ Test("title background camera profile case 1 bridge applied but visual unknown i
     return result.Level == TitleBackgroundQuickCheckLevel.WARN
         && result.Level != TitleBackgroundQuickCheckLevel.OK
         && result.Reason.Contains("visual", StringComparison.Ordinal)
-        && result.NextAction.Contains("capture legacy visible camera profile", StringComparison.Ordinal);
+        && result.NextAction.Contains("Enable legacy shooting composition", StringComparison.Ordinal);
 });
 
 Test("title background camera profile case 2 n4f4 candidate recommended requires visible profile", () =>
@@ -711,7 +711,7 @@ Test("title background camera profile case 2 n4f4 candidate recommended requires
 
     return result.Level == TitleBackgroundQuickCheckLevel.WARN
         && result.Level != TitleBackgroundQuickCheckLevel.OK
-        && result.NextAction.Contains("capture legacy visible camera profile", StringComparison.Ordinal);
+        && result.NextAction.Contains("Enable legacy shooting composition", StringComparison.Ordinal);
 });
 
 Test("title background camera profile case 3 visible profile and visual visible is ok", () =>
@@ -779,6 +779,8 @@ Test("title background camera profile case 4 y only framing is not enough", () =
 Test("title background captured camera case 1 profile resolved but yaw pitch distance none is warn", () =>
 {
     var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        cameraFramingMode: TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended,
+        candidateRecommendedFraming: TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended,
         cameraProfileId: "n4f4-visible",
         cameraProfileSource: "candidate",
         cameraYaw: "none",
@@ -802,7 +804,7 @@ Test("title background captured camera case 1 profile resolved but yaw pitch dis
 
     return result.Level == TitleBackgroundQuickCheckLevel.WARN
         && result.DetailLines.Any(line => line == "camera.visibleProfileApplied=Partial")
-        && result.Reason == "camera does not frame the character";
+        && result.Reason == "captured legacy visible camera profile is missing";
 });
 
 Test("title background captured camera case 2 captured profile preferred", () =>
@@ -818,7 +820,28 @@ Test("title background captured camera case 2 captured profile preferred", () =>
             new Vector3(4f, 5f, 6f),
             out var profile)
         && profile.ProfileSource == "captured"
-        && profile.ProfileId == "n4f4-visible-captured";
+        && profile.ProfileId == "n4f4-visible-captured"
+        && profile.Yaw.HasValue
+        && profile.Pitch.HasValue
+        && profile.Distance.HasValue;
+});
+
+Test("title background captured camera case 2b capture button stores valid legacy visible profile", () =>
+{
+    var result = TitleBackgroundCapturedCameraProfileLogic.Validate(new TitleBackgroundCapturedCameraProfileInput(
+        true,
+        TitleBackgroundCharacterVisualStatus.Visible,
+        -1.6f,
+        -0.2f,
+        2.8f,
+        new Vector3(1f, 2f, 3f),
+        new Vector3(4f, 5f, 6f)));
+
+    return result.Success
+        && result.Source == TitleBackgroundCapturedCameraProfileLogic.VisibleLegacySource
+        && result.Distance > 0f
+        && result.DirH != 0f
+        && result.DirV != 0f;
 });
 
 Test("title background captured camera case 3 captured profile applied and frames character is ok", () =>
@@ -838,9 +861,12 @@ Test("title background captured camera case 3 captured profile applied and frame
         cameraVisibleProfileApplied: true,
         cameraVisibleProfileAppliedState: "True",
         cameraProfileApplyRoute: "captured-profile",
-        cameraCapturedProfileEnabled: true));
+        cameraCapturedProfileEnabled: true,
+        bridgeCameraProfileApplied: true));
 
-    return result.Level == TitleBackgroundQuickCheckLevel.OK;
+    return result.Level == TitleBackgroundQuickCheckLevel.OK
+        && result.DetailLines.Any(line => line == "camera.visibleProfileApplied=True")
+        && result.DetailLines.Any(line => line == "bridge.cameraProfileApplied=True");
 });
 
 Test("title background captured camera case 4 fallback profile without captured data warns", () =>
@@ -869,7 +895,7 @@ Test("title background captured camera case 4 fallback profile without captured 
             true)));
 
     return result.Level == TitleBackgroundQuickCheckLevel.WARN
-        && result.NextAction.Contains("capture legacy visible camera profile", StringComparison.Ordinal);
+        && result.NextAction.Contains("Enable legacy shooting composition", StringComparison.Ordinal);
 });
 
 Test("title background bridge applied camera is stored for settings ui", () =>

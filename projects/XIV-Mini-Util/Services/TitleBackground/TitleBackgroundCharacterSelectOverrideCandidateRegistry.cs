@@ -44,6 +44,92 @@ internal readonly record struct TitleBackgroundCharacterSelectCameraProfile(
         0f);
 }
 
+internal readonly record struct TitleBackgroundCapturedCameraProfileInput(
+    bool LegacyCompositionEnabled,
+    TitleBackgroundCharacterVisualStatus CharacterVisualStatus,
+    float? DirH,
+    float? DirV,
+    float? Distance,
+    Vector3? Position,
+    Vector3? LookAt);
+
+internal readonly record struct TitleBackgroundCapturedCameraProfileResult(
+    bool Success,
+    string FailureReason,
+    string Source,
+    float DirH,
+    float DirV,
+    float Distance,
+    Vector3 Position,
+    Vector3 LookAt);
+
+internal static class TitleBackgroundCapturedCameraProfileLogic
+{
+    public const string VisibleLegacySource = "legacy-shooting-composition-visible";
+
+    public static TitleBackgroundCapturedCameraProfileResult Validate(
+        TitleBackgroundCapturedCameraProfileInput input)
+    {
+        if (!input.LegacyCompositionEnabled)
+        {
+            return Fail("legacy shooting composition is not enabled");
+        }
+
+        if (input.CharacterVisualStatus != TitleBackgroundCharacterVisualStatus.Visible)
+        {
+            return Fail("character not visually confirmed");
+        }
+
+        if (!input.DirH.HasValue || !input.DirV.HasValue || !input.Distance.HasValue)
+        {
+            return Fail("no current camera snapshot");
+        }
+
+        if (!float.IsFinite(input.DirH.Value)
+            || !float.IsFinite(input.DirV.Value)
+            || !float.IsFinite(input.Distance.Value))
+        {
+            return Fail("current camera values are invalid");
+        }
+
+        if (input.Distance.Value <= 0f)
+        {
+            return Fail("distance is zero");
+        }
+
+        if (!input.Position.HasValue
+            || !input.LookAt.HasValue
+            || !TitleBackgroundCameraMath.IsFiniteVector(input.Position.Value)
+            || !TitleBackgroundCameraMath.IsFiniteVector(input.LookAt.Value))
+        {
+            return Fail("position/lookAt missing");
+        }
+
+        return new TitleBackgroundCapturedCameraProfileResult(
+            true,
+            "none",
+            VisibleLegacySource,
+            TitleBackgroundCharaSelectCameraLogic.NormalizeRadians(input.DirH.Value),
+            Math.Clamp(input.DirV.Value, -MathF.PI / 2f, MathF.PI / 2f),
+            TitleBackgroundCharaSelectCameraLogic.SanitizeOptionalDistance(input.Distance.Value) ?? input.Distance.Value,
+            TitleBackgroundCharaSelectCameraLogic.SanitizeVector(input.Position.Value),
+            TitleBackgroundCharaSelectCameraLogic.SanitizeVector(input.LookAt.Value));
+    }
+
+    private static TitleBackgroundCapturedCameraProfileResult Fail(string reason)
+    {
+        return new TitleBackgroundCapturedCameraProfileResult(
+            false,
+            reason,
+            string.Empty,
+            0f,
+            0f,
+            0f,
+            Vector3.Zero,
+            Vector3.Zero);
+    }
+}
+
 internal readonly record struct TitleBackgroundCharacterSelectOverrideCandidate(
     string Id,
     string DisplayName,

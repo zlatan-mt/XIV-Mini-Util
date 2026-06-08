@@ -70,6 +70,8 @@ public sealed unsafe class CharaSelectService : IDisposable
     private CharaSelectSceneLastObservation _lastSceneObservation = CharaSelectSceneLastObservation.Empty;
     private CharaSelectStageProbeSnapshot _lastStageProbe = CharaSelectStageProbeSnapshot.Empty;
     private TitleBackgroundCharacterCompositionBridgeSnapshot _lastTitleBackgroundBridgeSnapshot = TitleBackgroundCharacterCompositionBridgeSnapshot.Empty;
+    private CharaSelectCompositionRouteRuntimeSnapshot _lastLegacyCompositionRouteSnapshot = CharaSelectCompositionRouteRuntimeSnapshot.Empty;
+    private CharaSelectCompositionRouteRuntimeSnapshot _lastTitleBackgroundBridgeRouteSnapshot = CharaSelectCompositionRouteRuntimeSnapshot.Empty;
 
     public CharaSelectService(
         IGameInteropProvider gameInteropProvider,
@@ -141,6 +143,24 @@ public sealed unsafe class CharaSelectService : IDisposable
                 ? "none"
                 : _lastTitleBackgroundBridgeSnapshot.Source,
             CharacterVisualExpected = required,
+        };
+    }
+
+    internal CharaSelectCompositionRouteRuntimeSnapshot GetLegacyCompositionRouteSnapshot()
+    {
+        return _lastLegacyCompositionRouteSnapshot with
+        {
+            LegacyEnabled = _configuration.CharaSelectSceneCompositionEnabled,
+            BridgeEnabled = false,
+        };
+    }
+
+    internal CharaSelectCompositionRouteRuntimeSnapshot GetTitleBackgroundBridgeRouteSnapshot()
+    {
+        return _lastTitleBackgroundBridgeRouteSnapshot with
+        {
+            LegacyEnabled = false,
+            BridgeEnabled = CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeEnabled(_configuration),
         };
     }
 
@@ -802,6 +822,7 @@ public sealed unsafe class CharaSelectService : IDisposable
 
         try
         {
+            MarkCompositionRouteUpdateDisplayDetourCalled();
             patchedDisplayData = TryPatchOverrideDisplayData(
                 agent,
                 index,
@@ -951,6 +972,7 @@ public sealed unsafe class CharaSelectService : IDisposable
             patchedZoneId: entry->ClientSelectData.ZoneId,
             patchAttempted: true,
             patchApplied: true);
+        MarkCompositionRouteClientSelectDataPatched(hasLegacyRoute, hasTitleBackgroundBridge);
         MarkTitleBackgroundBridge(
             invoked: hasTitleBackgroundBridge,
             reason: CharaSelectSceneCompositionPlanner.TitleBackgroundCharacterVisibilityReason,
@@ -1416,11 +1438,81 @@ public sealed unsafe class CharaSelectService : IDisposable
                 return;
             }
 
+            MarkCompositionRouteRefreshDisplayCalled();
             agent->UpdateCharaSelectDisplay((sbyte)index, true);
         }
         catch (Exception ex)
         {
             _log.Warning(ex, "Failed to refresh CharaSelect display.");
+        }
+    }
+
+    private void MarkCompositionRouteUpdateDisplayDetourCalled()
+    {
+        if (_configuration.CharaSelectSceneCompositionEnabled)
+        {
+            _lastLegacyCompositionRouteSnapshot = _lastLegacyCompositionRouteSnapshot with
+            {
+                LegacyEnabled = true,
+                UpdateDisplayDetourCalled = true,
+                ApplyRoute = CharaSelectSceneCompositionPlanner.ResolveCompositionCaller(_configuration),
+                ProfileId = _configuration.CharaSelectSceneProfileId,
+                CameraSource = "LobbyCamera",
+            };
+        }
+
+        if (CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeEnabled(_configuration))
+        {
+            _lastTitleBackgroundBridgeRouteSnapshot = _lastTitleBackgroundBridgeRouteSnapshot with
+            {
+                BridgeEnabled = true,
+                UpdateDisplayDetourCalled = true,
+                ApplyRoute = "title-background-bridge",
+                ProfileId = _configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
+                CameraSource = "Adapter",
+            };
+        }
+    }
+
+    private void MarkCompositionRouteClientSelectDataPatched(bool legacyRoute, bool titleBackgroundBridge)
+    {
+        if (legacyRoute)
+        {
+            _lastLegacyCompositionRouteSnapshot = _lastLegacyCompositionRouteSnapshot with
+            {
+                ClientSelectDataPatched = true,
+                ApplyRoute = CharaSelectSceneCompositionPlanner.ClientSelectDataTerritoryPatchRoute,
+                CameraSource = "LobbyCamera",
+            };
+        }
+
+        if (titleBackgroundBridge)
+        {
+            _lastTitleBackgroundBridgeRouteSnapshot = _lastTitleBackgroundBridgeRouteSnapshot with
+            {
+                ClientSelectDataPatched = true,
+                ApplyRoute = "title-background-bridge/client-select-data",
+                CameraSource = "Adapter",
+            };
+        }
+    }
+
+    private void MarkCompositionRouteRefreshDisplayCalled()
+    {
+        if (_configuration.CharaSelectSceneCompositionEnabled)
+        {
+            _lastLegacyCompositionRouteSnapshot = _lastLegacyCompositionRouteSnapshot with
+            {
+                RefreshDisplayCalled = true,
+            };
+        }
+
+        if (CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeEnabled(_configuration))
+        {
+            _lastTitleBackgroundBridgeRouteSnapshot = _lastTitleBackgroundBridgeRouteSnapshot with
+            {
+                RefreshDisplayCalled = true,
+            };
         }
     }
 

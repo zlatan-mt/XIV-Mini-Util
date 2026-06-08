@@ -132,6 +132,27 @@ internal readonly record struct TitleBackgroundCharacterCompositionBridgeSnapsho
         false);
 }
 
+internal readonly record struct CharaSelectCompositionRouteRuntimeSnapshot(
+    bool LegacyEnabled,
+    bool BridgeEnabled,
+    bool UpdateDisplayDetourCalled,
+    bool ClientSelectDataPatched,
+    bool RefreshDisplayCalled,
+    string ApplyRoute,
+    string ProfileId,
+    string CameraSource)
+{
+    public static CharaSelectCompositionRouteRuntimeSnapshot Empty { get; } = new(
+        false,
+        false,
+        false,
+        false,
+        false,
+        "none",
+        "none",
+        "Unknown");
+}
+
 internal readonly record struct CharaSelectSceneCompositionDiagnostic(
     bool Enabled,
     bool TitleBackgroundConflict,

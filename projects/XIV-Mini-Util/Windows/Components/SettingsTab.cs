@@ -954,6 +954,21 @@ public sealed class SettingsTab : ITabComponent
         }
 
         ImGui.SameLine();
+        if (ImGui.Button("Save as n4f4 visible profile##TitleBackgroundSaveN4F4VisibleProfile"))
+        {
+            if (_titleScreenBackgroundService.CaptureLegacyVisibleCameraProfile(out var message))
+            {
+                _titleBackgroundCameraProfileMessage = message;
+                _titleBackgroundCameraProfileMessageColor = new Vector4(0.3f, 0.8f, 0.45f, 1f);
+            }
+            else
+            {
+                _titleBackgroundCameraProfileMessage = message;
+                _titleBackgroundCameraProfileMessageColor = new Vector4(1f, 0.45f, 0.45f, 1f);
+            }
+        }
+
+        ImGui.SameLine();
         if (ImGui.Button("Clear captured profile##TitleBackgroundClearCapturedCamera"))
         {
             _titleScreenBackgroundService.ClearLegacyVisibleCameraProfile();

@@ -881,9 +881,47 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var currentDistance = hasCurrent ? current.LobbyDistance ?? current.Distance : null;
         var currentPosition = hasCurrent ? current.SceneCameraPosition : _lastPostFixOnSceneCameraPosition;
         var currentLookAt = hasCurrent ? current.SceneCameraLookAtVector ?? current.LobbyLastLookAtVector : _lastPostFixOnLookAtVector;
+        var legacyRoute = _charaSelectService?.GetLegacyCompositionRouteSnapshot()
+            ?? CharaSelectCompositionRouteRuntimeSnapshot.Empty;
+        var bridgeRoute = _charaSelectService?.GetTitleBackgroundBridgeRouteSnapshot()
+            ?? CharaSelectCompositionRouteRuntimeSnapshot.Empty;
 
         return
         [
+            "Legacy composition ON snapshot",
+            $"legacy.enabled={legacyRoute.LegacyEnabled}",
+            $"legacy.characterVisible={BuildCharacterVisibleLabel()}",
+            $"legacy.currentDirH={FormatFloat(currentDirH)}",
+            $"legacy.currentDirV={FormatFloat(currentDirV)}",
+            $"legacy.currentDistance={FormatFloat(currentDistance)}",
+            $"legacy.currentPosition={FormatVector(currentPosition)}",
+            $"legacy.currentLookAt={FormatVector(currentLookAt)}",
+            $"legacy.profileId={FormatNone(legacyRoute.ProfileId)}",
+            $"legacy.applyRoute={FormatNone(legacyRoute.ApplyRoute)}",
+            $"legacy.clientSelectDataPatched={legacyRoute.ClientSelectDataPatched}",
+            $"legacy.refreshDisplayCalled={legacyRoute.RefreshDisplayCalled}",
+            $"legacy.updateDisplayDetourCalled={legacyRoute.UpdateDisplayDetourCalled}",
+            $"legacy.cameraSource={legacyRoute.CameraSource}",
+            "Title Background bridge snapshot",
+            $"bridge.enabled={bridgeRoute.BridgeEnabled}",
+            $"bridge.characterVisible={BuildCharacterVisibleLabel()}",
+            $"bridge.currentDirH={FormatFloat(currentDirH)}",
+            $"bridge.currentDirV={FormatFloat(currentDirV)}",
+            $"bridge.currentDistance={FormatFloat(currentDistance)}",
+            $"bridge.currentPosition={FormatVector(currentPosition)}",
+            $"bridge.currentLookAt={FormatVector(currentLookAt)}",
+            $"bridge.profileId={titleBackgroundProfileLabel}",
+            $"bridge.applyRoute={BuildCameraProfileApplyRoute(cameraProfile, _charaSelectCameraAdapter.RuntimeState.HasCameraPose, GetPhase2GApplyCount() > 0)}",
+            $"bridge.clientSelectDataPatched={bridgeRoute.ClientSelectDataPatched}",
+            $"bridge.refreshDisplayCalled={bridgeRoute.RefreshDisplayCalled}",
+            $"bridge.updateDisplayDetourCalled={bridgeRoute.UpdateDisplayDetourCalled}",
+            $"bridge.cameraSource={bridgeRoute.CameraSource}",
+            "Delta",
+            "dirH.delta=none",
+            "dirV.delta=none",
+            "distance.delta=none",
+            "position.delta=none",
+            "lookAt.delta=none",
             "Legacy shooting composition camera profile: none observed in reusable profile resolver",
             $"Title Background camera profile: {titleBackgroundProfileLabel}",
             $"Captured camera profile enabled={_configuration.TitleBackgroundCapturedCameraProfileEnabled}",
@@ -912,6 +950,15 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         ];
     }
 
+    private string BuildCharacterVisibleLabel()
+    {
+        return _configuration.TitleBackgroundCharacterVisualStatus == TitleBackgroundCharacterVisualStatus.Visible
+            ? "True"
+            : _configuration.TitleBackgroundCharacterVisualStatus == TitleBackgroundCharacterVisualStatus.Unknown
+                ? "Unknown"
+                : "False";
+    }
+
     public bool CaptureLegacyVisibleCameraProfile(out string message)
     {
         if (!TryCaptureActiveCameraSnapshot(out var activeCamera, out var activeError))
@@ -924,28 +971,34 @@ public sealed unsafe class TitleScreenBackgroundService : IDisposable
         var dirH = lobbyCaptured ? lobbyCamera.DirH ?? activeCamera.DirH : activeCamera.DirH;
         var dirV = lobbyCaptured ? lobbyCamera.DirV ?? activeCamera.DirV : activeCamera.DirV;
         var distance = lobbyCaptured ? lobbyCamera.Distance ?? activeCamera.Distance : activeCamera.Distance;
-        if (!dirH.HasValue || !dirV.HasValue || !distance.HasValue || distance.Value <= 0f)
+        var capture = TitleBackgroundCapturedCameraProfileLogic.Validate(new TitleBackgroundCapturedCameraProfileInput(
+            _configuration.CharaSelectSceneCompositionEnabled,
+            _configuration.TitleBackgroundCharacterVisualStatus,
+            dirH,
+            dirV,
+            distance,
+            activeCamera.SceneCameraPosition,
+            activeCamera.LookAtVector));
+        if (!capture.Success)
         {
-            message = "capture failed: yaw/pitch/distance unavailable";
+            message = $"capture failed: {capture.FailureReason}";
             return false;
         }
 
         _configuration.TitleBackgroundCapturedCameraProfileEnabled = true;
-        _configuration.TitleBackgroundCapturedCameraProfileSource = _configuration.CharaSelectSceneCompositionEnabled
-            ? "legacy-shooting-composition"
-            : "manual-current-camera";
-        _configuration.TitleBackgroundCapturedDirH = TitleBackgroundCharaSelectCameraLogic.NormalizeRadians(dirH.Value);
-        _configuration.TitleBackgroundCapturedDirV = TitleBackgroundPreset.SanitizeCoordinate(dirV.Value);
-        _configuration.TitleBackgroundCapturedDistance = TitleBackgroundCharaSelectCameraLogic.SanitizeOptionalDistance(distance.Value) ?? distance.Value;
-        _configuration.TitleBackgroundCapturedPositionX = TitleBackgroundPreset.SanitizeCoordinate(activeCamera.SceneCameraPosition.X);
-        _configuration.TitleBackgroundCapturedPositionY = TitleBackgroundPreset.SanitizeCoordinate(activeCamera.SceneCameraPosition.Y);
-        _configuration.TitleBackgroundCapturedPositionZ = TitleBackgroundPreset.SanitizeCoordinate(activeCamera.SceneCameraPosition.Z);
-        _configuration.TitleBackgroundCapturedLookAtX = TitleBackgroundPreset.SanitizeCoordinate(activeCamera.LookAtVector.X);
-        _configuration.TitleBackgroundCapturedLookAtY = TitleBackgroundPreset.SanitizeCoordinate(activeCamera.LookAtVector.Y);
-        _configuration.TitleBackgroundCapturedLookAtZ = TitleBackgroundPreset.SanitizeCoordinate(activeCamera.LookAtVector.Z);
+        _configuration.TitleBackgroundCapturedCameraProfileSource = capture.Source;
+        _configuration.TitleBackgroundCapturedDirH = capture.DirH;
+        _configuration.TitleBackgroundCapturedDirV = capture.DirV;
+        _configuration.TitleBackgroundCapturedDistance = capture.Distance;
+        _configuration.TitleBackgroundCapturedPositionX = capture.Position.X;
+        _configuration.TitleBackgroundCapturedPositionY = capture.Position.Y;
+        _configuration.TitleBackgroundCapturedPositionZ = capture.Position.Z;
+        _configuration.TitleBackgroundCapturedLookAtX = capture.LookAt.X;
+        _configuration.TitleBackgroundCapturedLookAtY = capture.LookAt.Y;
+        _configuration.TitleBackgroundCapturedLookAtZ = capture.LookAt.Z;
         _configuration.TitleBackgroundCapturedCameraProfileCapturedAt = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz");
         _configuration.Save();
-        message = $"captured {FormatFloat(dirH)} / {FormatFloat(dirV)} / {FormatFloat(distance)}";
+        message = $"captured {FormatFloat(capture.DirH)} / {FormatFloat(capture.DirV)} / {FormatFloat(capture.Distance)}";
         return true;
     }
 
