@@ -5,6 +5,7 @@ using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using System.Numerics;
 using System.Text;
+using System.Text.Json;
 using XivMiniUtil;
 using XivMiniUtil.Services.CharaSelect;
 using XivMiniUtil.Services.TitleBackground;
@@ -29,6 +30,40 @@ Test("same content id with new character pointer replays", () =>
     var tracker = new CharaSelectReplayTracker();
     tracker.MarkReplayed(1, 100, 0x1000);
     return tracker.ShouldReplay(1, 100, 0x2000, force: false);
+});
+
+Test("configuration title background properties remain top-level json", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundOverrideEnabled = true,
+        TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.CharaSelectOnly,
+        TitleBackgroundTerritoryPath = "bg/ffxiv/fst_f1/twn/f1t1/level/f1t1",
+        TitleBackgroundCameraX = 12.5f,
+        TitleBackgroundCharacterSelectOverrideCandidateId = "custom:n4f4",
+        CharaSelectSceneCompositionEnabled = true,
+        CharaSelectSceneProfileId = "custom:n4f4",
+        CharaSelectOverridePositionX = 4.25f,
+    };
+
+    var json = JsonSerializer.Serialize(configuration);
+    var restored = JsonSerializer.Deserialize<Configuration>(json);
+
+    return json.Contains("\"TitleBackgroundOverrideEnabled\"", StringComparison.Ordinal)
+        && json.Contains("\"TitleBackgroundRuntimeMode\"", StringComparison.Ordinal)
+        && json.Contains("\"CharaSelectSceneCompositionEnabled\"", StringComparison.Ordinal)
+        && json.Contains("\"CharaSelectSceneProfileId\"", StringComparison.Ordinal)
+        && !json.Contains("TitleBackgroundConfig", StringComparison.Ordinal)
+        && !json.Contains("CharaSelectConfig", StringComparison.Ordinal)
+        && restored != null
+        && restored.TitleBackgroundOverrideEnabled
+        && restored.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
+        && restored.TitleBackgroundTerritoryPath == configuration.TitleBackgroundTerritoryPath
+        && Math.Abs(restored.TitleBackgroundCameraX - configuration.TitleBackgroundCameraX) < 0.001f
+        && restored.TitleBackgroundCharacterSelectOverrideCandidateId == configuration.TitleBackgroundCharacterSelectOverrideCandidateId
+        && restored.CharaSelectSceneCompositionEnabled
+        && restored.CharaSelectSceneProfileId == configuration.CharaSelectSceneProfileId
+        && Math.Abs(restored.CharaSelectOverridePositionX - configuration.CharaSelectOverridePositionX) < 0.001f;
 });
 
 Test("force replay bypasses previous state", () =>
@@ -902,7 +937,12 @@ Test("title background bridge applied camera is stored for settings ui", () =>
 {
     var root = FindRepositoryRoot();
     var charaSelectText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.cs"));
-    var titleBackgroundText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var titleBackgroundText = string.Join(
+        Environment.NewLine,
+        Directory.EnumerateFiles(
+                Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"),
+                "TitleScreenBackgroundService*.cs")
+            .Select(File.ReadAllText));
     var settingsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
 
     return charaSelectText.Contains("MarkTitleBackgroundCharacterCompositionBridgeCameraApplied", StringComparison.Ordinal)
