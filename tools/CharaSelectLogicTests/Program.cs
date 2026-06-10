@@ -431,7 +431,7 @@ Test("chara select stage probe stores primitive diagnostics only", () =>
 Test("chara select scene ui explains unchanged default background", () =>
 {
     var root = FindRepositoryRoot();
-    var settings = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var settings = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     return settings.Contains("場所が default のままなら", StringComparison.Ordinal)
         && settings.Contains("場所=変わらない", StringComparison.Ordinal);
 });
@@ -439,7 +439,7 @@ Test("chara select scene ui explains unchanged default background", () =>
 Test("title background camera framing note is independent of shooting composition", () =>
 {
     var root = FindRepositoryRoot();
-    var settings = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var settings = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     return settings.Contains("Camera framing is handled by Title Background.", StringComparison.Ordinal)
         && settings.Contains("integrated character composition", StringComparison.Ordinal);
 });
@@ -943,7 +943,7 @@ Test("title background bridge applied camera is stored for settings ui", () =>
                 Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"),
                 "TitleScreenBackgroundService*.cs")
             .Select(File.ReadAllText));
-    var settingsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var settingsText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
 
     return charaSelectText.Contains("MarkTitleBackgroundCharacterCompositionBridgeCameraApplied", StringComparison.Ordinal)
         && charaSelectText.Contains("AppliedCamera = true", StringComparison.Ordinal)
@@ -1197,7 +1197,7 @@ Test("title background quickcheck ui simple mode is bounded", () =>
 Test("title background settings simple panel hides advanced diagnostics", () =>
 {
     var root = FindRepositoryRoot();
-    var settingsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var settingsText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
 
     return simplePanel.Contains("Character Select Background", StringComparison.Ordinal)
@@ -1216,7 +1216,7 @@ Test("title background settings simple panel hides advanced diagnostics", () =>
 Test("title background settings simple check uses one-button quickcheck entrypoint", () =>
 {
     var root = FindRepositoryRoot();
-    var settingsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var settingsText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
     var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
     var simpleCheck = ExtractMethodBody(serviceText, "internal TitleBackgroundSimpleUiSummary RunSimpleCheck()");
