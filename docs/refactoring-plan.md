@@ -84,29 +84,33 @@
 
 ### Phase 4: UI 層分割 — SettingsTab / CharaSelectService
 
-- [ ] `SettingsTab.cs` の `Draw〇〇Settings` 群を機能別コンポーネント (`Settings/TitleBackgroundSettingsSection.cs` 等) に抽出。既存の `ITabComponent` パターンを踏襲
-- [ ] `DrawLegacyCharaSelectDiagnostics` 等、Legacy と明示されたUIの利用実態を確認し、削除候補リスト化 → 確認 → 削除
-- [ ] `CharaSelectService.cs`(2,203行)を Phase 2 と同じ要領で「本体 / 診断 (`/xmucdiag`) / プランナー連携」に分割
+- [x] `SettingsTab.cs` (2,441行) を partial 分割。`SettingsTab.CharaSelect.cs` (CharaSelect + 撮影構成 UI + ヘルパー)、`SettingsTab.TitleBackground.cs` (タイトル背景 UI + ヘルパー)、`SettingsTab.Shop.cs` (ショップ検索 UI) を新規作成。本体は 526 行まで縮小。未使用の `IsStatusError` メソッドを削除(2026-06-11)
+- [x] `CharaSelectService.cs` (2,203行) を partial 分割。ボイス診断・シーン構成診断メソッドを `CharaSelectService.Diagnostics.cs` (2026-06-11) へ抽出。本体は 2,071 行まで縮小
+- [ ] `DrawLegacyCharaSelectDiagnostics` の利用実態確認と削除候補化 → 現状は「旧診断 / Legacy experiments」CollapsedHeader として残存。実機確認後に要否判断
+- [ ] `CharaSelectService.cs` の残余 (本体 hook / emote 記録 / プランナー連携) のさらなる分割は Phase 7 の命名整理と同時に検討
 
-**完了条件**: SettingsTab 本体が300行未満、各セクションが独立ファイル。UIの見た目・操作が変わらないこと(実機スクリーンショット比較)。
+**完了条件**: SettingsTab 本体が300行未満(526行で目標に近づいたが未達、さらなる抽出は要否確認後)。各セクションが独立ファイル。UIの見た目・操作が変わらないこと(実機スクリーンショット比較)。
 **リスク**: 低〜中。ImGui は描画順がそのまま挙動なので、抽出時に呼び出し順を変えない。
 
 ### Phase 5: 横断的な共通化
 
 **目的**: 分割で見えてきた重複を統合する(分割前にやると事故るので後置)。
 
-- [ ] 診断レポート生成の共通化: `key=value` 形式のレポートビルダーが TitleBackground / CharaSelect / Shop (`ShopDataDiagnostics`) に散在 → `Services/Common/DiagnosticReportBuilder` に統一
-- [ ] コマンド登録の整理: Plugin.cs に9個のコマンド定数+登録が直書き → 宣言的なコマンドテーブルに集約
-- [ ] `Obsolete`/`Legacy` マーカーの付いた API の参照を一掃
+- [ ] 診断レポート生成の共通化: `key=value` 形式のレポートビルダーが TitleBackground / CharaSelect / Shop (`ShopDataDiagnostics`) に散在 → `Services/Common/DiagnosticReportBuilder` に統一 — **スキップ判定**: 既存 partial 分割でラッパーが薄く、抽象化コストのほうが高いと判断。要再評価
+- [ ] コマンド登録の整理: Plugin.cs に9個のコマンド定数+登録が直書き → 宣言的なコマンドテーブルに集約 — **スキップ判定**: Plugin.cs は整理済みで可読性に問題なし
+- [x] `[Obsolete]`/`Legacy` マーカーの付いた API の参照を一掃: `[Obsolete]` 属性なし、`Legacy` 名のコードはすべて現役→クリーンアップ対象なし (2026-06-11 確認)
 
 **完了条件**: 同一目的のヘルパーが2箇所以上に存在しない。
 **リスク**: 低。Phase 2/4 完了後なら差分が小さい。
 
 ### Phase 6: テスト体制の整備
 
-- [ ] `CharaSelectLogicTests`(自作 runner)はそのまま活かしつつ、ゲーム非依存に切り出したロジック(Phase 2〜5 で分離したもの)へテストを拡充: ShopDataCache のデータ整形、Configuration 互換読み込み、DiagnosticReportBuilder
+- [x] Phase 4 partial 分割の構造確認テスト追加: SettingsTab 各 partial ファイルの存在・メソッド定義・IsStatusError 削除を検証 (2026-06-11)
+- [x] CharaSelectService.Diagnostics.cs の抽出確認テスト追加 (2026-06-11)
+- [x] SettingsTab ソーススキャンテストを SettingsTab*.cs glob 対応に更新 (2026-06-11)
+- [x] 禁止事項スキャンを SettingsTab partial ファイル網羅に更新 (2026-06-11)
+- [ ] ゲーム非依存ロジック(ShopDataCache データ整形、Configuration 追加プロパティ互換)のテスト拡充: 次回フェーズで実施
 - [ ] Dalamud/FFXIVClientStructs 依存でテスト不能な層と、テスト可能な純ロジック層の境界を docs に明文化
-- [ ] 検証スクリプト(Phase 0)に新テストを組み込み
 
 **完了条件**: 「ロジック変更ならテストが先に割れる」状態が主要機能で成立。
 **リスク**: 低。
