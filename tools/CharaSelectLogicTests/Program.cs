@@ -3196,8 +3196,7 @@ Test("title background phase2q implementation avoids prohibited write paths", ()
     {
         Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundCharacterSelectOverrideCandidateRegistry.cs"),
         Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundPhase2NDeliveryDiagnostic.cs"),
-        Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"),
-    };
+    }.Concat(Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs")).ToArray();
     var titleBackgroundText = string.Join(
         "\n",
         changedFiles.Select(File.ReadAllText));
@@ -3223,8 +3222,7 @@ Test("title background phase2o docs and ui avoid n4f4 synthetic preset wording",
         Path.Combine(root, "docs", "title-background-character-select-bright-candidates.md"),
         Path.Combine(root, "docs", "title-background-character-select-delivery-notes.md"),
         Path.Combine(root, "docs", "title-background-character-select-phase2n-plan.md"),
-        Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"),
-    };
+    }.Concat(Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs")).ToArray();
 
     return paths.All(path => File.Exists(path)
         && !File.ReadAllText(path).Contains("n4f4 " + "preset", StringComparison.OrdinalIgnoreCase));
@@ -5114,6 +5112,68 @@ Test("title background case 4 camera framing applied but scene override not obse
         sceneOverrideApplyObserved: false));
     return result.Level == TitleBackgroundQuickCheckLevel.NG
         && result.Reason.Contains("camera framing applied but scene override was not observed", StringComparison.Ordinal);
+});
+
+// --- Phase 4 partial split structural tests ---
+
+Test("settings tab is split into chara select partial", () =>
+{
+    var root = FindRepositoryRoot();
+    var charaSelectFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.CharaSelect.cs");
+    var mainFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs");
+    var charaSelectText = File.ReadAllText(charaSelectFile);
+    var mainText = File.ReadAllText(mainFile);
+    return charaSelectText.Contains("private void DrawCharaSelectSettings()", StringComparison.Ordinal)
+        && charaSelectText.Contains("private void DrawLegacyCharaSelectDiagnostics()", StringComparison.Ordinal)
+        && charaSelectText.Contains("private static string GetStageStrategyLabel(", StringComparison.Ordinal)
+        && mainText.Contains("partial class SettingsTab", StringComparison.Ordinal)
+        && !mainText.Contains("private void DrawCharaSelectSettings()", StringComparison.Ordinal);
+});
+
+Test("settings tab is split into title background partial", () =>
+{
+    var root = FindRepositoryRoot();
+    var tbFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackground.cs");
+    var mainFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs");
+    var tbText = File.ReadAllText(tbFile);
+    var mainText = File.ReadAllText(mainFile);
+    return tbText.Contains("DrawTitleBackgroundSettings", StringComparison.Ordinal)
+        && tbText.Contains("DrawTitleBackgroundSimplePanel", StringComparison.Ordinal)
+        && tbText.Contains("ClearTitleBackgroundInputs", StringComparison.Ordinal)
+        && !mainText.Contains("DrawTitleBackgroundSettings", StringComparison.Ordinal);
+});
+
+Test("settings tab is split into shop partial", () =>
+{
+    var root = FindRepositoryRoot();
+    var shopFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.Shop.cs");
+    var mainFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs");
+    var shopText = File.ReadAllText(shopFile);
+    var mainText = File.ReadAllText(mainFile);
+    return shopText.Contains("private void DrawShopSearchSettings()", StringComparison.Ordinal)
+        && shopText.Contains("private void UpdateFilteredTerritories(", StringComparison.Ordinal)
+        && !mainText.Contains("private void DrawShopSearchSettings()", StringComparison.Ordinal);
+});
+
+Test("settings tab main file does not contain dead IsStatusError method", () =>
+{
+    var root = FindRepositoryRoot();
+    var settingsAll = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
+    return !settingsAll.Contains("IsStatusError", StringComparison.Ordinal);
+});
+
+Test("chara select service voice diagnostics extracted to partial", () =>
+{
+    var root = FindRepositoryRoot();
+    var diagFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.Diagnostics.cs");
+    var mainFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.cs");
+    var diagText = File.ReadAllText(diagFile);
+    var mainText = File.ReadAllText(mainFile);
+    return diagText.Contains("GetVoiceDiagnosticLines", StringComparison.Ordinal)
+        && diagText.Contains("GetSceneCompositionDiagnosticLines", StringComparison.Ordinal)
+        && diagText.Contains("AppendVoiceTableDiagnostics", StringComparison.Ordinal)
+        && mainText.Contains("partial class CharaSelectService", StringComparison.Ordinal)
+        && !mainText.Contains("GetVoiceDiagnosticLines", StringComparison.Ordinal);
 });
 
 if (failures.Count > 0)
