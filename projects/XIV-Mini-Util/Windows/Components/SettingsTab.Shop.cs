@@ -1,6 +1,5 @@
 // Path: projects/XIV-Mini-Util/Windows/Components/SettingsTab.Shop.cs
 // Description: ショップ検索関連の設定UI
-using Dalamud.Bindings.ImGui;
 using System.Numerics;
 using ImGui = Dalamud.Bindings.ImGui.ImGui;
 using ImGuiTableColumnFlags = Dalamud.Bindings.ImGui.ImGuiTableColumnFlags;

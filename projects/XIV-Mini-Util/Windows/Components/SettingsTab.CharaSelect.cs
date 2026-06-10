@@ -1,10 +1,8 @@
 // Path: projects/XIV-Mini-Util/Windows/Components/SettingsTab.CharaSelect.cs
 // Description: キャラクター選択・撮影構成関連の設定UI
-using Dalamud.Bindings.ImGui;
 using System.Numerics;
 using ImGui = Dalamud.Bindings.ImGui.ImGui;
 using XivMiniUtil.Services.CharaSelect;
-using XivMiniUtil.Services.TitleBackground;
 
 namespace XivMiniUtil.Windows.Components;
 

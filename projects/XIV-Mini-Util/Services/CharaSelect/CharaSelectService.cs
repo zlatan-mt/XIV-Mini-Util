@@ -682,7 +682,6 @@ public sealed unsafe partial class CharaSelectService : IDisposable
         _configuration.Save();
     }
 
-
     public void Dispose()
     {
         if (_disposed)
@@ -1653,7 +1652,6 @@ public sealed unsafe partial class CharaSelectService : IDisposable
             _configuration.Save();
         }
     }
-
 
     private uint GetChangePoseEmoteId()
     {

@@ -1,9 +1,7 @@
 // Path: projects/XIV-Mini-Util/Windows/Components/SettingsTab.TitleBackground.cs
 // Description: タイトル背景・Character Select背景差し替え関連の設定UI
-using Dalamud.Bindings.ImGui;
 using System.Numerics;
 using ImGui = Dalamud.Bindings.ImGui.ImGui;
-using XivMiniUtil.Services.CharaSelect;
 using XivMiniUtil.Services.TitleBackground;
 
 namespace XivMiniUtil.Windows.Components;
