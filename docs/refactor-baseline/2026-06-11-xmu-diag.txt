@@ -1,0 +1,2 @@
+[23:32] [XIV Mini Util] 診断レポートを出力しました: C:\Users\MonaT\AppData\Roaming\XIVLauncher\pluginConfigs\XivMiniUtil.Dev\shop-diagnostics-20260611-233237.md
+[23:32] [XIV Mini Util] 位置情報なしNPC: 179件, NPCマッチなしショップ: 340件

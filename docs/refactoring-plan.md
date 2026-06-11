@@ -35,7 +35,7 @@
 
 - [x] `CharaSelectLogicTests` を現状のまま通ることを確認し、ベースライン記録
 - [x] Release ビルド (`-p:DevPluginOutputDir=`) の出力ファイル一覧をスナップショット化(zip 内容の差分検知用)
-- [ ] 実機で `/xmu diag` `/xmutbgdiag` `/xmutbgcheck` の出力を取得し `docs/refactor-baseline/` に保存(キャラクタリゼーションテストの代わり)
+- [x] 実機で `/xmu diag` `/xmutbgdiag` `/xmutbgcheck` の出力を取得し `docs/refactor-baseline/` に保存(キャラクタリゼーションテストの代わり)— 2026-06-11 取得 (v0.3.8)。旧 phase2M/2N キーと新 alias の併記、post-login leak なしを確認
 - [x] `scripts/` にビルド+テスト一括検証スクリプトを追加(各フェーズの完了ゲートにする)
 
 **完了条件**: 上記スクリプト一発で green が確認できる。

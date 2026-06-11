@@ -1,0 +1,10 @@
+[23:33] [XIV Mini Util] [XMU QuickCheck] WARN
+[23:33] [XIV Mini Util] Candidate: custom:n4f4 / Custom n4f4 override target
+[23:33] [XIV Mini Util] Mode: SceneOverrideOnly
+[23:33] [XIV Mini Util] Background: applied
+[23:33] [XIV Mini Util] Login transition: warn
+[23:33] [XIV Mini Util] Post-login leak: none
+[23:33] [XIV Mini Util] Character: not detected by diagnostics / visual confirmation required
+[23:33] [XIV Mini Util] Warning: QuickCheck was not started; run-scoped confidence is limited
+[23:33] [XIV Mini Util] Reason: captured legacy visible camera profile is missing / Next: start QuickCheck, enter Character Select, log in, then run check
+[23:33] [XIV Mini Util] Details: title-background-quickcheck.txt
