@@ -1,18 +1,18 @@
-// Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundPhase2MPlacementDiagnostic.cs
+// Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundCharacterPlacementDiagnostic.cs
 // Description: Phase 2M character placement diagnostics summary logic
 // Reason: Keep placement/ground-height verdicts testable without writing actor or camera state
 using System.Numerics;
 
 namespace XivMiniUtil.Services.TitleBackground;
 
-internal enum TitleBackgroundPhase2MActorMatchKind
+internal enum TitleBackgroundCharacterPlacementActorMatchKind
 {
     None,
     Single,
     Ambiguous,
 }
 
-internal readonly record struct TitleBackgroundPhase2MActorCandidate(
+internal readonly record struct TitleBackgroundCharacterPlacementActorCandidate(
     int SourceIndex,
     string Source,
     int ObjectIndex,
@@ -55,7 +55,7 @@ internal readonly record struct TitleBackgroundPhase2MActorCandidate(
     int Score,
     string ScoreReason);
 
-internal readonly record struct TitleBackgroundPhase2MSourceDiscovery(
+internal readonly record struct TitleBackgroundCharacterPlacementSourceDiscovery(
     string Name,
     bool Available,
     int Count,
@@ -65,7 +65,7 @@ internal readonly record struct TitleBackgroundPhase2MSourceDiscovery(
     int DrawObjectNonNullCount = 0,
     int ModelLikeNonNullCount = 0);
 
-internal readonly record struct TitleBackgroundPhase2MObjectTableStats(
+internal readonly record struct TitleBackgroundCharacterPlacementObjectTableStats(
     int TotalScanned,
     int NamedCount,
     int PlayerLikeCount,
@@ -75,7 +75,7 @@ internal readonly record struct TitleBackgroundPhase2MObjectTableStats(
     int NearCameraCount,
     int NearConfiguredCharacterCount);
 
-internal readonly record struct TitleBackgroundPhase2MPlacementFrame(
+internal readonly record struct TitleBackgroundCharacterPlacementFrame(
     int Frame,
     string Reason,
     bool ActiveCameraCaptured,
@@ -90,13 +90,13 @@ internal readonly record struct TitleBackgroundPhase2MPlacementFrame(
     float? LobbyDirV,
     float? LobbyDistance,
     float? LobbyInterpDistance,
-    TitleBackgroundPhase2MActorMatchKind ActorMatchKind,
-    TitleBackgroundPhase2MActorCandidate? Actor,
-    IReadOnlyList<TitleBackgroundPhase2MActorCandidate> ObjectCandidates,
-    IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> SourceDiscovery,
+    TitleBackgroundCharacterPlacementActorMatchKind ActorMatchKind,
+    TitleBackgroundCharacterPlacementActorCandidate? Actor,
+    IReadOnlyList<TitleBackgroundCharacterPlacementActorCandidate> ObjectCandidates,
+    IReadOnlyList<TitleBackgroundCharacterPlacementSourceDiscovery> SourceDiscovery,
     int CandidateCount,
     string ActorStatus,
-    TitleBackgroundPhase2MObjectTableStats ObjectTableStats,
+    TitleBackgroundCharacterPlacementObjectTableStats ObjectTableStats,
     string ActorCandidateStatus,
     string ActorCandidateReason,
     string ActorSource,
@@ -114,7 +114,7 @@ internal readonly record struct TitleBackgroundPhase2MPlacementFrame(
     float? ActorYMinusFocusY,
     float? ActorYMinusNativeLookAtY);
 
-internal readonly record struct TitleBackgroundPhase2MSummary(
+internal readonly record struct TitleBackgroundCharacterPlacementSummary(
     string ActorDiagnosticStatus,
     string ActorVisible,
     string ActorGroundAligned,
@@ -147,7 +147,7 @@ internal readonly record struct TitleBackgroundPhase2MSummary(
     string NextAction,
     string NextActionReason);
 
-public enum TitleBackgroundPhase2MExperimentalApplyMode
+public enum TitleBackgroundCharacterPlacementExperimentalApplyMode
 {
     None,
     CameraAnchorOnly,
@@ -157,7 +157,7 @@ public enum TitleBackgroundPhase2MExperimentalApplyMode
     VisibilityProbeOnly,
 }
 
-internal static class TitleBackgroundPhase2MPlacementDiagnostic
+internal static class TitleBackgroundCharacterPlacementDiagnostic
 {
     public static readonly int[] RetainedFrames = [0, 1, 2, 4, 8, 16, 30, 60, 120, 300, 600, 900, 1200];
 
@@ -166,12 +166,12 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
         return Array.IndexOf(RetainedFrames, frame) >= 0;
     }
 
-    public static TitleBackgroundPhase2MSummary BuildSummary(
-        IReadOnlyCollection<TitleBackgroundPhase2MPlacementFrame> frames)
+    public static TitleBackgroundCharacterPlacementSummary BuildSummary(
+        IReadOnlyCollection<TitleBackgroundCharacterPlacementFrame> frames)
     {
         if (frames.Count == 0)
         {
-            return new TitleBackgroundPhase2MSummary(
+            return new TitleBackgroundCharacterPlacementSummary(
                 "not-run",
                 "not-observed",
                 "unknown",
@@ -202,7 +202,7 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
                 "none",
                 "CharacterManager",
                 "insufficient-data",
-                "Phase2M pre-login capture is unavailable");
+                "CharacterPlacement pre-login capture is unavailable");
         }
 
         var ordered = frames.OrderBy(frame => frame.Frame).ToArray();
@@ -212,16 +212,16 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
             .Select(group => group.OrderByDescending(candidate => candidate.Score).First())
             .ToArray();
         var summary = BuildCandidateResolution(candidates);
-        var hasSingleActor = ordered.Any(frame => frame.ActorMatchKind == TitleBackgroundPhase2MActorMatchKind.Single);
-        var hasAmbiguousActor = ordered.Any(frame => frame.ActorMatchKind == TitleBackgroundPhase2MActorMatchKind.Ambiguous);
+        var hasSingleActor = ordered.Any(frame => frame.ActorMatchKind == TitleBackgroundCharacterPlacementActorMatchKind.Single);
+        var hasAmbiguousActor = ordered.Any(frame => frame.ActorMatchKind == TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous);
         var actorSourceResolved = summary.Resolution == "single";
         var actorSourceHasModelEvidence = summary.BestCandidateStableAcrossFrames
             || summary.DrawObjectNonNullCount > 0
             || summary.ModelLikeNonNullCount > 0;
         var hasActorObserved = hasSingleActor && actorSourceResolved && actorSourceHasModelEvidence;
-        var hasActorVisibleHint = ordered.Any(frame => frame.ActorMatchKind == TitleBackgroundPhase2MActorMatchKind.Single && frame.Actor?.VisibleHint == true);
+        var hasActorVisibleHint = ordered.Any(frame => frame.ActorMatchKind == TitleBackgroundCharacterPlacementActorMatchKind.Single && frame.Actor?.VisibleHint == true);
         var hasActorCameraDeltas = ordered.Any(frame =>
-            frame.ActorMatchKind == TitleBackgroundPhase2MActorMatchKind.Single
+            frame.ActorMatchKind == TitleBackgroundCharacterPlacementActorMatchKind.Single
             && frame.ActorToCameraDistance.HasValue
             && frame.ActorToLookAtDelta.HasValue);
         var hasGroundUnavailable = ordered.Any(frame => string.Equals(frame.GroundHeightStatus, "unavailable", StringComparison.Ordinal));
@@ -260,7 +260,7 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
         var nextNativeSource = SelectNextNativeSource(summary.Resolution, bestSource, sourceDiscovery);
         var (nextAction, nextActionReason) = SelectNextAction(summary.Resolution, summary.TransformValidity, summary.IdentityConfidence, visible, nextNativeSource);
 
-        return new TitleBackgroundPhase2MSummary(
+        return new TitleBackgroundCharacterPlacementSummary(
             status,
             visible,
             groundAligned,
@@ -295,13 +295,13 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
     }
 
     public static string EvaluateExperimentalApply(
-        TitleBackgroundPhase2MExperimentalApplyMode mode,
-        TitleBackgroundPhase2MSummary summary,
+        TitleBackgroundCharacterPlacementExperimentalApplyMode mode,
+        TitleBackgroundCharacterPlacementSummary summary,
         bool sceneGenerationMatches,
         bool isCharaSelectActive,
         bool isLoggedIn)
     {
-        if (mode == TitleBackgroundPhase2MExperimentalApplyMode.None)
+        if (mode == TitleBackgroundCharacterPlacementExperimentalApplyMode.None)
         {
             return "skip:none-mode";
         }
@@ -321,7 +321,7 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
             return "skip:scene-generation-mismatch";
         }
 
-        if (mode == TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot)
+        if (mode == TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementOneShot)
         {
             if (summary.Resolution != "single")
             {
@@ -342,12 +342,12 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
         return "ready";
     }
 
-    private static TitleBackgroundPhase2MCandidateResolution BuildCandidateResolution(
-        IReadOnlyCollection<TitleBackgroundPhase2MActorCandidate> candidates)
+    private static TitleBackgroundCharacterPlacementCandidateResolution BuildCandidateResolution(
+        IReadOnlyCollection<TitleBackgroundCharacterPlacementActorCandidate> candidates)
     {
         if (candidates.Count == 0)
         {
-            return TitleBackgroundPhase2MCandidateResolution.Empty("source-missing");
+            return TitleBackgroundCharacterPlacementCandidateResolution.Empty("source-missing");
         }
 
         var zeroCount = candidates.Count(IsZeroPosition);
@@ -379,7 +379,7 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
         var best = candidates.OrderByDescending(candidate => candidate.Score).First();
         var resolution = BuildResolution(candidates, transformValidity);
 
-        return new TitleBackgroundPhase2MCandidateResolution(
+        return new TitleBackgroundCharacterPlacementCandidateResolution(
             zeroCount,
             nonZeroCount,
             namedCount,
@@ -403,7 +403,7 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
             resolution);
     }
 
-    private static string BuildResolution(IReadOnlyCollection<TitleBackgroundPhase2MActorCandidate> candidates, string transformValidity)
+    private static string BuildResolution(IReadOnlyCollection<TitleBackgroundCharacterPlacementActorCandidate> candidates, string transformValidity)
     {
         if (candidates.Count == 0)
         {
@@ -453,14 +453,14 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
         return "weak";
     }
 
-    private static string BuildBestCandidateReason(TitleBackgroundPhase2MActorCandidate candidate)
+    private static string BuildBestCandidateReason(TitleBackgroundCharacterPlacementActorCandidate candidate)
     {
         return string.IsNullOrWhiteSpace(candidate.ScoreReason)
             ? $"score={candidate.Score}"
             : $"score={candidate.Score};{candidate.ScoreReason}";
     }
 
-    private static string SelectNextNativeSource(string resolution, string bestSource, IReadOnlyCollection<TitleBackgroundPhase2MSourceDiscovery> sources)
+    private static string SelectNextNativeSource(string resolution, string bestSource, IReadOnlyCollection<TitleBackgroundCharacterPlacementSourceDiscovery> sources)
     {
         if (resolution == "single")
         {
@@ -512,14 +512,14 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
         return ("insufficient-data", $"resolution={resolution}; transformValidity={transformValidity}; identityConfidence={identityConfidence}");
     }
 
-    private static bool IsZeroPosition(TitleBackgroundPhase2MActorCandidate candidate)
+    private static bool IsZeroPosition(TitleBackgroundCharacterPlacementActorCandidate candidate)
     {
         return Math.Abs(candidate.Position.X) <= 0.001f
             && Math.Abs(candidate.Position.Y) <= 0.001f
             && Math.Abs(candidate.Position.Z) <= 0.001f;
     }
 
-    private static string BuildCandidateKey(TitleBackgroundPhase2MActorCandidate candidate)
+    private static string BuildCandidateKey(TitleBackgroundCharacterPlacementActorCandidate candidate)
     {
         return candidate.Address != nint.Zero
             ? $"address:{candidate.Address.ToInt64():X}"
@@ -552,7 +552,7 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
         return "unknown";
     }
 
-    private readonly record struct TitleBackgroundPhase2MCandidateResolution(
+    private readonly record struct TitleBackgroundCharacterPlacementCandidateResolution(
         int ZeroPositionCandidateCount,
         int NonZeroPositionCandidateCount,
         int NamedCandidateCount,
@@ -575,11 +575,13 @@ internal static class TitleBackgroundPhase2MPlacementDiagnostic
         bool BestCandidateStableAcrossFrames,
         string Resolution)
     {
-        public static TitleBackgroundPhase2MCandidateResolution Empty(string resolution)
+        public static TitleBackgroundCharacterPlacementCandidateResolution Empty(string resolution)
         {
-            return new TitleBackgroundPhase2MCandidateResolution(
+            return new TitleBackgroundCharacterPlacementCandidateResolution(
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "none", "none", "unknown", "none", "unknown",
                 "none", "no-candidates", 0, "none", false, resolution);
         }
     }
 }
+
+

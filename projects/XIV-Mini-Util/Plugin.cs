@@ -65,6 +65,11 @@ public sealed class Plugin : IDalamudPlugin
     private readonly MainWindow _mainWindow;
     private readonly ShopSearchResultWindow _shopSearchResultWindow;
 
+    private readonly record struct CommandRegistration(
+        string Name,
+        IReadOnlyCommandInfo.HandlerDelegate Handler,
+        string HelpMessage);
+
     public string Name => "XIV Mini Util";
 
     public Plugin(
@@ -213,58 +218,7 @@ public sealed class Plugin : IDalamudPlugin
         _pluginInterface.UiBuilder.OpenMainUi += OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi += OpenSettingsWindow;
 
-        _commandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
-        {
-            HelpMessage = "メインウィンドウを開きます。サブコマンド: config / diag / version / help",
-        });
-        _commandManager.AddHandler(CommandAlias, new CommandInfo(OnCommand)
-        {
-            HelpMessage = "メインウィンドウを開きます。サブコマンド: config / diag / version / help",
-        });
-        _commandManager.AddHandler(VersionCommandName, new CommandInfo(OnVersionCommand)
-        {
-            HelpMessage = "読み込み中のXIV Mini Util DLLとビルド時刻を表示します。",
-        });
-        _commandManager.AddHandler(VersionCommandAlias, new CommandInfo(OnVersionCommand)
-        {
-            HelpMessage = "読み込み中のXIV Mini Util DLLとビルド時刻を表示します。",
-        });
-        _commandManager.AddHandler(CharaSelectDiagnosticCommandName, new CommandInfo(OnCharaSelectDiagnosticCommand)
-        {
-            HelpMessage = "キャラ選択画面のエモート/声診断情報を表示します。",
-        });
-        _commandManager.AddHandler(CharaSelectDiagnosticCommandAlias, new CommandInfo(OnCharaSelectDiagnosticCommand)
-        {
-            HelpMessage = "キャラ選択画面のエモート/声診断情報を表示します。",
-        });
-        _commandManager.AddHandler(TitleBackgroundDiagnosticCommandName, new CommandInfo(OnTitleBackgroundDiagnosticCommand)
-        {
-            HelpMessage = "タイトル背景差し替えの診断情報を表示します。サブコマンド: copy",
-        });
-        _commandManager.AddHandler(TitleBackgroundDiagnosticCommandAlias, new CommandInfo(OnTitleBackgroundDiagnosticCommand)
-        {
-            HelpMessage = "タイトル背景差し替えの診断情報を表示します。サブコマンド: copy",
-        });
-        _commandManager.AddHandler(TitleBackgroundProbeCommandName, new CommandInfo(OnTitleBackgroundProbeCommand)
-        {
-            HelpMessage = "タイトル背景hook probeを開始/停止/表示します。サブコマンド: on / report / off",
-        });
-        _commandManager.AddHandler(TitleBackgroundCameraProbeCommandName, new CommandInfo(OnTitleBackgroundCameraProbeCommand)
-        {
-            HelpMessage = "タイトル背景camera Y probeを準備/表示/復元します。サブコマンド: arm-y / report / restore",
-        });
-        _commandManager.AddHandler(TitleBackgroundSelfTestCommandName, new CommandInfo(OnTitleBackgroundSelfTestCommand)
-        {
-            HelpMessage = "debug-only: タイトル背景差し替えのself-testを実行します。通常確認では使用しません。",
-        });
-        _commandManager.AddHandler(TitleBackgroundReloadCommandName, new CommandInfo(OnTitleBackgroundReloadCommand)
-        {
-            HelpMessage = "debug-only: キャラ選択ロビー中にタイトル背景とカメラを再適用します。通常確認では使用しません。",
-        });
-        _commandManager.AddHandler(TitleBackgroundQuickCheckCommandName, new CommandInfo(OnTitleBackgroundQuickCheckCommand)
-        {
-            HelpMessage = "Character Select 背景 QuickCheck を開始/評価/表示/リセットします。サブコマンド: start / status / reset",
-        });
+        RegisterCommands();
         _shopSearchService.OnSearchCompleted += OnShopSearchCompleted;
         _ = InitializeShopDataAsync();
     }
@@ -276,19 +230,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
-        _commandManager.RemoveHandler(CommandName);
-        _commandManager.RemoveHandler(CommandAlias);
-        _commandManager.RemoveHandler(VersionCommandName);
-        _commandManager.RemoveHandler(VersionCommandAlias);
-        _commandManager.RemoveHandler(CharaSelectDiagnosticCommandName);
-        _commandManager.RemoveHandler(CharaSelectDiagnosticCommandAlias);
-        _commandManager.RemoveHandler(TitleBackgroundDiagnosticCommandName);
-        _commandManager.RemoveHandler(TitleBackgroundDiagnosticCommandAlias);
-        _commandManager.RemoveHandler(TitleBackgroundProbeCommandName);
-        _commandManager.RemoveHandler(TitleBackgroundCameraProbeCommandName);
-        _commandManager.RemoveHandler(TitleBackgroundSelfTestCommandName);
-        _commandManager.RemoveHandler(TitleBackgroundReloadCommandName);
-        _commandManager.RemoveHandler(TitleBackgroundQuickCheckCommandName);
+        UnregisterCommands();
         _pluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         _pluginInterface.UiBuilder.OpenMainUi -= OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi -= OpenSettingsWindow;
@@ -309,6 +251,45 @@ public sealed class Plugin : IDalamudPlugin
         _checklistService.Dispose();
         _discordService.Dispose();
         _shopSearchService.OnSearchCompleted -= OnShopSearchCompleted;
+    }
+
+    private IReadOnlyList<CommandRegistration> GetCommandRegistrations()
+    {
+        return
+        [
+            new(CommandName, OnCommand, "メインウィンドウを開きます。サブコマンド: config / diag / version / help"),
+            new(CommandAlias, OnCommand, "メインウィンドウを開きます。サブコマンド: config / diag / version / help"),
+            new(VersionCommandName, OnVersionCommand, "読み込み中のXIV Mini Util DLLとビルド時刻を表示します。"),
+            new(VersionCommandAlias, OnVersionCommand, "読み込み中のXIV Mini Util DLLとビルド時刻を表示します。"),
+            new(CharaSelectDiagnosticCommandName, OnCharaSelectDiagnosticCommand, "キャラ選択画面のエモート/声診断情報を表示します。"),
+            new(CharaSelectDiagnosticCommandAlias, OnCharaSelectDiagnosticCommand, "キャラ選択画面のエモート/声診断情報を表示します。"),
+            new(TitleBackgroundDiagnosticCommandName, OnTitleBackgroundDiagnosticCommand, "タイトル背景差し替えの診断情報を表示します。サブコマンド: copy"),
+            new(TitleBackgroundDiagnosticCommandAlias, OnTitleBackgroundDiagnosticCommand, "タイトル背景差し替えの診断情報を表示します。サブコマンド: copy"),
+            new(TitleBackgroundProbeCommandName, OnTitleBackgroundProbeCommand, "タイトル背景hook probeを開始/停止/表示します。サブコマンド: on / report / off"),
+            new(TitleBackgroundCameraProbeCommandName, OnTitleBackgroundCameraProbeCommand, "タイトル背景camera Y probeを準備/表示/復元します。サブコマンド: arm-y / report / restore"),
+            new(TitleBackgroundSelfTestCommandName, OnTitleBackgroundSelfTestCommand, "debug-only: タイトル背景差し替えのself-testを実行します。通常確認では使用しません。"),
+            new(TitleBackgroundReloadCommandName, OnTitleBackgroundReloadCommand, "debug-only: キャラ選択ロビー中にタイトル背景とカメラを再適用します。通常確認では使用しません。"),
+            new(TitleBackgroundQuickCheckCommandName, OnTitleBackgroundQuickCheckCommand, "Character Select 背景 QuickCheck を開始/評価/表示/リセットします。サブコマンド: start / status / reset"),
+        ];
+    }
+
+    private void RegisterCommands()
+    {
+        foreach (var registration in GetCommandRegistrations())
+        {
+            _commandManager.AddHandler(registration.Name, new CommandInfo(registration.Handler)
+            {
+                HelpMessage = registration.HelpMessage,
+            });
+        }
+    }
+
+    private void UnregisterCommands()
+    {
+        foreach (var registration in GetCommandRegistrations())
+        {
+            _commandManager.RemoveHandler(registration.Name);
+        }
     }
 
     private void OnCommand(string command, string args)

@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>タイトル背景差し替え 実装進捗ダッシュボード</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f4f1eb;
+      --surface: #fffdf8;
+      --surface-2: #f8f4ec;
+      --ink: #242526;
+      --muted: #6d6a63;
+      --line: #d9d0c1;
+      --blue: #245c7a;
+      --blue-soft: #e6f0f4;
+      --green: #23705a;
+      --green-soft: #e5f3ed;
+      --amber: #9a5d00;
+      --amber-soft: #fff0d6;
+      --red: #a4382d;
+      --red-soft: #fae5e1;
+      --charcoal: #20262c;
+      --shadow: 0 18px 40px rgba(43, 36, 24, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(90deg, rgba(36, 92, 122, 0.08) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(36, 92, 122, 0.06) 1px, transparent 1px),
+        var(--paper);
+      background-size: 32px 32px;
+      color: var(--ink);
+      font-family: "Yu Gothic UI", "Meiryo", "Segoe UI", sans-serif;
+      line-height: 1.6;
+    }
+
+    .wrap {
+      width: min(1220px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 253, 248, 0.92);
+      backdrop-filter: blur(8px);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 24px;
+      padding: 30px 0 24px;
+      align-items: end;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 780px;
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .now-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--charcoal);
+      color: #edf3f5;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .now-panel strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #ffffff;
+      font-size: 18px;
+    }
+
+    .now-panel span {
+      color: #b9c8d0;
+      font-size: 13px;
+    }
+
+    main {
+      padding: 24px 0 40px;
+    }
+
+    .scoreboard {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .score {
+      min-height: 104px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 14px 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .score .number {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--blue);
+      font-size: 34px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .score .label {
+      display: block;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .score .note {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .workbench {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .map {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 253, 248, 0.9);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .map-head {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-2);
+    }
+
+    .map-head div {
+      padding: 14px 16px;
+      border-right: 1px solid var(--line);
+    }
+
+    .map-head div:last-child {
+      border-right: 0;
+    }
+
+    .map-head b {
+      display: block;
+      font-size: 16px;
+    }
+
+    .map-head span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .lane {
+      position: relative;
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr);
+      border-bottom: 1px solid var(--line);
+      min-height: 138px;
+    }
+
+    .lane:last-child {
+      border-bottom: 0;
+    }
+
+    .lane-label {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 18px;
+      border-right: 1px solid var(--line);
+      background: #fbf7ef;
+    }
+
+    .lane-label b {
+      font-size: 15px;
+    }
+
+    .lane-label span {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .lane-items {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      padding: 16px;
+      align-items: stretch;
+    }
+
+    .task {
+      position: relative;
+      border: 1px solid var(--line);
+      border-left: 6px solid var(--amber);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 12px 12px 12px 14px;
+      min-height: 104px;
+    }
+
+    .task.ready {
+      border-left-color: var(--green);
+      background: linear-gradient(180deg, #ffffff, var(--green-soft));
+    }
+
+    .task.wait {
+      border-left-color: var(--amber);
+      background: linear-gradient(180deg, #ffffff, var(--amber-soft));
+    }
+
+    .task.todo {
+      border-left-color: #8a9099;
+      background: linear-gradient(180deg, #ffffff, #eef0f2);
+    }
+
+    .task .id {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      margin-bottom: 6px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .task h3 {
+      margin: 0 0 6px;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+
+    .task p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .side {
+      display: grid;
+      gap: 14px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .panel h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .action-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: action;
+    }
+
+    .action-list li {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .action-list li::before {
+      counter-increment: action;
+      content: counter(action);
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--blue);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .action-list b {
+      color: var(--ink);
+    }
+
+    .checks {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .check {
+      display: grid;
+      grid-template-columns: 20px 1fr;
+      gap: 8px;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .check b {
+      color: var(--ink);
+    }
+
+    .logbox {
+      margin-top: 12px;
+      padding: 13px;
+      border-radius: 8px;
+      background: #171d22;
+      color: #dce8ee;
+      font-family: "Cascadia Mono", "Consolas", monospace;
+      font-size: 12px;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    code {
+      padding: 1px 5px;
+      border-radius: 5px;
+      background: #ece6da;
+      font-family: "Cascadia Mono", "Consolas", monospace;
+      font-size: 0.92em;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .pill.ready {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .pill.wait {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .pill.todo {
+      background: #eef0f2;
+      color: #626b75;
+    }
+
+    .footnote {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    a {
+      color: var(--blue);
+    }
+
+    @media (max-width: 1050px) {
+      .hero,
+      .scoreboard,
+      .workbench,
+      .map-head,
+      .lane,
+      .lane-items {
+        grid-template-columns: 1fr;
+      }
+
+      .map-head div,
+      .lane-label {
+        border-right: 0;
+      }
+
+      .map-head div {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .map-head div:last-child {
+        border-bottom: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap hero">
+      <div>
+        <p class="eyebrow">XIV Mini Util / タイトル背景差し替え</p>
+        <h1>次に確認する作業が一目で分かる進捗表</h1>
+        <p class="lead">内部の Step 名ではなく、「何の機能を確認するのか」で並べています。今は背景を変える前に、ゲーム内の処理位置を安全に見つける段階です。</p>
+      </div>
+      <div class="now-panel">
+        <strong>次の作業: ゲーム内アドレス確認</strong>
+        <span>実行モードは「address解決のみ」。背景はまだ変更しません。</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="scoreboard" aria-label="進捗サマリー">
+      <div class="score"><span class="number">8</span><span class="label">土台は実装済み</span><span class="note">UI、設定、診断、段階モード</span></div>
+      <div class="score"><span class="number">0</span><span class="label">実機確認完了</span><span class="note">ゲーム内ログ待ち</span></div>
+      <div class="score"><span class="number">1</span><span class="label">最後に判断</span><span class="note">配布してよいかの判定</span></div>
+      <div class="score"><span class="number">今ここ</span><span class="label">場所だけ確認</span><span class="note">hook や背景変更はまだしない</span></div>
+    </section>
+
+    <section class="workbench">
+      <section class="map" aria-label="実装マップ">
+        <div class="map-head">
+          <div><b>場所を見つける</b><span>背景変更なし。最初の安全確認。</span></div>
+          <div><b>ログだけ取る</b><span>値を書き換えず、呼ばれ方を見る。</span></div>
+          <div><b>実際に変える</b><span>背景、再読み込み、カメラを確認。</span></div>
+        </div>
+
+        <div class="lane">
+          <div class="lane-label"><b>今すぐ見る</b><span>ゲーム内で最初に確認</span></div>
+          <div class="lane-items">
+            <article class="task wait">
+              <span class="id">Step 1</span>
+              <h3>ゲーム内処理の目印を確認する</h3>
+              <p>現在の FFXIV で背景読み込み処理を見つけるための目印を入力する。</p>
+            </article>
+            <article class="task wait">
+              <span class="id">Step 2</span>
+              <h3>場所だけ見つかるか確認する</h3>
+              <p><code>/xmutbg</code> で 4 つのアドレスが見つかるか確認する。</p>
+            </article>
+            <article class="task todo">
+              <span class="id">Step 9</span>
+              <h3>配布してよいか判断する</h3>
+              <p>全ログと実機確認が揃ってから最後に判断する。</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="lane-label"><b>安全に観測</b><span>ログのみ、書き換えなし</span></div>
+          <div class="lane-items">
+            <article class="task ready">
+              <span class="id">Step 3</span>
+              <h3>画面切り替わりを記録する</h3>
+              <p>タイトル画面とキャラ選択の状態変化をログで見る。</p>
+            </article>
+            <article class="task ready">
+              <span class="id">Step 5</span>
+              <h3>背景ファイルの読み込み元を記録する</h3>
+              <p>タイトル背景として読み込まれる元のパスを確認する。</p>
+            </article>
+            <article class="task ready">
+              <span class="id">Step 7</span>
+              <h3>カメラ設定の呼び出しを記録する</h3>
+              <p>カメラ位置や視野角の設定処理が呼ばれるか見る。</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="lane-label"><b>差し替え確認</b><span>ログ確認後に進む</span></div>
+          <div class="lane-items">
+            <article class="task ready">
+              <span class="id">Step 4</span>
+              <h3>古い背景が残らないようにする</h3>
+              <p>タイトルへ戻ったときに前の背景を使い回さないようにする。</p>
+            </article>
+            <article class="task ready">
+              <span class="id">Step 6</span>
+              <h3>タイトル背景のファイルを差し替える</h3>
+              <p>設定したエリア背景をタイトル画面の背景として読み込ませる。</p>
+            </article>
+            <article class="task ready">
+              <span class="id">Step 8</span>
+              <h3>カメラ位置と見え方を反映する</h3>
+              <p>カメラ位置、注視点、視野角を設定値に合わせる。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side">
+        <section class="panel">
+          <h2>次に実施すべきこと</h2>
+          <ol class="action-list">
+            <li><span><b>実行モードを確認</b><br>設定画面で <code>address解決のみ</code> のままにする。</span></li>
+            <li><span><b>目印を入力</b><br>ゲームの現在バージョンで確認した 4 つの目印を入力する。</span></li>
+            <li><span><b>場所だけ再確認</b><br><code>address再解決</code> を押す。</span></li>
+            <li><span><b>ログを見る</b><br><code>/xmutbg</code> で address 解決だけ成功しているか確認する。</span></li>
+          </ol>
+
+          <div class="checks">
+            <div class="check"><span>□</span><span><b>成功条件:</b> 4 つのアドレスがすべて <code>zero</code> ではない。</span></div>
+            <div class="check"><span>□</span><span><b>安全条件:</b> <code>hooksReady=False</code> のまま。背景はまだ変えない。</span></div>
+            <div class="check"><span>□</span><span><b>失敗時:</b> エラー理由を記録し、次の段階へ進まない。</span></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>期待するログ</h2>
+          <div class="logbox">signaturesConfigured: すべて yes
+addresses: すべて 0x... 表示
+resolverError=none
+runtimeMode=ResolveOnly
+hooksReady=False</div>
+          <div class="legend">
+            <span class="pill wait">今ここ</span>
+            <span class="pill ready">実装済み</span>
+            <span class="pill todo">未判断</span>
+          </div>
+          <p class="footnote">正式な計画本文: <a href="./codex-title-background-final-implementation-plan.md">codex-title-background-final-implementation-plan.md</a></p>
+        </section>
+      </aside>
+    </section>
+  </main>
+</body>
+</html>

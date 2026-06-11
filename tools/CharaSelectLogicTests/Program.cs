@@ -5,8 +5,11 @@ using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using System.Numerics;
 using System.Text;
+using System.Text.Json;
 using XivMiniUtil;
 using XivMiniUtil.Services.CharaSelect;
+using XivMiniUtil.Services.Market;
+using XivMiniUtil.Services.Shop;
 using XivMiniUtil.Services.TitleBackground;
 
 var failures = new List<string>();
@@ -29,6 +32,201 @@ Test("same content id with new character pointer replays", () =>
     var tracker = new CharaSelectReplayTracker();
     tracker.MarkReplayed(1, 100, 0x1000);
     return tracker.ShouldReplay(1, 100, 0x2000, force: false);
+});
+
+Test("configuration title background properties remain top-level json", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundOverrideEnabled = true,
+        TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.CharaSelectOnly,
+        TitleBackgroundTerritoryPath = "bg/ffxiv/fst_f1/twn/f1t1/level/f1t1",
+        TitleBackgroundCameraX = 12.5f,
+        TitleBackgroundCharacterPlacementExperimentalApplyMode = TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementPreviewOnly,
+        TitleBackgroundCharacterSelectOverrideCandidateId = "custom:n4f4",
+        CharaSelectSceneCompositionEnabled = true,
+        CharaSelectSceneProfileId = "custom:n4f4",
+        CharaSelectOverridePositionX = 4.25f,
+        ShopSearchEchoEnabled = false,
+        DesynthMinLevel = 42,
+        ChecklistFeatureEnabled = false,
+        DutyReadySoundDurationSeconds = 12,
+    };
+
+    var json = JsonSerializer.Serialize(configuration);
+    var restored = JsonSerializer.Deserialize<Configuration>(json);
+
+    return json.Contains("\"TitleBackgroundOverrideEnabled\"", StringComparison.Ordinal)
+        && json.Contains("\"TitleBackgroundRuntimeMode\"", StringComparison.Ordinal)
+        && json.Contains("\"TitleBackgroundPhase2MExperimentalApplyMode\"", StringComparison.Ordinal)
+        && !json.Contains("\"TitleBackgroundCharacterPlacementExperimentalApplyMode\"", StringComparison.Ordinal)
+        && json.Contains("\"CharaSelectSceneCompositionEnabled\"", StringComparison.Ordinal)
+        && json.Contains("\"CharaSelectSceneProfileId\"", StringComparison.Ordinal)
+        && json.Contains("\"ShopSearchEchoEnabled\"", StringComparison.Ordinal)
+        && json.Contains("\"ChecklistFeatureEnabled\"", StringComparison.Ordinal)
+        && !json.Contains("TitleBackgroundConfig", StringComparison.Ordinal)
+        && !json.Contains("CharaSelectConfig", StringComparison.Ordinal)
+        && !json.Contains("ShopConfig", StringComparison.Ordinal)
+        && !json.Contains("ChecklistConfig", StringComparison.Ordinal)
+        && restored != null
+        && restored.TitleBackgroundOverrideEnabled
+        && restored.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
+        && restored.TitleBackgroundTerritoryPath == configuration.TitleBackgroundTerritoryPath
+        && Math.Abs(restored.TitleBackgroundCameraX - configuration.TitleBackgroundCameraX) < 0.001f
+        && restored.TitleBackgroundCharacterPlacementExperimentalApplyMode == configuration.TitleBackgroundCharacterPlacementExperimentalApplyMode
+        && restored.TitleBackgroundCharacterSelectOverrideCandidateId == configuration.TitleBackgroundCharacterSelectOverrideCandidateId
+        && restored.CharaSelectSceneCompositionEnabled
+        && restored.CharaSelectSceneProfileId == configuration.CharaSelectSceneProfileId
+        && Math.Abs(restored.CharaSelectOverridePositionX - configuration.CharaSelectOverridePositionX) < 0.001f
+        && !restored.ShopSearchEchoEnabled
+        && restored.DesynthMinLevel == configuration.DesynthMinLevel
+        && !restored.ChecklistFeatureEnabled
+        && restored.DutyReadySoundDurationSeconds == configuration.DutyReadySoundDurationSeconds;
+});
+
+Test("configuration reads legacy title background character placement json key", () =>
+{
+    const string json = """
+        {
+          "Version": 7,
+          "TitleBackgroundPhase2MExperimentalApplyMode": 3
+        }
+        """;
+
+    var restored = JsonSerializer.Deserialize<Configuration>(json);
+
+    return restored != null
+        && restored.TitleBackgroundCharacterPlacementExperimentalApplyMode == TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementPreviewOnly;
+});
+
+Test("configuration reads legacy title background character placement json key via newtonsoft", () =>
+{
+    // Dalamud の SavePluginConfig / GetPluginConfig は Newtonsoft.Json を使うため、
+    // System.Text.Json とは別にこの経路でも旧キーが読めることを保証する
+    const string json = """
+        {
+          "Version": 7,
+          "TitleBackgroundPhase2MExperimentalApplyMode": 3
+        }
+        """;
+
+    var restored = Newtonsoft.Json.JsonConvert.DeserializeObject<Configuration>(json);
+    var serialized = restored == null ? string.Empty : Newtonsoft.Json.JsonConvert.SerializeObject(restored);
+
+    return restored != null
+        && restored.TitleBackgroundCharacterPlacementExperimentalApplyMode == TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementPreviewOnly
+        && serialized.Contains("\"TitleBackgroundPhase2MExperimentalApplyMode\"", StringComparison.Ordinal);
+});
+
+Test("configuration ignores removed chara select experimental stage flags", () =>
+{
+    const string json = """
+        {
+          "Version": 7,
+          "CharaSelectSceneCompositionEnabled": true,
+          "CharaSelectSceneStageStrategyExperimentalEnabled": true,
+          "CharaSelectSceneStageStrategyOneShotProbeEnabled": true,
+          "CharaSelectSceneStageStrategyLastResult": " observed ",
+          "CharaSelectSceneStageStrategyLastReason": " manual "
+        }
+        """;
+
+    var restored = JsonSerializer.Deserialize<Configuration>(json);
+    var serialized = JsonSerializer.Serialize(restored);
+
+    return restored != null
+        && restored.CharaSelectSceneCompositionEnabled
+        && restored.CharaSelectSceneStageStrategyLastResult == " observed "
+        && restored.CharaSelectSceneStageStrategyLastReason == " manual "
+        && !serialized.Contains("CharaSelectSceneStageStrategyExperimentalEnabled", StringComparison.Ordinal)
+        && !serialized.Contains("CharaSelectSceneStageStrategyOneShotProbeEnabled", StringComparison.Ordinal);
+});
+
+Test("configuration apply from preserves top-level feature settings and clamps unsafe values", () =>
+{
+    var target = new Configuration();
+    var source = new Configuration
+    {
+        Version = -1,
+        ShopSearchEchoEnabled = false,
+        ShopSearchWindowEnabled = false,
+        ShopSearchAutoTeleportEnabled = true,
+        ShopSearchAreaPriority = [132, 128],
+        ShopDataVerboseLogging = true,
+        UniversalisShowTopThreeListings = true,
+        UniversalisSearchRegionWide = true,
+        DesynthMinLevel = 2000,
+        DesynthMaxLevel = -5,
+        DesynthWarningThreshold = 0,
+        DesynthTargetCount = 1200,
+        NotificationRateLimitRetryMax = 99,
+        DutyReadySoundDurationSeconds = 99,
+        CharaSelectOverridePositionX = float.PositiveInfinity,
+        CharaSelectSceneProfileId = " missing-profile ",
+    };
+
+    target.ApplyFrom(source);
+
+    return target.Version == Configuration.CurrentVersion
+        && !target.ShopSearchEchoEnabled
+        && !target.ShopSearchWindowEnabled
+        && target.ShopSearchAutoTeleportEnabled
+        && target.ShopSearchAreaPriority.SequenceEqual(new uint[] { 132, 128 })
+        && target.ShopDataVerboseLogging
+        && target.UniversalisShowTopThreeListings
+        && target.UniversalisSearchRegionWide
+        && target.DesynthMinLevel == 1
+        && target.DesynthMaxLevel == 999
+        && target.DesynthWarningThreshold == 1
+        && target.DesynthTargetCount == 999
+        && target.NotificationRateLimitRetryMax == 10
+        && target.DutyReadySoundDurationSeconds == 30
+        && target.CharaSelectOverridePositionX == 0f
+        && target.CharaSelectSceneProfileId == "missing-profile";
+});
+
+Test("shop item id normalization handles normal hq and zero ids", () =>
+{
+    return ContextMenuService.NormalizeItemId(42) == 42
+        && ContextMenuService.NormalizeItemId(500042) == 42
+        && ContextMenuService.NormalizeItemId(1000042) == 42
+        && ContextMenuService.NormalizeItemId(0) == 0
+        && ContextMenuService.GetItemQuality(42) == UniversalisItemQuality.Normal
+        && ContextMenuService.GetItemQuality(1000042) == UniversalisItemQuality.HighQuality
+        && ContextMenuService.GetItemQuality(1000000) == UniversalisItemQuality.HighQuality;
+});
+
+Test("shop names fall back to stable labels when source names are missing", () =>
+{
+    var gilNames = new Dictionary<uint, string>
+    {
+        [10] = "素材屋",
+        [11] = string.Empty,
+    };
+
+    return ShopNameFormatter.GetGilShopName(10, gilNames) == "素材屋"
+        && ShopNameFormatter.GetGilShopName(11, gilNames) == "ショップ#11"
+        && ShopNameFormatter.GetGilShopName(12, gilNames) == "ショップ#12"
+        && ShopNameFormatter.GetSpecialShopName(20, "交換員") == "交換員"
+        && ShopNameFormatter.GetSpecialShopName(21, null) == "特殊ショップ#21"
+        && ShopNameFormatter.GetSpecialShopName(22, string.Empty) == "特殊ショップ#22";
+});
+
+Test("shop location validator rejects placeholder or missing locations", () =>
+{
+    var valid = new NpcShopInfo(1, "NPC", 10, "Shop", 128, "リムサ・ロミンサ", string.Empty, 1, 10f, 20f);
+    var missingTerritory = valid with { TerritoryTypeId = 0 };
+    var missingArea = valid with { AreaName = " " };
+    var unknownArea = valid with { AreaName = "Unknown" };
+    var noneArea = valid with { AreaName = "None" };
+    var japaneseUnknownArea = valid with { AreaName = "不明" };
+
+    return ShopLocationValidator.IsValid(valid)
+        && !ShopLocationValidator.IsValid(missingTerritory)
+        && !ShopLocationValidator.IsValid(missingArea)
+        && !ShopLocationValidator.IsValid(unknownArea)
+        && !ShopLocationValidator.IsValid(noneArea)
+        && !ShopLocationValidator.IsValid(japaneseUnknownArea);
 });
 
 Test("force replay bypasses previous state", () =>
@@ -396,7 +594,7 @@ Test("chara select stage probe stores primitive diagnostics only", () =>
 Test("chara select scene ui explains unchanged default background", () =>
 {
     var root = FindRepositoryRoot();
-    var settings = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var settings = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     return settings.Contains("場所が default のままなら", StringComparison.Ordinal)
         && settings.Contains("場所=変わらない", StringComparison.Ordinal);
 });
@@ -404,7 +602,7 @@ Test("chara select scene ui explains unchanged default background", () =>
 Test("title background camera framing note is independent of shooting composition", () =>
 {
     var root = FindRepositoryRoot();
-    var settings = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var settings = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     return settings.Contains("Camera framing is handled by Title Background.", StringComparison.Ordinal)
         && settings.Contains("integrated character composition", StringComparison.Ordinal);
 });
@@ -522,7 +720,9 @@ Test("title background bridge case 1 legacy shooting composition on path is disc
         CharaSelectSceneStageStrategy = CharaSelectStageStrategy.ClientSelectDataTerritoryPatch,
     };
     var root = FindRepositoryRoot();
-    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.cs"));
+    var serviceText = string.Join(Environment.NewLine, Directory
+        .EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect"), "CharaSelectService*.cs")
+        .Select(File.ReadAllText));
     return CharaSelectSceneCompositionPlanner.ResolveCompositionCaller(configuration) == "legacy-shooting-composition"
         && CharaSelectSceneCompositionPlanner.UsesClientSelectDataTerritoryPatch(configuration)
         && serviceText.Contains("TryPatchOverrideDisplayData", StringComparison.Ordinal)
@@ -901,9 +1101,19 @@ Test("title background captured camera case 4 fallback profile without captured 
 Test("title background bridge applied camera is stored for settings ui", () =>
 {
     var root = FindRepositoryRoot();
-    var charaSelectText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.cs"));
-    var titleBackgroundText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
-    var settingsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var charaSelectText = string.Join(
+        Environment.NewLine,
+        Directory.EnumerateFiles(
+                Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect"),
+                "CharaSelectService*.cs")
+            .Select(File.ReadAllText));
+    var titleBackgroundText = string.Join(
+        Environment.NewLine,
+        Directory.EnumerateFiles(
+                Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"),
+                "TitleScreenBackgroundService*.cs")
+            .Select(File.ReadAllText));
+    var settingsText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
 
     return charaSelectText.Contains("MarkTitleBackgroundCharacterCompositionBridgeCameraApplied", StringComparison.Ordinal)
         && charaSelectText.Contains("AppliedCamera = true", StringComparison.Ordinal)
@@ -1157,7 +1367,7 @@ Test("title background quickcheck ui simple mode is bounded", () =>
 Test("title background settings simple panel hides advanced diagnostics", () =>
 {
     var root = FindRepositoryRoot();
-    var settingsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var settingsText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
 
     return simplePanel.Contains("Character Select Background", StringComparison.Ordinal)
@@ -1176,7 +1386,7 @@ Test("title background settings simple panel hides advanced diagnostics", () =>
 Test("title background settings simple check uses one-button quickcheck entrypoint", () =>
 {
     var root = FindRepositoryRoot();
-    var settingsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
+    var settingsText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
     var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
     var simpleCheck = ExtractMethodBody(serviceText, "internal TitleBackgroundSimpleUiSummary RunSimpleCheck()");
@@ -2436,25 +2646,25 @@ Test("title background phase2m diagnostics retain scene-ready frames for post-lo
 {
     var frames = new[]
     {
-        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
-        Phase2MFrame(30, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
-        Phase2MFrame(600, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
+        CharacterPlacementFrame(0, TitleBackgroundCharacterPlacementActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
+        CharacterPlacementFrame(30, TitleBackgroundCharacterPlacementActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
+        CharacterPlacementFrame(600, TitleBackgroundCharacterPlacementActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
     };
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(frames);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(frames);
 
-    return TitleBackgroundPhase2MPlacementDiagnostic.ShouldCaptureFrame(0)
-        && TitleBackgroundPhase2MPlacementDiagnostic.ShouldCaptureFrame(30)
-        && TitleBackgroundPhase2MPlacementDiagnostic.ShouldCaptureFrame(600)
-        && !TitleBackgroundPhase2MPlacementDiagnostic.ShouldCaptureFrame(90)
+    return TitleBackgroundCharacterPlacementDiagnostic.ShouldCaptureFrame(0)
+        && TitleBackgroundCharacterPlacementDiagnostic.ShouldCaptureFrame(30)
+        && TitleBackgroundCharacterPlacementDiagnostic.ShouldCaptureFrame(600)
+        && !TitleBackgroundCharacterPlacementDiagnostic.ShouldCaptureFrame(90)
         && summary.ActorDiagnosticStatus == "observed"
         && summary.ActorVisible == "observed";
 });
 
 Test("title background phase2m ambiguous actor candidates prevent write-capable conclusions", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.Ambiguous, candidateCount: 2),
+        CharacterPlacementFrame(0, TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous, candidateCount: 2),
     ]);
 
     return summary.ActorDiagnosticStatus == "ambiguous"
@@ -2463,9 +2673,9 @@ Test("title background phase2m ambiguous actor candidates prevent write-capable 
 
 Test("title background phase2m ground height unavailable is unknown not failure", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true, groundStatus: "unavailable"),
+        CharacterPlacementFrame(0, TitleBackgroundCharacterPlacementActorMatchKind.Single, visibleHint: true, withCameraDeltas: true, groundStatus: "unavailable"),
     ]);
 
     return summary.ActorGroundAligned == "unknown"
@@ -2475,8 +2685,8 @@ Test("title background phase2m ground height unavailable is unknown not failure"
 
 Test("title background phase2m visual placement is unsafe when actor is not observed", () =>
 {
-    var frame = Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.None, candidateCount: 0);
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var frame = CharacterPlacementFrame(0, TitleBackgroundCharacterPlacementActorMatchKind.None, candidateCount: 0);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
         frame,
     ]);
@@ -2490,8 +2700,8 @@ Test("title background phase2m visual placement is unsafe when actor is not obse
 
 Test("title background phase2m single stable candidate is observed but not automatically safe", () =>
 {
-    var frame = Phase2MFrame(60, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true);
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([frame]);
+    var frame = CharacterPlacementFrame(60, TitleBackgroundCharacterPlacementActorMatchKind.Single, visibleHint: true, withCameraDeltas: true);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary([frame]);
 
     return summary.ActorDiagnosticStatus == "observed"
         && frame.ActorCandidateStatus == "single"
@@ -2509,9 +2719,9 @@ Test("title background phase2m visual placement safety is independent from login
         isLoggedIn: true,
         historicalLastOverrideApplied: true,
         cleanupReason: "world-login-transition"));
-    var placementSummary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var placementSummary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.None, candidateCount: 0),
+        CharacterPlacementFrame(0, TitleBackgroundCharacterPlacementActorMatchKind.None, candidateCount: 0),
     ]);
 
     return transitionVerdicts.LoginTransitionSafety == "safe"
@@ -2521,9 +2731,9 @@ Test("title background phase2m visual placement safety is independent from login
 Test("title background phase2m resolves all zero candidates as stub only", () =>
 {
     var candidates = Enumerable.Range(0, 8)
-        .Select(index => Phase2MCandidate(index, Vector3.Zero, named: false, drawObject: false, visible: false))
+        .Select(index => CharacterPlacementCandidate(index, Vector3.Zero, named: false, drawObject: false, visible: false))
         .ToArray();
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates(candidates)]);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary([CharacterPlacementFrameFromCandidates(candidates)]);
 
     return summary.Resolution == "stub-only"
         && summary.TransformValidity == "all-zero-transform"
@@ -2536,9 +2746,9 @@ Test("title background phase2m resolves single valid visible draw object candida
 {
     var candidates = new[]
     {
-        Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+        CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
     };
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates(candidates, TitleBackgroundPhase2MActorMatchKind.Single)]);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary([CharacterPlacementFrameFromCandidates(candidates, TitleBackgroundCharacterPlacementActorMatchKind.Single)]);
 
     return summary.Resolution == "single"
         && summary.TransformValidity == "valid-world-transform"
@@ -2550,10 +2760,10 @@ Test("title background phase2m resolves multiple non-zero candidates as ambiguou
 {
     var candidates = new[]
     {
-        Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
-        Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: true, visible: true),
+        CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+        CharacterPlacementCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: true, visible: true),
     };
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates(candidates, TitleBackgroundPhase2MActorMatchKind.Ambiguous)]);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary([CharacterPlacementFrameFromCandidates(candidates, TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous)]);
 
     return summary.Resolution == "ambiguous";
 });
@@ -2562,10 +2772,10 @@ Test("title background phase2m ambiguous object table without model evidence is 
 {
     var candidates = new[]
     {
-        Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
-        Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+        CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+        CharacterPlacementCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
     };
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates(candidates, TitleBackgroundPhase2MActorMatchKind.Ambiguous)]);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary([CharacterPlacementFrameFromCandidates(candidates, TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous)]);
 
     return summary.Resolution == "ambiguous"
         && summary.DrawObjectNonNullCount == 0
@@ -2582,10 +2792,10 @@ Test("title background phase2m post login style object table candidate does not 
 {
     var candidates = new[]
     {
-        Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
-        Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+        CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+        CharacterPlacementCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
     };
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates(candidates, TitleBackgroundPhase2MActorMatchKind.Ambiguous)]);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary([CharacterPlacementFrameFromCandidates(candidates, TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous)]);
 
     return summary.BestSource == "ObjectTable"
         && summary.ActorVisible != "observed"
@@ -2595,7 +2805,7 @@ Test("title background phase2m post login style object table candidate does not 
 
 Test("title background phase2m resolves unavailable source as source missing", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrameFromCandidates([])]);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary([CharacterPlacementFrameFromCandidates([])]);
     return summary.Resolution == "source-missing"
         && summary.NextAction == "inspect-native-source";
 });
@@ -2604,20 +2814,20 @@ Test("title background phase2m prelogin capture summary survives post-login styl
 {
     var frames = new[]
     {
-        Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
-        Phase2MFrame(1200, TitleBackgroundPhase2MActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
+        CharacterPlacementFrame(0, TitleBackgroundCharacterPlacementActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
+        CharacterPlacementFrame(1200, TitleBackgroundCharacterPlacementActorMatchKind.Single, visibleHint: true, withCameraDeltas: true),
     };
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(frames);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(frames);
 
-    return TitleBackgroundPhase2MPlacementDiagnostic.ShouldCaptureFrame(1200)
+    return TitleBackgroundCharacterPlacementDiagnostic.ShouldCaptureFrame(1200)
         && summary.ActorDiagnosticStatus == "observed";
 });
 
 Test("title background phase2m experimental mode none never writes", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary([Phase2MFrame(0, TitleBackgroundPhase2MActorMatchKind.Single)]);
-    return TitleBackgroundPhase2MPlacementDiagnostic.EvaluateExperimentalApply(
-        TitleBackgroundPhase2MExperimentalApplyMode.None,
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary([CharacterPlacementFrame(0, TitleBackgroundCharacterPlacementActorMatchKind.Single)]);
+    return TitleBackgroundCharacterPlacementDiagnostic.EvaluateExperimentalApply(
+        TitleBackgroundCharacterPlacementExperimentalApplyMode.None,
         summary,
         sceneGenerationMatches: true,
         isCharaSelectActive: true,
@@ -2626,27 +2836,27 @@ Test("title background phase2m experimental mode none never writes", () =>
 
 Test("title background phase2m actor placement one shot requires single valid transform", () =>
 {
-    var ambiguous = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var ambiguous = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates(
+        CharacterPlacementFrameFromCandidates(
         [
-            Phase2MCandidate(1, new Vector3(1f, 2f, 3f), named: true, drawObject: true, visible: true),
-            Phase2MCandidate(2, new Vector3(2f, 2f, 3f), named: true, drawObject: true, visible: true),
-        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+            CharacterPlacementCandidate(1, new Vector3(1f, 2f, 3f), named: true, drawObject: true, visible: true),
+            CharacterPlacementCandidate(2, new Vector3(2f, 2f, 3f), named: true, drawObject: true, visible: true),
+        ], TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous),
     ]);
-    var stub = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var stub = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([Phase2MCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: false)]),
+        CharacterPlacementFrameFromCandidates([CharacterPlacementCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: false)]),
     ]);
 
-    return TitleBackgroundPhase2MPlacementDiagnostic.EvaluateExperimentalApply(
-            TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot,
+    return TitleBackgroundCharacterPlacementDiagnostic.EvaluateExperimentalApply(
+            TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementOneShot,
             ambiguous,
             sceneGenerationMatches: true,
             isCharaSelectActive: true,
             isLoggedIn: false).StartsWith("skip:resolution-", StringComparison.Ordinal)
-        && TitleBackgroundPhase2MPlacementDiagnostic.EvaluateExperimentalApply(
-            TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot,
+        && TitleBackgroundCharacterPlacementDiagnostic.EvaluateExperimentalApply(
+            TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementOneShot,
             stub,
             sceneGenerationMatches: true,
             isCharaSelectActive: true,
@@ -2655,15 +2865,15 @@ Test("title background phase2m actor placement one shot requires single valid tr
 
 Test("title background phase2n object table all zero is stub only", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates(
+        CharacterPlacementFrameFromCandidates(
         [
-            Phase2MCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: false),
-            Phase2MCandidate(2, Vector3.Zero, named: false, drawObject: false, visible: false),
+            CharacterPlacementCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: false),
+            CharacterPlacementCandidate(2, Vector3.Zero, named: false, drawObject: false, visible: false),
         ]),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return summary.Resolution == "stub-only"
         && delivery.ObjectTableActorRejected
@@ -2672,16 +2882,16 @@ Test("title background phase2n object table all zero is stub only", () =>
 
 Test("title background phase2n stub only blocks actor placement one shot", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([Phase2MCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: false)]),
+        CharacterPlacementFrameFromCandidates([CharacterPlacementCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: false)]),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return !delivery.ActorPlacementReady
         && delivery.ActorPlacementBlocker == "stub-only-object-table"
-        && TitleBackgroundPhase2NDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
-            TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot,
+        && TitleBackgroundDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
+            TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementOneShot,
             summary,
             sceneGenerationMatches: true,
             isCharaSelectActive: true,
@@ -2690,14 +2900,14 @@ Test("title background phase2n stub only blocks actor placement one shot", () =>
 
 Test("title background phase2n valid native single is ready", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates(
+        CharacterPlacementFrameFromCandidates(
         [
-            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
-        ], TitleBackgroundPhase2MActorMatchKind.Single),
+            CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+        ], TitleBackgroundCharacterPlacementActorMatchKind.Single),
     ]);
-    var delivery = Phase2N(summary, TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource);
+    var delivery = Delivery(summary, TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource);
 
     return delivery.NativePreviewSourceResolution == "found-single"
         && delivery.ActorPlacementReady
@@ -2706,15 +2916,15 @@ Test("title background phase2n valid native single is ready", () =>
 
 Test("title background phase2n multiple valid native candidates are ambiguous", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates(
+        CharacterPlacementFrameFromCandidates(
         [
-            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
-            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: true, visible: true),
-        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+            CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+            CharacterPlacementCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: true, visible: true),
+        ], TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous),
     ]);
-    var delivery = Phase2N(summary);
+    var delivery = Delivery(summary);
 
     return delivery.NativePreviewSourceResolution == "found-ambiguous"
         && !delivery.ActorPlacementReady;
@@ -2722,11 +2932,11 @@ Test("title background phase2n multiple valid native candidates are ambiguous", 
 
 Test("title background phase2n no native source falls back to background only", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return delivery.NativePreviewSourceResolution == "not-found"
         && delivery.DeliveryVerdict == "working-background-only"
@@ -2735,11 +2945,11 @@ Test("title background phase2n no native source falls back to background only", 
 
 Test("title background phase2n custom n4f4 override warns and recommends bright candidate", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return delivery.PresetCompatibility.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
         && delivery.PresetCompatibility.ExpectedBrightness == TitleBackgroundCharacterSelectExpectedBrightness.Dark
@@ -2878,11 +3088,11 @@ Test("title background phase2o no bright candidate reports none", () =>
 
 Test("title background phase2q old sharlayan delivery exposes observed unverified background only", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(
+    var delivery = Delivery(
         summary,
         lastOverrideApplied: true,
         selectedOverrideCandidateId: "custom:old-sharlayan-k5t1",
@@ -2910,11 +3120,11 @@ Test("title background phase2q old sharlayan delivery exposes observed unverifie
 
 Test("title background phase2q background application survives transition safety warning", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(
+    var delivery = Delivery(
         summary,
         lastOverrideApplied: true,
         transitionSafety: "unsafe",
@@ -2931,11 +3141,11 @@ Test("title background phase2q background application survives transition safety
 
 Test("title background phase2q post login leak not observed without active override or phase2g", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(
+    var delivery = Delivery(
         summary,
         lastOverrideApplied: true,
         transitionSafety: "unsafe",
@@ -2949,11 +3159,11 @@ Test("title background phase2q post login leak not observed without active overr
 
 Test("title background phase2q leak blocks candidate promotion", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(
+    var delivery = Delivery(
         summary,
         lastOverrideApplied: true,
         activeAfterLoginDetected: true);
@@ -3053,12 +3263,12 @@ Test("title background phase2p selecting manual candidate updates override field
 
 Test("title background phase2p delivery selects valid manual candidate", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
     var slot = ManualSlot(enabled: true, brightness: TitleBackgroundCharacterSelectExpectedBrightness.Bright);
-    var delivery = Phase2N(
+    var delivery = Delivery(
         summary,
         lastOverrideApplied: true,
         selectedOverrideCandidateId: "manual:slot1",
@@ -3077,12 +3287,12 @@ Test("title background phase2p delivery selects valid manual candidate", () =>
 
 Test("title background phase2p invalid manual candidate falls back safely", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
     var slot = ManualSlot(path: "bad/path", territoryId: 900, enabled: true);
-    var delivery = Phase2N(
+    var delivery = Delivery(
         summary,
         lastOverrideApplied: true,
         selectedOverrideCandidateId: "manual:slot1",
@@ -3127,16 +3337,41 @@ Test("title background phase2o unverified bright candidate does not claim verifi
 
 Test("title background phase2o delivery exposes selected override candidate", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return delivery.OverrideCandidate.Selected.Id == "custom:n4f4"
         && delivery.OverrideCandidate.Selected.VerifiedInGame
         && delivery.OverrideCandidate.Available.Count == 2
         && delivery.OverrideCandidate.Available[0].Id == "custom:n4f4";
+});
+
+Test("title background delivery diagnostics emit old and new key prefixes", () =>
+{
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
+    [
+        CharacterPlacementFrameFromCandidates([]),
+    ]);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
+    var lines = TitleBackgroundDeliveryDiagnostic.BuildLineList(delivery);
+
+    return lines.Any(line => line == $"phase2N.mvpStatus={delivery.MvpStatus}")
+        && lines.Any(line => line == $"delivery.mvpStatus={delivery.MvpStatus}")
+        && lines.Any(line => line == $"phase2N.nextAction={delivery.NextAction}")
+        && lines.Any(line => line == $"delivery.nextAction={delivery.NextAction}");
+});
+
+Test("title background character placement diagnostics keep old and new key prefixes", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+
+    return serviceText.Contains("phase2M.", StringComparison.Ordinal)
+        && serviceText.Contains("characterPlacement.", StringComparison.Ordinal)
+        && serviceText.Contains("DiagnosticReportBuilder.AddPrefixAliasLines(lines, aliasStartIndex, \"phase2M.\", \"characterPlacement.\")", StringComparison.Ordinal);
 });
 
 Test("title background phase2q docs mention xmutbgdiag after login", () =>
@@ -3155,9 +3390,8 @@ Test("title background phase2q implementation avoids prohibited write paths", ()
     var changedFiles = new[]
     {
         Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundCharacterSelectOverrideCandidateRegistry.cs"),
-        Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundPhase2NDeliveryDiagnostic.cs"),
-        Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"),
-    };
+        Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundDeliveryDiagnostic.cs"),
+    }.Concat(Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs")).ToArray();
     var titleBackgroundText = string.Join(
         "\n",
         changedFiles.Select(File.ReadAllText));
@@ -3183,8 +3417,7 @@ Test("title background phase2o docs and ui avoid n4f4 synthetic preset wording",
         Path.Combine(root, "docs", "title-background-character-select-bright-candidates.md"),
         Path.Combine(root, "docs", "title-background-character-select-delivery-notes.md"),
         Path.Combine(root, "docs", "title-background-character-select-phase2n-plan.md"),
-        Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"),
-    };
+    }.Concat(Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs")).ToArray();
 
     return paths.All(path => File.Exists(path)
         && !File.ReadAllText(path).Contains("n4f4 " + "preset", StringComparison.OrdinalIgnoreCase));
@@ -3192,11 +3425,11 @@ Test("title background phase2o docs and ui avoid n4f4 synthetic preset wording",
 
 Test("title background phase2n stub only never reports character observed", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([Phase2MCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: true)]),
+        CharacterPlacementFrameFromCandidates([CharacterPlacementCandidate(1, Vector3.Zero, named: false, drawObject: false, visible: true)]),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return delivery.ObjectTableActorRejected
         && delivery.NativePreviewSourceResolution == "not-found"
@@ -3207,11 +3440,11 @@ Test("title background phase2n stub only never reports character observed", () =
 
 Test("title background phase2n native source not found never reports character observed", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return delivery.NativePreviewSourceResolution == "not-found"
         && delivery.CharacterVisibilityObserved != "observed";
@@ -3219,11 +3452,11 @@ Test("title background phase2n native source not found never reports character o
 
 Test("title background phase2n background only keeps character expected hidden", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return delivery.DeliveryVerdict == "working-background-only"
         && !delivery.PresetCompatibility.CharacterExpectedVisible
@@ -3232,11 +3465,11 @@ Test("title background phase2n background only keeps character expected hidden",
 
 Test("title background phase2n custom override source keeps selected preset none", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(summary, selectedPresetId: string.Empty, lastOverrideApplied: true);
+    var delivery = Delivery(summary, selectedPresetId: string.Empty, lastOverrideApplied: true);
 
     return delivery.OverrideCompatibility.Source == "custom-override"
         && delivery.OverrideCompatibility.SelectedPresetId == "none"
@@ -3245,11 +3478,11 @@ Test("title background phase2n custom override source keeps selected preset none
 
 Test("title background phase2n custom n4f4 synthetic entry is not selected preset", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(summary, selectedPresetId: string.Empty, lastOverrideApplied: true);
+    var delivery = Delivery(summary, selectedPresetId: string.Empty, lastOverrideApplied: true);
 
     return delivery.PresetCompatibility.CurrentPresetId == "custom:n4f4"
         && delivery.OverrideCompatibility.Id == "custom:n4f4"
@@ -3259,11 +3492,11 @@ Test("title background phase2n custom n4f4 synthetic entry is not selected prese
 
 Test("title background phase2n custom n4f4 dark lighting has recommendation", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return delivery.OverrideCompatibility.ExpectedBrightness == TitleBackgroundCharacterSelectExpectedBrightness.Dark
         && delivery.Lighting.CurrentLayerFilterKey == 51
@@ -3274,11 +3507,11 @@ Test("title background phase2n custom n4f4 dark lighting has recommendation", ()
 
 Test("title background phase2n background only safe compatibility delivers background only", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return delivery.PresetCompatibility.ExpectedCompatibility == TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
         && delivery.PresetCompatibility.SafeToUse
@@ -3287,15 +3520,15 @@ Test("title background phase2n background only safe compatibility delivers backg
 
 Test("title background phase2n post login current object table is ignored", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates(
+        CharacterPlacementFrameFromCandidates(
         [
-            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
-            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
-        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+            CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+            CharacterPlacementCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+        ], TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true, currentObjectTableValidForCharaSelect: false);
+    var delivery = Delivery(summary, lastOverrideApplied: true, currentObjectTableValidForCharaSelect: false);
 
     return delivery.NativePreviewSourceCurrentObjectTableIgnored
         && delivery.NativePreviewSourceCurrentObjectTableIgnoredReason == "post-login-world-object-table-not-valid-for-chara-select"
@@ -3309,15 +3542,15 @@ Test("title background phase2n post login current object table is ignored", () =
 
 Test("title background phase2n background only mvp is complete with known limitation", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates(
+        CharacterPlacementFrameFromCandidates(
         [
-            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
-            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
-        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+            CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+            CharacterPlacementCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+        ], TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true, currentObjectTableValidForCharaSelect: false);
+    var delivery = Delivery(summary, lastOverrideApplied: true, currentObjectTableValidForCharaSelect: false);
 
     return delivery.NativePreviewSourceCurrentObjectTableIgnored
         && delivery.NativePreviewSourceResolution == "not-verifiable-post-login"
@@ -3331,15 +3564,15 @@ Test("title background phase2n background only mvp is complete with known limita
 
 Test("title background phase2n post login ambiguous object table never readies actor placement", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates(
+        CharacterPlacementFrameFromCandidates(
         [
-            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
-            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
-        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+            CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+            CharacterPlacementCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+        ], TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true, currentObjectTableValidForCharaSelect: false);
+    var delivery = Delivery(summary, lastOverrideApplied: true, currentObjectTableValidForCharaSelect: false);
 
     return !delivery.ActorPlacementReady
         && delivery.ActorPlacementBlocker == "post-login-world-object-table-not-valid-for-chara-select"
@@ -3348,15 +3581,15 @@ Test("title background phase2n post login ambiguous object table never readies a
 
 Test("title background phase2n draw object absent unstable ambiguous is not observed", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates(
+        CharacterPlacementFrameFromCandidates(
         [
-            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
-            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
-        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+            CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: false, visible: false),
+            CharacterPlacementCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: false, visible: false),
+        ], TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return summary.DrawObjectNonNullCount == 0
         && summary.ModelLikeNonNullCount == 0
@@ -3369,11 +3602,11 @@ Test("title background phase2n source local counts do not leak object table coun
 {
     var sourceDiscovery = new[]
     {
-        new TitleBackgroundPhase2MSourceDiscovery("ObjectTable", true, 16, 16, string.Empty, 16, 0, 0),
-        new TitleBackgroundPhase2MSourceDiscovery("PlayerObjects", true, 0, 0, string.Empty, 0, 0, 0),
-        new TitleBackgroundPhase2MSourceDiscovery("CharacterManagerObjects", true, 0, 0, string.Empty, 0, 0, 0),
+        new TitleBackgroundCharacterPlacementSourceDiscovery("ObjectTable", true, 16, 16, string.Empty, 16, 0, 0),
+        new TitleBackgroundCharacterPlacementSourceDiscovery("PlayerObjects", true, 0, 0, string.Empty, 0, 0, 0),
+        new TitleBackgroundCharacterPlacementSourceDiscovery("CharacterManagerObjects", true, 0, 0, string.Empty, 0, 0, 0),
     };
-    var delivery = Phase2NFromRaw(
+    var delivery = DeliveryFromRaw(
         phase2MResolution: "ambiguous",
         phase2MTransformValidity: "valid-world-transform",
         phase2MActorVisible: "ambiguous",
@@ -3394,20 +3627,20 @@ Test("title background phase2n source local counts do not leak object table coun
 
 Test("title background phase2n object table ambiguous candidate never enables one shot readiness", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates(
+        CharacterPlacementFrameFromCandidates(
         [
-            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
-            Phase2MCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: true, visible: true),
-        ], TitleBackgroundPhase2MActorMatchKind.Ambiguous),
+            CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+            CharacterPlacementCandidate(2, new Vector3(11f, 20f, 30f), named: true, drawObject: true, visible: true),
+        ], TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true);
+    var delivery = Delivery(summary, lastOverrideApplied: true);
 
     return summary.Resolution == "ambiguous"
         && !delivery.ActorPlacementReady
-        && TitleBackgroundPhase2NDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
-            TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot,
+        && TitleBackgroundDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
+            TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementOneShot,
             summary,
             sceneGenerationMatches: true,
             isCharaSelectActive: true,
@@ -3416,18 +3649,18 @@ Test("title background phase2n object table ambiguous candidate never enables on
 
 Test("title background phase2n default mode does not enable actor or camera direct writes", () =>
 {
-    return TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly)
-        && !TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(TitleBackgroundCharacterSelectBackgroundMode.Disabled)
-        && !TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(TitleBackgroundCharacterSelectBackgroundMode.DiagnosticsOnly);
+    return TitleBackgroundDeliveryDiagnostic.IsMutationMode(TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly)
+        && !TitleBackgroundDeliveryDiagnostic.IsMutationMode(TitleBackgroundCharacterSelectBackgroundMode.Disabled)
+        && !TitleBackgroundDeliveryDiagnostic.IsMutationMode(TitleBackgroundCharacterSelectBackgroundMode.DiagnosticsOnly);
 });
 
 Test("title background phase2n login transition unsafe stops delivery", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates([]),
+        CharacterPlacementFrameFromCandidates([]),
     ]);
-    var delivery = Phase2N(summary, lastOverrideApplied: true, transitionSafety: "unsafe");
+    var delivery = Delivery(summary, lastOverrideApplied: true, transitionSafety: "unsafe");
 
     return delivery.DeliveryVerdict == "unsafe"
         && delivery.NextAction == "unsafe-stop";
@@ -3435,16 +3668,16 @@ Test("title background phase2n login transition unsafe stops delivery", () =>
 
 Test("title background phase2n scene generation mismatch remains no-op for actor placement", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates(
+        CharacterPlacementFrameFromCandidates(
         [
-            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
-        ], TitleBackgroundPhase2MActorMatchKind.Single),
+            CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: true),
+        ], TitleBackgroundCharacterPlacementActorMatchKind.Single),
     ]);
 
-    return TitleBackgroundPhase2NDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
-        TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot,
+    return TitleBackgroundDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
+        TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementOneShot,
         summary,
         sceneGenerationMatches: false,
         isCharaSelectActive: true,
@@ -3453,12 +3686,12 @@ Test("title background phase2n scene generation mismatch remains no-op for actor
 
 Test("title background phase2m next action selects visibility probe for valid invisible actor", () =>
 {
-    var summary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
     [
-        Phase2MFrameFromCandidates(
+        CharacterPlacementFrameFromCandidates(
         [
-            Phase2MCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: false),
-        ], TitleBackgroundPhase2MActorMatchKind.Single),
+            CharacterPlacementCandidate(1, new Vector3(10f, 20f, 30f), named: true, drawObject: true, visible: false),
+        ], TitleBackgroundCharacterPlacementActorMatchKind.Single),
     ]);
 
     return summary.NextAction == "enable-visibility-probe" || summary.NextAction == "actor-placement-preview";
@@ -4373,8 +4606,8 @@ string ExtractMethodBody(string source, string signature)
     return source[bodyStart..];
 }
 
-TitleBackgroundPhase2NDeliverySummary Phase2N(
-    TitleBackgroundPhase2MSummary summary,
+TitleBackgroundDeliverySummary Delivery(
+    TitleBackgroundCharacterPlacementSummary summary,
     TitleBackgroundCharacterSelectBackgroundMode backgroundMode = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly,
     TitleBackgroundCharacterSelectLightingMode lightingMode = TitleBackgroundCharacterSelectLightingMode.Default,
     string selectedPresetId = "",
@@ -4392,7 +4625,7 @@ TitleBackgroundPhase2NDeliverySummary Phase2N(
     bool activeAfterLoginDetected = false,
     bool phase2GAppliedAfterLogin = false)
 {
-    return TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
+    return TitleBackgroundDeliveryDiagnostic.BuildSummary(
         backgroundMode,
         lightingMode,
         selectedPresetId,
@@ -4410,7 +4643,7 @@ TitleBackgroundPhase2NDeliverySummary Phase2N(
         summary.ModelLikeNonNullCount,
         summary.BestCandidate,
         [
-            new TitleBackgroundPhase2MSourceDiscovery(
+            new TitleBackgroundCharacterPlacementSourceDiscovery(
                 "ObjectTable",
                 true,
                 summary.ZeroPositionCandidateCount + summary.NonZeroPositionCandidateCount,
@@ -4432,7 +4665,7 @@ TitleBackgroundPhase2NDeliverySummary Phase2N(
         phase2GAppliedAfterLogin);
 }
 
-TitleBackgroundPhase2NDeliverySummary Phase2NFromRaw(
+TitleBackgroundDeliverySummary DeliveryFromRaw(
     string phase2MResolution,
     string phase2MTransformValidity,
     string phase2MActorVisible,
@@ -4440,11 +4673,11 @@ TitleBackgroundPhase2NDeliverySummary Phase2NFromRaw(
     int nonZeroPositionCandidateCount,
     int drawObjectNonNullCount,
     int modelLikeNonNullCount,
-    IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> sourceDiscovery,
+    IReadOnlyList<TitleBackgroundCharacterPlacementSourceDiscovery> sourceDiscovery,
     bool lastOverrideApplied = false,
     bool currentObjectTableValidForCharaSelect = true)
 {
-    return TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
+    return TitleBackgroundDeliveryDiagnostic.BuildSummary(
         TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly,
         TitleBackgroundCharacterSelectLightingMode.Default,
         string.Empty,
@@ -4467,16 +4700,16 @@ TitleBackgroundPhase2NDeliverySummary Phase2NFromRaw(
         currentObjectTableValidForCharaSelect ? "none" : "post-login-world-object-table-not-valid-for-chara-select");
 }
 
-TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
+TitleBackgroundCharacterPlacementFrame CharacterPlacementFrame(
     int frame,
-    TitleBackgroundPhase2MActorMatchKind matchKind,
+    TitleBackgroundCharacterPlacementActorMatchKind matchKind,
     bool visibleHint = false,
     bool withCameraDeltas = false,
     string groundStatus = "unavailable",
     int candidateCount = 1)
 {
-    var actor = matchKind == TitleBackgroundPhase2MActorMatchKind.Single
-        ? new TitleBackgroundPhase2MActorCandidate(
+    var actor = matchKind == TitleBackgroundCharacterPlacementActorMatchKind.Single
+        ? new TitleBackgroundCharacterPlacementActorCandidate(
             SourceIndex: 1,
             Source: "test",
             ObjectIndex: 1,
@@ -4518,12 +4751,12 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
             CategoryReason: "PlayerCharacter,BattleChara,Named",
             Score: 100,
             ScoreReason: "test")
-        : (TitleBackgroundPhase2MActorCandidate?)null;
+        : (TitleBackgroundCharacterPlacementActorCandidate?)null;
     var objectCandidates = actor.HasValue
         ? new[] { actor.Value }
-        : Array.Empty<TitleBackgroundPhase2MActorCandidate>();
+        : Array.Empty<TitleBackgroundCharacterPlacementActorCandidate>();
 
-    return new TitleBackgroundPhase2MPlacementFrame(
+    return new TitleBackgroundCharacterPlacementFrame(
         Frame: frame,
         Reason: frame == 0 ? "scene-ready-accepted" : "timeline",
         ActiveCameraCaptured: withCameraDeltas,
@@ -4543,7 +4776,7 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
         ObjectCandidates: objectCandidates,
         SourceDiscovery:
         [
-            new TitleBackgroundPhase2MSourceDiscovery(
+            new TitleBackgroundCharacterPlacementSourceDiscovery(
                 "ObjectTable",
                 true,
                 candidateCount,
@@ -4552,16 +4785,16 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
                 objectCandidates.Count(candidate => candidate.Position != Vector3.Zero),
                 objectCandidates.Count(candidate => candidate.DrawObjectNonNull),
                 objectCandidates.Count(candidate => candidate.ModelLikeNonNull)),
-            new TitleBackgroundPhase2MSourceDiscovery("CharacterManagerObjects", true, candidateCount, 0, string.Empty),
+            new TitleBackgroundCharacterPlacementSourceDiscovery("CharacterManagerObjects", true, candidateCount, 0, string.Empty),
         ],
         CandidateCount: candidateCount,
         ActorStatus: matchKind switch
         {
-            TitleBackgroundPhase2MActorMatchKind.Single => "observed",
-            TitleBackgroundPhase2MActorMatchKind.Ambiguous => "ambiguous",
+            TitleBackgroundCharacterPlacementActorMatchKind.Single => "observed",
+            TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous => "ambiguous",
             _ => "not-observed",
         },
-        ObjectTableStats: new TitleBackgroundPhase2MObjectTableStats(
+        ObjectTableStats: new TitleBackgroundCharacterPlacementObjectTableStats(
             TotalScanned: candidateCount,
             NamedCount: actor.HasValue ? 1 : 0,
             PlayerLikeCount: actor.HasValue ? 1 : 0,
@@ -4572,18 +4805,18 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
             NearConfiguredCharacterCount: actor.HasValue ? 1 : 0),
         ActorCandidateStatus: matchKind switch
         {
-            TitleBackgroundPhase2MActorMatchKind.Single => "single",
-            TitleBackgroundPhase2MActorMatchKind.Ambiguous => "ambiguous",
+            TitleBackgroundCharacterPlacementActorMatchKind.Single => "single",
+            TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous => "ambiguous",
             _ => "none",
         },
         ActorCandidateReason: matchKind switch
         {
-            TitleBackgroundPhase2MActorMatchKind.Single => "single-candidate",
-            TitleBackgroundPhase2MActorMatchKind.Ambiguous => "multiple-candidates:2",
+            TitleBackgroundCharacterPlacementActorMatchKind.Single => "single-candidate",
+            TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous => "multiple-candidates:2",
             _ => "objectTable-unavailable-or-not-exposed",
         },
-        ActorSource: matchKind == TitleBackgroundPhase2MActorMatchKind.Single ? "test" : "objectTable-unavailable-or-not-exposed",
-        NextNativeSourceToInspect: matchKind == TitleBackgroundPhase2MActorMatchKind.None ? "native character-select actor manager" : "none",
+        ActorSource: matchKind == TitleBackgroundCharacterPlacementActorMatchKind.Single ? "test" : "objectTable-unavailable-or-not-exposed",
+        NextNativeSourceToInspect: matchKind == TitleBackgroundCharacterPlacementActorMatchKind.None ? "native character-select actor manager" : "none",
         GroundHeightStatus: groundStatus,
         GroundY: null,
         ActorToCameraDistance: withCameraDeltas ? 3f : null,
@@ -4598,7 +4831,7 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrame(
         ActorYMinusNativeLookAtY: actor.HasValue ? 0f : null);
 }
 
-TitleBackgroundPhase2MActorCandidate Phase2MCandidate(
+TitleBackgroundCharacterPlacementActorCandidate CharacterPlacementCandidate(
     int index,
     Vector3 position,
     bool named,
@@ -4606,7 +4839,7 @@ TitleBackgroundPhase2MActorCandidate Phase2MCandidate(
     bool visible)
 {
     var zero = position == Vector3.Zero;
-    return new TitleBackgroundPhase2MActorCandidate(
+    return new TitleBackgroundCharacterPlacementActorCandidate(
         SourceIndex: index,
         Source: "ObjectTable",
         ObjectIndex: 200 + index,
@@ -4650,15 +4883,15 @@ TitleBackgroundPhase2MActorCandidate Phase2MCandidate(
         ScoreReason: zero ? "all-zero-transform-penalty:-40" : "non-zero-world-position:+30");
 }
 
-TitleBackgroundPhase2MPlacementFrame Phase2MFrameFromCandidates(
-    IReadOnlyList<TitleBackgroundPhase2MActorCandidate> candidates,
-    TitleBackgroundPhase2MActorMatchKind matchKind = TitleBackgroundPhase2MActorMatchKind.Ambiguous)
+TitleBackgroundCharacterPlacementFrame CharacterPlacementFrameFromCandidates(
+    IReadOnlyList<TitleBackgroundCharacterPlacementActorCandidate> candidates,
+    TitleBackgroundCharacterPlacementActorMatchKind matchKind = TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous)
 {
     var actor = candidates.Count == 1
         ? candidates[0]
         : candidates.FirstOrDefault();
     var hasActor = candidates.Count > 0;
-    return new TitleBackgroundPhase2MPlacementFrame(
+    return new TitleBackgroundCharacterPlacementFrame(
         Frame: 0,
         Reason: "scene-ready-accepted",
         ActiveCameraCaptured: true,
@@ -4673,12 +4906,12 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrameFromCandidates(
         LobbyDirV: 0f,
         LobbyDistance: 3f,
         LobbyInterpDistance: 3f,
-        ActorMatchKind: hasActor ? matchKind : TitleBackgroundPhase2MActorMatchKind.None,
+        ActorMatchKind: hasActor ? matchKind : TitleBackgroundCharacterPlacementActorMatchKind.None,
         Actor: hasActor ? actor : null,
         ObjectCandidates: candidates,
         SourceDiscovery:
         [
-            new TitleBackgroundPhase2MSourceDiscovery(
+            new TitleBackgroundCharacterPlacementSourceDiscovery(
                 "ObjectTable",
                 true,
                 candidates.Count,
@@ -4687,11 +4920,11 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrameFromCandidates(
                 candidates.Count(candidate => candidate.Position != Vector3.Zero),
                 candidates.Count(candidate => candidate.DrawObjectNonNull),
                 candidates.Count(candidate => candidate.ModelLikeNonNull)),
-            new TitleBackgroundPhase2MSourceDiscovery("CharacterManagerObjects", false, 0, 0, "not-exposed"),
+            new TitleBackgroundCharacterPlacementSourceDiscovery("CharacterManagerObjects", false, 0, 0, "not-exposed"),
         ],
         CandidateCount: candidates.Count,
-        ActorStatus: hasActor ? matchKind == TitleBackgroundPhase2MActorMatchKind.Single ? "observed" : "ambiguous" : "not-observed",
-        ObjectTableStats: new TitleBackgroundPhase2MObjectTableStats(
+        ActorStatus: hasActor ? matchKind == TitleBackgroundCharacterPlacementActorMatchKind.Single ? "observed" : "ambiguous" : "not-observed",
+        ObjectTableStats: new TitleBackgroundCharacterPlacementObjectTableStats(
             TotalScanned: candidates.Count,
             NamedCount: candidates.Count(candidate => candidate.Named),
             PlayerLikeCount: candidates.Count(candidate => candidate.PlayerLike),
@@ -4700,7 +4933,7 @@ TitleBackgroundPhase2MPlacementFrame Phase2MFrameFromCandidates(
             CompanionLikeCount: 0,
             NearCameraCount: candidates.Count(candidate => candidate.NearCameraLookAt || candidate.NearCameraPosition),
             NearConfiguredCharacterCount: candidates.Count(candidate => candidate.NearConfiguredCharacter)),
-        ActorCandidateStatus: hasActor ? matchKind == TitleBackgroundPhase2MActorMatchKind.Single ? "single" : "ambiguous" : "none",
+        ActorCandidateStatus: hasActor ? matchKind == TitleBackgroundCharacterPlacementActorMatchKind.Single ? "single" : "ambiguous" : "none",
         ActorCandidateReason: hasActor ? $"multiple-candidates:{candidates.Count}" : "objectTable-unavailable-or-not-exposed",
         ActorSource: hasActor ? "ObjectTable" : "objectTable-unavailable-or-not-exposed",
         NextNativeSourceToInspect: hasActor ? "CharacterManager" : "native character-select actor manager",
@@ -5076,6 +5309,112 @@ Test("title background case 4 camera framing applied but scene override not obse
         && result.Reason.Contains("camera framing applied but scene override was not observed", StringComparison.Ordinal);
 });
 
+// --- Phase 4 partial split structural tests ---
+
+Test("settings tab is split into chara select partial", () =>
+{
+    var root = FindRepositoryRoot();
+    var charaSelectFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.CharaSelect.cs");
+    var mainFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs");
+    var charaSelectText = File.ReadAllText(charaSelectFile);
+    var mainText = File.ReadAllText(mainFile);
+    return charaSelectText.Contains("private void DrawCharaSelectSettings()", StringComparison.Ordinal)
+        && !charaSelectText.Contains("DrawLegacyCharaSelectDiagnostics", StringComparison.Ordinal)
+        && !charaSelectText.Contains("Legacy experiments", StringComparison.Ordinal)
+        && charaSelectText.Contains("private static string GetStageStrategyLabel(", StringComparison.Ordinal)
+        && mainText.Contains("partial class SettingsTab", StringComparison.Ordinal)
+        && !mainText.Contains("private void DrawCharaSelectSettings()", StringComparison.Ordinal);
+});
+
+Test("settings tab is split into title background partial", () =>
+{
+    var root = FindRepositoryRoot();
+    var tbFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackground.cs");
+    var mainFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs");
+    var tbText = File.ReadAllText(tbFile);
+    var mainText = File.ReadAllText(mainFile);
+    return tbText.Contains("DrawTitleBackgroundSettings", StringComparison.Ordinal)
+        && tbText.Contains("DrawTitleBackgroundSimplePanel", StringComparison.Ordinal)
+        && tbText.Contains("ClearTitleBackgroundInputs", StringComparison.Ordinal)
+        && !mainText.Contains("DrawTitleBackgroundSettings", StringComparison.Ordinal);
+});
+
+Test("settings tab is split into shop partial", () =>
+{
+    var root = FindRepositoryRoot();
+    var shopFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.Shop.cs");
+    var mainFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs");
+    var shopText = File.ReadAllText(shopFile);
+    var mainText = File.ReadAllText(mainFile);
+    return shopText.Contains("private void DrawShopSearchSettings()", StringComparison.Ordinal)
+        && shopText.Contains("private void UpdateFilteredTerritories(", StringComparison.Ordinal)
+        && !mainText.Contains("private void DrawShopSearchSettings()", StringComparison.Ordinal);
+});
+
+Test("settings tab main file does not contain dead IsStatusError method", () =>
+{
+    var root = FindRepositoryRoot();
+    var settingsAll = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
+    return !settingsAll.Contains("IsStatusError", StringComparison.Ordinal);
+});
+
+Test("chara select service voice diagnostics extracted to partial", () =>
+{
+    var root = FindRepositoryRoot();
+    var diagFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.Diagnostics.cs");
+    var mainFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.cs");
+    var diagText = File.ReadAllText(diagFile);
+    var mainText = File.ReadAllText(mainFile);
+    return diagText.Contains("GetVoiceDiagnosticLines", StringComparison.Ordinal)
+        && diagText.Contains("GetSceneCompositionDiagnosticLines", StringComparison.Ordinal)
+        && diagText.Contains("AppendVoiceTableDiagnostics", StringComparison.Ordinal)
+        && mainText.Contains("partial class CharaSelectService", StringComparison.Ordinal)
+        && !mainText.Contains("GetVoiceDiagnosticLines", StringComparison.Ordinal);
+});
+
+Test("chara select service native hooks extracted to partial", () =>
+{
+    var root = FindRepositoryRoot();
+    var hookFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.NativeHooks.cs");
+    var mainFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.cs");
+    var hookText = File.ReadAllText(hookFile);
+    var mainText = File.ReadAllText(mainFile);
+    return hookText.Contains("private void InitializeHooks()", StringComparison.Ordinal)
+        && hookText.Contains("private bool UpdateCharaSelectDisplayDetour(", StringComparison.Ordinal)
+        && hookText.Contains("private void OnFrameworkUpdate(", StringComparison.Ordinal)
+        && hookText.Contains("private void DisposeHook<T>(", StringComparison.Ordinal)
+        && !mainText.Contains("private void InitializeHooks()", StringComparison.Ordinal);
+});
+
+Test("chara select service emote and prefetch logic extracted to partials", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceDir = Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect");
+    var mainText = File.ReadAllText(Path.Combine(serviceDir, "CharaSelectService.cs"));
+    var emoteText = File.ReadAllText(Path.Combine(serviceDir, "CharaSelectService.Emotes.cs"));
+    var prefetchText = File.ReadAllText(Path.Combine(serviceDir, "CharaSelectService.Prefetch.cs"));
+    return emoteText.Contains("private void SaveExecutedEmote(", StringComparison.Ordinal)
+        && emoteText.Contains("private bool PlayEmote(", StringComparison.Ordinal)
+        && prefetchText.Contains("private void PreloadLoginTerritory()", StringComparison.Ordinal)
+        && prefetchText.Contains("private void TryLoadPrefetchLayout(", StringComparison.Ordinal)
+        && !mainText.Contains("private bool PlayEmote(", StringComparison.Ordinal)
+        && !mainText.Contains("private void TryLoadPrefetchLayout(", StringComparison.Ordinal);
+});
+
+Test("plugin commands are registered through a command table", () =>
+{
+    var root = FindRepositoryRoot();
+    var pluginText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Plugin.cs"));
+    return pluginText.Contains("private readonly record struct CommandRegistration", StringComparison.Ordinal)
+        && pluginText.Contains("private IReadOnlyList<CommandRegistration> GetCommandRegistrations()", StringComparison.Ordinal)
+        && pluginText.Contains("private void RegisterCommands()", StringComparison.Ordinal)
+        && pluginText.Contains("private void UnregisterCommands()", StringComparison.Ordinal)
+        && pluginText.Contains("_commandManager.AddHandler(registration.Name", StringComparison.Ordinal)
+        && pluginText.Contains("_commandManager.RemoveHandler(registration.Name", StringComparison.Ordinal)
+        && CountOccurrences(pluginText, "_commandManager.AddHandler(") == 1
+        && CountOccurrences(pluginText, "_commandManager.RemoveHandler(") == 1;
+});
+
 if (failures.Count > 0)
 {
     foreach (var failure in failures)
@@ -5102,4 +5441,17 @@ void Test(string name, Func<bool> assertion)
     {
         failures.Add($"ERROR: {name}: {ex.GetType().Name}: {ex.Message}");
     }
+}
+
+int CountOccurrences(string text, string value)
+{
+    var count = 0;
+    var index = 0;
+    while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+    {
+        count++;
+        index += value.Length;
+    }
+
+    return count;
 }

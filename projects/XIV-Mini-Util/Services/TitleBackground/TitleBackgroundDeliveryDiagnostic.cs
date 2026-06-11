@@ -1,7 +1,8 @@
-// Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundPhase2NDeliveryDiagnostic.cs
+// Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundDeliveryDiagnostic.cs
 // Description: Character Select 背景配送 MVP の互換性・fallback・安全判定をまとめる
 // Reason: 実機 write を増やさずに Phase 2N の配送状態を /xmutbgdiag とテストで判断するため
 using System.Numerics;
+using XivMiniUtil.Services.Common;
 
 namespace XivMiniUtil.Services.TitleBackground;
 
@@ -44,7 +45,7 @@ public enum TitleBackgroundCharacterSelectExpectedBrightness
     TooDark,
 }
 
-internal readonly record struct TitleBackgroundPhase2NForegroundPreserveResult(
+internal readonly record struct TitleBackgroundForegroundPreserveResult(
     bool Available,
     string Reason,
     string OriginalScenePath,
@@ -56,7 +57,7 @@ internal readonly record struct TitleBackgroundPhase2NForegroundPreserveResult(
     bool Applied,
     string SkippedReason);
 
-internal readonly record struct TitleBackgroundPhase2NNativeSourceProbe(
+internal readonly record struct TitleBackgroundNativePreviewSourceProbe(
     string Name,
     bool Available,
     string ReadStatus,
@@ -66,7 +67,7 @@ internal readonly record struct TitleBackgroundPhase2NNativeSourceProbe(
     int ModelLikeNonNullCount,
     string Error);
 
-internal readonly record struct TitleBackgroundPhase2NLightingDiagnostic(
+internal readonly record struct TitleBackgroundLightingDiagnostic(
     TitleBackgroundCharacterSelectLightingMode Mode,
     bool Available,
     string CurrentWeather,
@@ -85,7 +86,7 @@ internal readonly record struct TitleBackgroundPhase2NLightingDiagnostic(
     string BrightLayerCandidates,
     string RecommendedAction);
 
-internal readonly record struct TitleBackgroundPhase2NPresetCompatibility(
+internal readonly record struct TitleBackgroundPresetCompatibility(
     string CurrentPresetId,
     TitleBackgroundCharacterSelectCompatibility ExpectedCompatibility,
     TitleBackgroundCharacterSelectExpectedBrightness ExpectedBrightness,
@@ -95,7 +96,7 @@ internal readonly record struct TitleBackgroundPhase2NPresetCompatibility(
     bool SafeToUse,
     bool CharacterExpectedVisible);
 
-internal readonly record struct TitleBackgroundPhase2NOverrideCompatibility(
+internal readonly record struct TitleBackgroundOverrideCompatibility(
     string Source,
     string Id,
     string DisplayName,
@@ -112,7 +113,7 @@ internal readonly record struct TitleBackgroundPhase2NOverrideCompatibility(
     string RecommendedAction,
     string Warning);
 
-internal readonly record struct TitleBackgroundPhase2NOverrideCandidateDiagnostic(
+internal readonly record struct TitleBackgroundOverrideCandidateDiagnostic(
     TitleBackgroundCharacterSelectOverrideCandidate Selected,
     IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> Available,
     IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot> ManualSlots,
@@ -122,7 +123,7 @@ internal readonly record struct TitleBackgroundPhase2NOverrideCandidateDiagnosti
     int RegistryBrightCount,
     string RegistryDefaultId);
 
-internal readonly record struct TitleBackgroundPhase2NBackgroundApplicationDiagnostic(
+internal readonly record struct TitleBackgroundDeliveryBackgroundApplicationDiagnostic(
     bool Observed,
     bool LastHistoricalOverrideApplied,
     string LastHistoricalOverridePath,
@@ -130,12 +131,12 @@ internal readonly record struct TitleBackgroundPhase2NBackgroundApplicationDiagn
     bool VisualConfirmationRequired,
     string UserVerdict);
 
-internal readonly record struct TitleBackgroundPhase2NSafetyDiagnostic(
+internal readonly record struct TitleBackgroundDeliverySafetyDiagnostic(
     string Verdict,
     string Reason,
     bool BlocksBackgroundCandidatePromotion);
 
-internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
+internal readonly record struct TitleBackgroundDeliverySummary(
     string FeatureGoal,
     TitleBackgroundCharacterSelectBackgroundMode BackgroundMode,
     string BackgroundModeReason,
@@ -143,24 +144,24 @@ internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
     string CharacterVisibilityObserved,
     string CharacterVisibilityBlocker,
     bool NativePreviewSourceSearched,
-    IReadOnlyList<TitleBackgroundPhase2NNativeSourceProbe> NativePreviewSources,
+    IReadOnlyList<TitleBackgroundNativePreviewSourceProbe> NativePreviewSources,
     string NativePreviewSourceBestSource,
     string NativePreviewSourceBestCandidate,
     string NativePreviewSourceResolution,
     bool NativePreviewSourceCurrentObjectTableIgnored,
     string NativePreviewSourceCurrentObjectTableIgnoredReason,
-    TitleBackgroundPhase2NForegroundPreserveResult ForegroundPreserve,
-    TitleBackgroundPhase2NPresetCompatibility PresetCompatibility,
-    TitleBackgroundPhase2NOverrideCompatibility OverrideCompatibility,
-    TitleBackgroundPhase2NOverrideCandidateDiagnostic OverrideCandidate,
-    TitleBackgroundPhase2NLightingDiagnostic Lighting,
+    TitleBackgroundForegroundPreserveResult ForegroundPreserve,
+    TitleBackgroundPresetCompatibility PresetCompatibility,
+    TitleBackgroundOverrideCompatibility OverrideCompatibility,
+    TitleBackgroundOverrideCandidateDiagnostic OverrideCandidate,
+    TitleBackgroundLightingDiagnostic Lighting,
     bool ObjectTableActorRejected,
     string ObjectTableActorRejectedReason,
     bool ActorPlacementReady,
     string ActorPlacementBlocker,
     string DeliveryVerdict,
-    TitleBackgroundPhase2NBackgroundApplicationDiagnostic BackgroundApplication,
-    TitleBackgroundPhase2NSafetyDiagnostic Safety,
+    TitleBackgroundDeliveryBackgroundApplicationDiagnostic BackgroundApplication,
+    TitleBackgroundDeliverySafetyDiagnostic Safety,
     string BackgroundDeliveryVerdict,
     string TransitionSafetyVerdict,
     string PostLoginLeakVerdict,
@@ -175,7 +176,7 @@ internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
     string NextAction,
     string NextActionReason);
 
-internal static class TitleBackgroundPhase2NDeliveryDiagnostic
+internal static class TitleBackgroundDeliveryDiagnostic
 {
     public const string OriginalCharaSelectScenePath = "ffxiv/zon_z1/chr/z1c1/level/z1c1";
 
@@ -195,7 +196,171 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             layerFilterKey);
     }
 
-    public static TitleBackgroundPhase2NDeliverySummary BuildSummary(
+    public static List<string> BuildLineList(TitleBackgroundDeliverySummary summary)
+    {
+        var lines = new List<string>();
+        AddLines(lines, summary);
+        return lines;
+    }
+
+    public static void AddLines(List<string> lines, TitleBackgroundDeliverySummary summary)
+    {
+        var aliasStartIndex = lines.Count;
+        lines.Add($"phase2N.featureGoal={summary.FeatureGoal}");
+        lines.Add($"phase2N.backgroundMode={summary.BackgroundMode}");
+        lines.Add($"phase2N.backgroundMode.reason={FormatNone(summary.BackgroundModeReason)}");
+        lines.Add($"phase2N.characterVisibility.expected={FormatNone(summary.CharacterVisibilityExpected)}");
+        lines.Add($"phase2N.characterVisibility.observed={FormatNone(summary.CharacterVisibilityObserved)}");
+        lines.Add($"phase2N.characterVisibility.blocker={FormatNone(summary.CharacterVisibilityBlocker)}");
+        lines.Add($"phase2N.nativePreviewSource.searched={summary.NativePreviewSourceSearched}");
+        for (var i = 0; i < summary.NativePreviewSources.Count; i++)
+        {
+            var source = summary.NativePreviewSources[i];
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].name={FormatNone(source.Name)}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].available={source.Available}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].readStatus={FormatNone(source.ReadStatus)}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].candidateCount={source.CandidateCount}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].nonZeroTransformCount={source.NonZeroTransformCount}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].drawObjectNonNullCount={source.DrawObjectNonNullCount}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].modelLikeNonNullCount={source.ModelLikeNonNullCount}");
+            lines.Add($"phase2N.nativePreviewSource.source[{i}].error={FormatNone(source.Error)}");
+        }
+
+        lines.Add($"phase2N.nativePreviewSource.bestSource={FormatNone(summary.NativePreviewSourceBestSource)}");
+        lines.Add($"phase2N.nativePreviewSource.bestCandidate={FormatNone(summary.NativePreviewSourceBestCandidate)}");
+        lines.Add($"phase2N.nativePreviewSource.resolution={FormatNone(summary.NativePreviewSourceResolution)}");
+        lines.Add($"phase2N.nativePreviewSource.currentObjectTableIgnored={summary.NativePreviewSourceCurrentObjectTableIgnored}");
+        lines.Add($"phase2N.nativePreviewSource.currentObjectTableIgnoredReason={FormatNone(summary.NativePreviewSourceCurrentObjectTableIgnoredReason)}");
+        lines.Add($"phase2N.foregroundPreserve.available={summary.ForegroundPreserve.Available}");
+        lines.Add($"phase2N.foregroundPreserve.reason={FormatNone(summary.ForegroundPreserve.Reason)}");
+        lines.Add($"phase2N.foregroundPreserve.originalScenePath={FormatNone(summary.ForegroundPreserve.OriginalScenePath)}");
+        lines.Add($"phase2N.foregroundPreserve.overrideScenePath={FormatNone(summary.ForegroundPreserve.OverrideScenePath)}");
+        lines.Add($"phase2N.foregroundPreserve.canKeepOriginalCharaStage={summary.ForegroundPreserve.CanKeepOriginalCharaStage}");
+        lines.Add($"phase2N.foregroundPreserve.canOverrideBackgroundOnly={summary.ForegroundPreserve.CanOverrideBackgroundOnly}");
+        lines.Add($"phase2N.foregroundPreserve.blocker={FormatNone(summary.ForegroundPreserve.Blocker)}");
+        lines.Add($"phase2N.foregroundPreserve.hookPoint={FormatNone(summary.ForegroundPreserve.HookPoint)}");
+        lines.Add($"phase2N.foregroundPreserve.applied={summary.ForegroundPreserve.Applied}");
+        lines.Add($"phase2N.foregroundPreserve.skippedReason={FormatNone(summary.ForegroundPreserve.SkippedReason)}");
+        lines.Add($"phase2N.objectTableActorRejected={summary.ObjectTableActorRejected}");
+        lines.Add($"phase2N.objectTableActorRejected.reason={FormatNone(summary.ObjectTableActorRejectedReason)}");
+        lines.Add($"phase2N.actorPlacement.ready={summary.ActorPlacementReady}");
+        lines.Add($"phase2N.actorPlacement.blocker={FormatNone(summary.ActorPlacementBlocker)}");
+        lines.Add($"phase2N.backgroundApplication.observed={summary.BackgroundApplication.Observed}");
+        lines.Add($"phase2N.backgroundApplication.lastHistoricalOverrideApplied={summary.BackgroundApplication.LastHistoricalOverrideApplied}");
+        lines.Add($"phase2N.backgroundApplication.lastHistoricalOverridePath={FormatNone(summary.BackgroundApplication.LastHistoricalOverridePath)}");
+        lines.Add($"phase2N.backgroundApplication.currentCandidateId={FormatNone(summary.BackgroundApplication.CurrentCandidateId)}");
+        lines.Add($"phase2N.backgroundApplication.visualConfirmationRequired={summary.BackgroundApplication.VisualConfirmationRequired}");
+        lines.Add($"phase2N.backgroundApplication.userVerdict={FormatNone(summary.BackgroundApplication.UserVerdict)}");
+        lines.Add($"phase2N.safety.verdict={FormatNone(summary.Safety.Verdict)}");
+        lines.Add($"phase2N.safety.reason={FormatNone(summary.Safety.Reason)}");
+        lines.Add($"phase2N.safety.blocksBackgroundCandidatePromotion={summary.Safety.BlocksBackgroundCandidatePromotion}");
+        lines.Add($"phase2N.presetCompatibility.currentPresetId={FormatNone(summary.PresetCompatibility.CurrentPresetId)}");
+        lines.Add($"phase2N.presetCompatibility.expectedCompatibility={summary.PresetCompatibility.ExpectedCompatibility}");
+        lines.Add($"phase2N.presetCompatibility.expectedBrightness={summary.PresetCompatibility.ExpectedBrightness}");
+        lines.Add($"phase2N.presetCompatibility.warning={FormatNone(summary.PresetCompatibility.Warning)}");
+        lines.Add($"phase2N.presetCompatibility.recommendedMode={summary.PresetCompatibility.RecommendedMode}");
+        lines.Add($"phase2N.presetCompatibility.knownIssue={FormatNone(summary.PresetCompatibility.KnownIssue)}");
+        lines.Add($"phase2N.presetCompatibility.safeToUse={summary.PresetCompatibility.SafeToUse}");
+        lines.Add($"phase2N.presetCompatibility.characterExpectedVisible={summary.PresetCompatibility.CharacterExpectedVisible}");
+        lines.Add($"phase2N.overrideCompatibility.source={FormatNone(summary.OverrideCompatibility.Source)}");
+        lines.Add($"phase2N.overrideCompatibility.selectedPresetId={FormatNone(summary.OverrideCompatibility.SelectedPresetId)}");
+        lines.Add($"phase2N.overrideCompatibility.currentOverrideId={FormatNone(summary.OverrideCompatibility.CurrentOverrideId)}");
+        lines.Add($"phase2N.overrideCompatibility.overrideTerritoryPath={FormatNone(summary.OverrideCompatibility.OverrideTerritoryPath)}");
+        lines.Add($"phase2N.overrideCompatibility.overrideTerritoryId={summary.OverrideCompatibility.OverrideTerritoryId}");
+        lines.Add($"phase2N.overrideCompatibility.layerFilterKey={summary.OverrideCompatibility.LayerFilterKey}");
+        lines.Add($"phase2N.overrideCompatibility.expectedCompatibility={summary.OverrideCompatibility.ExpectedCompatibility}");
+        lines.Add($"phase2N.overrideCompatibility.expectedBrightness={summary.OverrideCompatibility.ExpectedBrightness}");
+        lines.Add($"phase2N.overrideCompatibility.characterExpectedVisible={summary.OverrideCompatibility.CharacterExpectedVisible}");
+        lines.Add($"phase2N.overrideCompatibility.warning={FormatNone(summary.OverrideCompatibility.Warning)}");
+        lines.Add($"phase2N.compatibility.source={FormatNone(summary.OverrideCompatibility.Source)}");
+        lines.Add($"phase2N.compatibility.id={FormatNone(summary.OverrideCompatibility.Id)}");
+        lines.Add($"phase2N.compatibility.displayName={FormatNone(summary.OverrideCompatibility.DisplayName)}");
+        lines.Add($"phase2N.compatibility.characterVisibility={FormatNone(summary.OverrideCompatibility.CharacterVisibility)}");
+        lines.Add($"phase2N.compatibility.characterExpectedVisible={summary.OverrideCompatibility.CharacterExpectedVisible}");
+        lines.Add($"phase2N.compatibility.backgroundUsable={summary.OverrideCompatibility.BackgroundUsable}");
+        lines.Add($"phase2N.compatibility.brightness={summary.OverrideCompatibility.ExpectedBrightness}");
+        lines.Add($"phase2N.compatibility.recommendedAction={FormatNone(summary.OverrideCompatibility.RecommendedAction)}");
+        lines.Add($"phase2N.overrideCandidate.selectedId={FormatNone(summary.OverrideCandidate.Selected.Id)}");
+        lines.Add($"phase2N.overrideCandidate.source={FormatNone(summary.OverrideCandidate.Selected.Source)}");
+        lines.Add($"phase2N.overrideCandidate.displayName={FormatNone(summary.OverrideCandidate.Selected.DisplayName)}");
+        lines.Add($"phase2N.overrideCandidate.verifiedInGame={summary.OverrideCandidate.Selected.VerifiedInGame}");
+        lines.Add($"phase2N.overrideCandidate.expectedCompatibility={summary.OverrideCandidate.Selected.ExpectedCompatibility}");
+        lines.Add($"phase2N.overrideCandidate.expectedBrightness={summary.OverrideCandidate.Selected.ExpectedBrightness}");
+        lines.Add($"phase2N.overrideCandidate.backgroundUsable={summary.OverrideCandidate.Selected.BackgroundUsable}");
+        lines.Add($"phase2N.overrideCandidate.characterExpectedVisible={summary.OverrideCandidate.Selected.CharacterExpectedVisible}");
+        lines.Add($"phase2N.overrideCandidate.warning={FormatNone(summary.OverrideCandidate.Selected.Warning)}");
+        lines.Add($"phase2N.overrideCandidate.knownIssue={FormatNone(summary.OverrideCandidate.Selected.KnownIssue)}");
+        lines.Add($"phase2N.overrideCandidate.recommendedAction={FormatNone(summary.OverrideCandidate.Selected.RecommendedAction)}");
+        lines.Add($"phase2N.overrideCandidate.availableCount={summary.OverrideCandidate.Available.Count}");
+        lines.Add($"phase2N.overrideCandidate.registry.count={summary.OverrideCandidate.RegistryCount}");
+        lines.Add($"phase2N.overrideCandidate.registry.verifiedCount={summary.OverrideCandidate.RegistryVerifiedCount}");
+        lines.Add($"phase2N.overrideCandidate.registry.unverifiedCount={summary.OverrideCandidate.RegistryUnverifiedCount}");
+        lines.Add($"phase2N.overrideCandidate.registry.brightCount={summary.OverrideCandidate.RegistryBrightCount}");
+        lines.Add($"phase2N.overrideCandidate.registry.defaultId={FormatNone(summary.OverrideCandidate.RegistryDefaultId)}");
+        for (var i = 0; i < summary.OverrideCandidate.Available.Count; i++)
+        {
+            var candidate = summary.OverrideCandidate.Available[i];
+            lines.Add($"phase2N.overrideCandidate.available[{i}].id={FormatNone(candidate.Id)}");
+            lines.Add($"phase2N.overrideCandidate.available[{i}].displayName={FormatNone(candidate.DisplayName)}");
+            lines.Add($"phase2N.overrideCandidate.available[{i}].brightness={candidate.ExpectedBrightness}");
+            lines.Add($"phase2N.overrideCandidate.available[{i}].verifiedInGame={candidate.VerifiedInGame}");
+            lines.Add($"phase2N.overrideCandidate.available[{i}].source={FormatNone(candidate.Source)}");
+        }
+
+        foreach (var slot in summary.OverrideCandidate.ManualSlots)
+        {
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].enabled={slot.Enabled}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].valid={slot.Valid}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].id={FormatNone(slot.Id)}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].displayName={FormatNone(slot.DisplayName)}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].territoryPath={FormatNone(slot.TerritoryPath)}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].territoryId={slot.TerritoryId}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].layerFilterKey={slot.LayerFilterKey}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].expectedBrightness={slot.ExpectedBrightness}");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].verifiedInGame=False");
+            lines.Add($"phase2N.overrideCandidate.manualSlot[{slot.SlotNumber}].validationError={FormatNone(slot.ValidationError)}");
+        }
+
+        lines.Add($"phase2N.lighting.mode={summary.Lighting.Mode}");
+        lines.Add($"phase2N.lighting.diagnostic.available={summary.Lighting.Available}");
+        lines.Add($"phase2N.lighting.diagnostic.currentWeather={FormatNone(summary.Lighting.CurrentWeather)}");
+        lines.Add($"phase2N.lighting.diagnostic.currentTime={FormatNone(summary.Lighting.CurrentTime)}");
+        lines.Add($"phase2N.lighting.diagnostic.envSet={FormatNone(summary.Lighting.EnvSet)}");
+        lines.Add($"phase2N.lighting.diagnostic.fog={FormatNone(summary.Lighting.Fog)}");
+        lines.Add($"phase2N.lighting.diagnostic.exposure={FormatNone(summary.Lighting.Exposure)}");
+        lines.Add($"phase2N.lighting.diagnostic.overlay={FormatNone(summary.Lighting.Overlay)}");
+        lines.Add($"phase2N.lighting.diagnostic.layerFilterKey={summary.Lighting.LayerFilterKey}");
+        lines.Add($"phase2N.lighting.diagnostic.error={FormatNone(summary.Lighting.Error)}");
+        lines.Add($"phase2N.lighting.lastStatus={FormatNone(summary.Lighting.LastStatus)}");
+        lines.Add($"phase2N.lighting.lastSkippedReason={FormatNone(summary.Lighting.LastSkippedReason)}");
+        lines.Add($"phase2N.lighting.expectedBrightness={summary.Lighting.ExpectedBrightness}");
+        lines.Add($"phase2N.lighting.currentLayerFilterKey={summary.Lighting.CurrentLayerFilterKey}");
+        lines.Add($"phase2N.lighting.layerBrightnessKnown={summary.Lighting.LayerBrightnessKnown}");
+        lines.Add($"phase2N.lighting.brightLayerCandidates={FormatNone(summary.Lighting.BrightLayerCandidates)}");
+        lines.Add($"phase2N.lighting.recommendedAction={FormatNone(summary.Lighting.RecommendedAction)}");
+        lines.Add($"phase2N.deliveryVerdict={FormatNone(summary.DeliveryVerdict)}");
+        lines.Add($"phase2N.backgroundDeliveryVerdict={FormatNone(summary.BackgroundDeliveryVerdict)}");
+        lines.Add($"phase2N.transitionSafetyVerdict={FormatNone(summary.TransitionSafetyVerdict)}");
+        lines.Add($"phase2N.postLoginLeakVerdict={FormatNone(summary.PostLoginLeakVerdict)}");
+        lines.Add($"phase2N.userMessage={FormatNone(summary.UserMessage)}");
+        lines.Add($"phase2N.userNextAction={FormatNone(summary.UserNextAction)}");
+        lines.Add($"phase2N.candidateHumanName={FormatNone(summary.CandidateHumanName)}");
+        lines.Add($"phase2N.candidateHumanStatus={FormatNone(summary.CandidateHumanStatus)}");
+        lines.Add($"transition.userMessage={FormatNone(summary.TransitionUserMessage)}");
+        lines.Add($"phase2N.mvpStatus={FormatNone(summary.MvpStatus)}");
+        lines.Add($"phase2N.mvpBlockingIssue={FormatNone(summary.MvpBlockingIssue)}");
+        lines.Add($"phase2N.mvpKnownLimitation={FormatNone(summary.MvpKnownLimitation)}");
+        lines.Add($"phase2N.nextAction={FormatNone(summary.NextAction)}");
+        lines.Add($"phase2N.nextAction.reason={FormatNone(summary.NextActionReason)}");
+        DiagnosticReportBuilder.AddPrefixAliasLines(lines, aliasStartIndex, "phase2N.", "delivery.");
+    }
+
+    private static string FormatNone(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "none" : value;
+    }
+
+    public static TitleBackgroundDeliverySummary BuildSummary(
         TitleBackgroundCharacterSelectBackgroundMode backgroundMode,
         TitleBackgroundCharacterSelectLightingMode lightingMode,
         string selectedPresetId,
@@ -212,7 +377,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         int drawObjectNonNullCount,
         int modelLikeNonNullCount,
         string bestCandidate,
-        IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> sourceDiscovery,
+        IReadOnlyList<TitleBackgroundCharacterPlacementSourceDiscovery> sourceDiscovery,
         string transitionSafety,
         bool currentObjectTableValidForCharaSelect = true,
         string currentObjectTableInvalidReason = "none",
@@ -232,7 +397,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             overrideTerritoryId,
             layerFilterKey,
             availableCandidates);
-        var overrideCandidateDiagnostic = new TitleBackgroundPhase2NOverrideCandidateDiagnostic(
+        var overrideCandidateDiagnostic = new TitleBackgroundOverrideCandidateDiagnostic(
             overrideCandidate,
             availableCandidates,
             normalizedManualSlots,
@@ -354,7 +519,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             nextAction,
             characterBlocker);
 
-        return new TitleBackgroundPhase2NDeliverySummary(
+        return new TitleBackgroundDeliverySummary(
             "character-select-background",
             backgroundMode,
             modeReason,
@@ -395,7 +560,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             nextActionReason);
     }
 
-    private static TitleBackgroundPhase2NBackgroundApplicationDiagnostic BuildBackgroundApplication(
+    private static TitleBackgroundDeliveryBackgroundApplicationDiagnostic BuildBackgroundApplication(
         bool lastOverrideApplied,
         bool historicalLastOverrideApplied,
         string historicalLastOverridePath,
@@ -405,7 +570,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             ? "none"
             : historicalLastOverridePath;
         var observed = lastOverrideApplied || historicalLastOverrideApplied;
-        return new TitleBackgroundPhase2NBackgroundApplicationDiagnostic(
+        return new TitleBackgroundDeliveryBackgroundApplicationDiagnostic(
             observed,
             historicalLastOverrideApplied,
             historicalPath,
@@ -414,7 +579,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             observed ? "background-applied-character-hidden" : "not-confirmed");
     }
 
-    private static TitleBackgroundPhase2NSafetyDiagnostic BuildSafety(
+    private static TitleBackgroundDeliverySafetyDiagnostic BuildSafety(
         string transitionSafety,
         bool sceneReadyAcceptedMultipleTimes,
         bool activeAfterLoginDetected,
@@ -422,7 +587,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
     {
         if (activeAfterLoginDetected || phase2GAppliedAfterLogin)
         {
-            return new TitleBackgroundPhase2NSafetyDiagnostic(
+            return new TitleBackgroundDeliverySafetyDiagnostic(
                 "unsafe",
                 activeAfterLoginDetected ? "scene-override-active-after-login" : "phase2g-applied-after-login",
                 true);
@@ -430,17 +595,17 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
 
         if (sceneReadyAcceptedMultipleTimes || transitionSafety == "unsafe")
         {
-            return new TitleBackgroundPhase2NSafetyDiagnostic(
+            return new TitleBackgroundDeliverySafetyDiagnostic(
                 "warning",
                 sceneReadyAcceptedMultipleTimes ? "scene-ready-accepted-multiple-times" : "login-transition-safety-unsafe",
                 true);
         }
 
-        return new TitleBackgroundPhase2NSafetyDiagnostic("safe", "none", false);
+        return new TitleBackgroundDeliverySafetyDiagnostic("safe", "none", false);
     }
 
     private static string BuildTransitionSafetyVerdict(
-        TitleBackgroundPhase2NSafetyDiagnostic safety,
+        TitleBackgroundDeliverySafetyDiagnostic safety,
         bool sceneReadyAcceptedMultipleTimes)
     {
         if (sceneReadyAcceptedMultipleTimes)
@@ -526,13 +691,13 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
     }
 
     public static string EvaluateExperimentalActorPlacement(
-        TitleBackgroundPhase2MExperimentalApplyMode mode,
-        TitleBackgroundPhase2MSummary summary,
+        TitleBackgroundCharacterPlacementExperimentalApplyMode mode,
+        TitleBackgroundCharacterPlacementSummary summary,
         bool sceneGenerationMatches,
         bool isCharaSelectActive,
         bool isLoggedIn)
     {
-        if (mode == TitleBackgroundPhase2MExperimentalApplyMode.None)
+        if (mode == TitleBackgroundCharacterPlacementExperimentalApplyMode.None)
         {
             return "skip:none-mode";
         }
@@ -552,13 +717,13 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             return "skip:scene-generation-mismatch";
         }
 
-        if (mode == TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot
+        if (mode == TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementOneShot
             && summary.Resolution == "stub-only")
         {
             return "skip:stub-only-object-table";
         }
 
-        return TitleBackgroundPhase2MPlacementDiagnostic.EvaluateExperimentalApply(
+        return TitleBackgroundCharacterPlacementDiagnostic.EvaluateExperimentalApply(
             mode,
             summary,
             sceneGenerationMatches,
@@ -566,7 +731,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             isLoggedIn);
     }
 
-    private static TitleBackgroundPhase2NPresetCompatibility BuildPresetCompatibility(
+    private static TitleBackgroundPresetCompatibility BuildPresetCompatibility(
         string selectedPresetId,
         string territoryPath,
         uint territoryId,
@@ -585,7 +750,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 : overrideCandidate.Id == TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId
                     ? "synthetic custom override compatibility entry; full scene override works as background-only and selected character is not expected to be visible"
                     : overrideCandidate.Warning;
-            return new TitleBackgroundPhase2NPresetCompatibility(
+            return new TitleBackgroundPresetCompatibility(
                 presetId,
                 overrideCandidate.ExpectedCompatibility,
                 overrideCandidate.ExpectedBrightness,
@@ -598,7 +763,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 overrideCandidate.CharacterExpectedVisible);
         }
 
-        return new TitleBackgroundPhase2NPresetCompatibility(
+        return new TitleBackgroundPresetCompatibility(
             presetId,
             TitleBackgroundCharacterSelectCompatibility.Unknown,
             TitleBackgroundCharacterSelectExpectedBrightness.Unknown,
@@ -611,12 +776,12 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             false);
     }
 
-    private static TitleBackgroundPhase2NOverrideCompatibility BuildOverrideCompatibility(
+    private static TitleBackgroundOverrideCompatibility BuildOverrideCompatibility(
         string selectedPresetId,
         string territoryPath,
         uint territoryId,
         uint layerFilterKey,
-        TitleBackgroundPhase2NPresetCompatibility presetCompatibility,
+        TitleBackgroundPresetCompatibility presetCompatibility,
         TitleBackgroundCharacterSelectOverrideCandidate overrideCandidate)
     {
         var hasSelectedPreset = !string.IsNullOrWhiteSpace(selectedPresetId);
@@ -639,7 +804,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 or TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
                 or TitleBackgroundCharacterSelectCompatibility.CharacterHidden);
 
-        return new TitleBackgroundPhase2NOverrideCompatibility(
+        return new TitleBackgroundOverrideCompatibility(
             source,
             id,
             displayName,
@@ -657,11 +822,11 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             presetCompatibility.Warning);
     }
 
-    private static TitleBackgroundPhase2NForegroundPreserveResult BuildForegroundPreserve(
+    private static TitleBackgroundForegroundPreserveResult BuildForegroundPreserve(
         TitleBackgroundCharacterSelectBackgroundMode backgroundMode,
         string overrideScenePath)
     {
-        return new TitleBackgroundPhase2NForegroundPreserveResult(
+        return new TitleBackgroundForegroundPreserveResult(
             false,
             "unsupported: no safe public hook point found to keep original CharaSelect stage while replacing only the background",
             OriginalCharaSelectScenePath,
@@ -676,18 +841,18 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 : "mode-not-selected");
     }
 
-    private static IReadOnlyList<TitleBackgroundPhase2NNativeSourceProbe> BuildNativeSourceProbes(
-        IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> sourceDiscovery,
+    private static IReadOnlyList<TitleBackgroundNativePreviewSourceProbe> BuildNativeSourceProbes(
+        IReadOnlyList<TitleBackgroundCharacterPlacementSourceDiscovery> sourceDiscovery,
         int zeroPositionCandidateCount,
         int nonZeroPositionCandidateCount,
         int drawObjectNonNullCount,
         int modelLikeNonNullCount)
     {
-        var probes = new List<TitleBackgroundPhase2NNativeSourceProbe>();
+        var probes = new List<TitleBackgroundNativePreviewSourceProbe>();
         foreach (var source in sourceDiscovery)
         {
             var objectTableLike = source.Name is "ObjectTable" or "PlayerObjects" or "CharacterManagerObjects";
-            probes.Add(new TitleBackgroundPhase2NNativeSourceProbe(
+            probes.Add(new TitleBackgroundNativePreviewSourceProbe(
                 source.Name,
                 source.Available,
                 source.Available ? "read" : "not-available",
@@ -700,12 +865,12 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
 
         if (probes.All(probe => probe.Name != "CharaSelectCharacterManager"))
         {
-            probes.Add(new TitleBackgroundPhase2NNativeSourceProbe("CharaSelectCharacterManager", false, "not-resolved", 0, 0, 0, 0, "no public field or signature-safe source"));
+            probes.Add(new TitleBackgroundNativePreviewSourceProbe("CharaSelectCharacterManager", false, "not-resolved", 0, 0, 0, 0, "no public field or signature-safe source"));
         }
 
         if (probes.All(probe => !probe.Name.StartsWith("UIStage", StringComparison.Ordinal)))
         {
-            probes.Add(new TitleBackgroundPhase2NNativeSourceProbe("UIStage CharaSelect model source", false, "not-resolved", 0, 0, 0, 0, "no safe model owner path found"));
+            probes.Add(new TitleBackgroundNativePreviewSourceProbe("UIStage CharaSelect model source", false, "not-resolved", 0, 0, 0, 0, "no safe model owner path found"));
         }
 
         return probes;
@@ -714,7 +879,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
     private static string BuildNativeResolution(
         string phase2MResolution,
         string transformValidity,
-        IReadOnlyList<TitleBackgroundPhase2NNativeSourceProbe> nativeSources)
+        IReadOnlyList<TitleBackgroundNativePreviewSourceProbe> nativeSources)
     {
         if (phase2MResolution == "single" && transformValidity == "valid-world-transform")
         {
@@ -739,7 +904,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         return "not-found";
     }
 
-    private static TitleBackgroundPhase2NLightingDiagnostic BuildLightingDiagnostic(
+    private static TitleBackgroundLightingDiagnostic BuildLightingDiagnostic(
         TitleBackgroundCharacterSelectLightingMode mode,
         TitleBackgroundCharacterSelectExpectedBrightness expectedBrightness,
         uint layerFilterKey,
@@ -756,7 +921,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             ? "safe-public-write-api-not-found"
             : "read-only";
 
-        return new TitleBackgroundPhase2NLightingDiagnostic(
+        return new TitleBackgroundLightingDiagnostic(
             mode,
             true,
             "not-read",
@@ -780,7 +945,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         TitleBackgroundCharacterSelectBackgroundMode mode,
         bool sceneOverrideEnabled,
         bool lastOverrideApplied,
-        TitleBackgroundPhase2NForegroundPreserveResult foreground,
+        TitleBackgroundForegroundPreserveResult foreground,
         string nativeResolution)
     {
         return mode switch
@@ -805,8 +970,8 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         bool lastOverrideApplied,
         string nativeResolution,
         bool foregroundAvailable,
-        TitleBackgroundPhase2NPresetCompatibility compatibility,
-        TitleBackgroundPhase2NLightingDiagnostic lighting)
+        TitleBackgroundPresetCompatibility compatibility,
+        TitleBackgroundLightingDiagnostic lighting)
     {
         if (transitionSafety == "unsafe")
         {
@@ -847,3 +1012,5 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         return ("blocked-character-source-not-found", "try-compatible-preset", "native preview source was not found and no applied background was observed");
     }
 }
+
+
