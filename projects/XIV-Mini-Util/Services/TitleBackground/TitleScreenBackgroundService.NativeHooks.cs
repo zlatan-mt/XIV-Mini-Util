@@ -138,7 +138,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     _charaSelectCameraAdapter.RuntimeState.SceneGeneration,
                     _clientState.IsLoggedIn);
                 StartPhase2CTimelineObservation();
-                CapturePhase2MPlacementFrame(0, "scene-ready-accepted");
+                CaptureCharacterPlacementPlacementFrame(0, "scene-ready-accepted");
                 _charaSelectCameraAdapter.NotifySceneLoaded(map);
                 RecordTransitionEvent("sceneLoadedNotification success", map.ToString());
                 RestoreCharaSelectRuntimeCameraStateAfterSceneLoad();

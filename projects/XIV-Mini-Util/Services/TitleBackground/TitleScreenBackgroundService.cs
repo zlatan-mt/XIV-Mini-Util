@@ -12,6 +12,7 @@ using System.Numerics;
 using System.Text;
 using ClientVector3 = FFXIVClientStructs.FFXIV.Common.Math.Vector3;
 using XivMiniUtil.Services.CharaSelect;
+using XivMiniUtil.Services.Common;
 
 namespace XivMiniUtil.Services.TitleBackground;
 
@@ -127,7 +128,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private string _phase2CTimelineStatus = "not-run";
     private string _phase2CTimelineError = string.Empty;
     private readonly Dictionary<int, TitleBackgroundPhase2CTimelineSnapshot> _phase2CTimelineSnapshots = [];
-    private readonly Dictionary<int, TitleBackgroundPhase2MPlacementFrame> _phase2MPlacementFrames = [];
+    private readonly Dictionary<int, TitleBackgroundCharacterPlacementFrame> _phase2MPlacementFrames = [];
     private int _phase2MPlacementCaptureSceneGeneration;
     private string _phase2MPlacementCaptureReason = "not-run";
     private string _phase2MExperimentalLastStatus = "not-run";
@@ -916,7 +917,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     {
         return _configuration.TitleBackgroundOverrideEnabled
             && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
-            && TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(_configuration.TitleBackgroundCharacterSelectBackgroundMode);
+            && TitleBackgroundDeliveryDiagnostic.IsMutationMode(_configuration.TitleBackgroundCharacterSelectBackgroundMode);
     }
 
     private bool IsOverrideMutationBranchArmed()
@@ -925,7 +926,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             && !IsHookProbeMode()
             && _configuration.TitleBackgroundOverrideEnabled
             && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
-            && TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(_configuration.TitleBackgroundCharacterSelectBackgroundMode)
+            && TitleBackgroundDeliveryDiagnostic.IsMutationMode(_configuration.TitleBackgroundCharacterSelectBackgroundMode)
             && !string.IsNullOrWhiteSpace(_validatedTerritoryPath);
     }
 
@@ -1084,7 +1085,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     private bool ShouldValidateSceneOverrideConfiguration()
     {
-        return TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(_configuration.TitleBackgroundCharacterSelectBackgroundMode)
+        return TitleBackgroundDeliveryDiagnostic.IsMutationMode(_configuration.TitleBackgroundCharacterSelectBackgroundMode)
             && TitleBackgroundRuntimeModeHelper.ShouldValidateSceneOverrideConfiguration(
                 _configuration.TitleBackgroundRuntimeMode);
     }
@@ -1581,7 +1582,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         return (signature ?? string.Empty).Trim();
     }
 
-    private void AddPhase2MPreLoginCaptureLines(List<string> lines)
+    private void AddCharacterPlacementPreLoginCaptureLines(List<string> lines)
     {
         var frames = _phase2MPlacementFrames.Keys.OrderBy(frame => frame).ToArray();
         lines.Add($"phase2M.preLoginCapture.available={frames.Length > 0}");
@@ -1607,8 +1608,9 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         ];
     }
 
-    private void AddPhase2MSummaryLines(List<string> lines, TitleBackgroundPhase2MSummary summary)
+    private void AddCharacterPlacementSummaryLines(List<string> lines, TitleBackgroundCharacterPlacementSummary summary)
     {
+        var aliasStartIndex = lines.Count;
         lines.Add($"phase2M.actorCandidate.zeroPositionCandidateCount={summary.ZeroPositionCandidateCount}");
         lines.Add($"phase2M.actorCandidate.nonZeroPositionCandidateCount={summary.NonZeroPositionCandidateCount}");
         lines.Add($"phase2M.actorCandidate.namedCandidateCount={summary.NamedCandidateCount}");
@@ -1635,25 +1637,26 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2M.sourceDiscovery.nextNativeSourceToInspect={summary.NextNativeSourceToInspect}");
         lines.Add($"phase2M.nextAction={summary.NextAction}");
         lines.Add($"phase2M.nextAction.reason={summary.NextActionReason}");
+        DiagnosticReportBuilder.AddPrefixAliasLines(lines, aliasStartIndex, "phase2M.", "characterPlacement.");
     }
 
-    private void AddPhase2MTopCandidateLines(List<string> lines)
+    private void AddCharacterPlacementTopCandidateLines(List<string> lines)
     {
         var topCandidates = _phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
             .SelectMany(frame => frame.ObjectCandidates)
-            .GroupBy(BuildPhase2MCandidateKey)
+            .GroupBy(BuildCharacterPlacementCandidateKey)
             .Select(group => group.OrderByDescending(candidate => candidate.Score).First())
             .OrderByDescending(candidate => candidate.Score)
             .Take(3)
             .ToArray();
         for (var i = 0; i < topCandidates.Length; i++)
         {
-            AddPhase2MObjectCandidateLines(lines, $"phase2M.topCandidate[{i}]", topCandidates[i]);
+            AddCharacterPlacementObjectCandidateLines(lines, $"phase2M.topCandidate[{i}]", topCandidates[i]);
         }
     }
 
-    private void AddPhase2MPlacementFrameLines(List<string> lines, TitleBackgroundPhase2MPlacementFrame frame)
+    private void AddCharacterPlacementPlacementFrameLines(List<string> lines, TitleBackgroundCharacterPlacementFrame frame)
     {
         var prefix = $"phase2M.placementFrame[{frame.Frame}]";
         lines.Add($"{prefix}.reason={frame.Reason}");
@@ -1716,7 +1719,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"{prefix}.actor.candidate.nearCameraLookAt={FormatBool(frame.Actor?.NearCameraLookAt)}");
         lines.Add($"{prefix}.actor.candidate.nearCameraPosition={FormatBool(frame.Actor?.NearCameraPosition)}");
         lines.Add($"{prefix}.actor.candidate.categoryReason={FormatNone(frame.Actor?.CategoryReason)}");
-        lines.Add($"{prefix}.actor.candidate.stableAcrossFrames={FormatBool(frame.Actor.HasValue ? IsStablePhase2MCandidate(frame.Actor.Value) : null)}");
+        lines.Add($"{prefix}.actor.candidate.stableAcrossFrames={FormatBool(frame.Actor.HasValue ? IsStableCharacterPlacementCandidate(frame.Actor.Value) : null)}");
         lines.Add($"{prefix}.activeCamera.captureStatus={(frame.ActiveCameraCaptured ? "success" : "failed")}");
         lines.Add($"{prefix}.activeCamera.position={FormatVector(frame.ActiveCameraPosition)}");
         lines.Add($"{prefix}.activeCamera.lookAt={FormatVector(frame.ActiveCameraLookAt)}");
@@ -1745,7 +1748,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
         for (var i = 0; i < frame.ObjectCandidates.Count; i++)
         {
-            AddPhase2MObjectCandidateLines(lines, $"{prefix}.objectCandidate[{i}]", frame.ObjectCandidates[i]);
+            AddCharacterPlacementObjectCandidateLines(lines, $"{prefix}.objectCandidate[{i}]", frame.ObjectCandidates[i]);
         }
 
         for (var i = 0; i < frame.SourceDiscovery.Count; i++)
@@ -1759,10 +1762,10 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         }
     }
 
-    private void AddPhase2MObjectCandidateLines(
+    private void AddCharacterPlacementObjectCandidateLines(
         List<string> lines,
         string prefix,
-        TitleBackgroundPhase2MActorCandidate candidate)
+        TitleBackgroundCharacterPlacementActorCandidate candidate)
     {
         lines.Add($"{prefix}.source={FormatNone(candidate.Source)}");
         lines.Add($"{prefix}.sourceIndex={candidate.SourceIndex}");
@@ -1803,7 +1806,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"{prefix}.nearCameraLookAt={FormatBool(candidate.NearCameraLookAt)}");
         lines.Add($"{prefix}.nearCameraPosition={FormatBool(candidate.NearCameraPosition)}");
         lines.Add($"{prefix}.categoryReason={FormatNone(candidate.CategoryReason)}");
-        lines.Add($"{prefix}.stableAcrossFrames={FormatBool(IsStablePhase2MCandidate(candidate))}");
+        lines.Add($"{prefix}.stableAcrossFrames={FormatBool(IsStableCharacterPlacementCandidate(candidate))}");
         lines.Add($"{prefix}.score={candidate.Score}");
         lines.Add($"{prefix}.scoreReason={FormatNone(candidate.ScoreReason)}");
     }

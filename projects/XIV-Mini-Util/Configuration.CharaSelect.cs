@@ -28,8 +28,6 @@ public sealed partial class Configuration
     public bool CharaSelectSceneUseSavedEmote { get; set; } = true;
     public CharaSelectScenePlacementMode CharaSelectScenePlacementMode { get; set; } = CharaSelectScenePlacementMode.ObserveOnly;
     public CharaSelectStageStrategy CharaSelectSceneStageStrategy { get; set; } = CharaSelectStageStrategy.ObserveOnly;
-    public bool CharaSelectSceneStageStrategyExperimentalEnabled { get; set; } = false;
-    public bool CharaSelectSceneStageStrategyOneShotProbeEnabled { get; set; } = false;
     public string CharaSelectSceneStageStrategyLastResult { get; set; } = "none";
     public string CharaSelectSceneStageStrategyLastReason { get; set; } = "none";
     public CharaSelectBrightnessRating CharaSelectSceneExpectedBrightness { get; set; } = CharaSelectBrightnessRating.Unknown;
@@ -77,8 +75,6 @@ public sealed partial class Configuration
         CharaSelectSceneUseSavedEmote = source.CharaSelectSceneUseSavedEmote;
         CharaSelectScenePlacementMode = NormalizeCharaSelectScenePlacementMode(source.CharaSelectScenePlacementMode);
         CharaSelectSceneStageStrategy = NormalizeCharaSelectStageStrategy(source.CharaSelectSceneStageStrategy);
-        CharaSelectSceneStageStrategyExperimentalEnabled = source.CharaSelectSceneStageStrategyExperimentalEnabled;
-        CharaSelectSceneStageStrategyOneShotProbeEnabled = source.CharaSelectSceneStageStrategyOneShotProbeEnabled;
         CharaSelectSceneStageStrategyLastResult = NormalizeShortDiagnostic(source.CharaSelectSceneStageStrategyLastResult);
         CharaSelectSceneStageStrategyLastReason = NormalizeShortDiagnostic(source.CharaSelectSceneStageStrategyLastReason);
         CharaSelectSceneExpectedBrightness = NormalizeCharaSelectBrightnessRating(source.CharaSelectSceneExpectedBrightness);

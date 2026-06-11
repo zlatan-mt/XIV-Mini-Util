@@ -38,13 +38,13 @@ internal readonly record struct TitleBackgroundCurvePointSnapshot(
     float X,
     float Y);
 
-internal readonly record struct TitleBackgroundPhase2MActorCandidateResult(
-    TitleBackgroundPhase2MActorMatchKind MatchKind,
-    TitleBackgroundPhase2MActorCandidate? Actor,
-    IReadOnlyList<TitleBackgroundPhase2MActorCandidate> Candidates,
-    IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> SourceDiscovery,
+internal readonly record struct TitleBackgroundCharacterPlacementActorCandidateResult(
+    TitleBackgroundCharacterPlacementActorMatchKind MatchKind,
+    TitleBackgroundCharacterPlacementActorCandidate? Actor,
+    IReadOnlyList<TitleBackgroundCharacterPlacementActorCandidate> Candidates,
+    IReadOnlyList<TitleBackgroundCharacterPlacementSourceDiscovery> SourceDiscovery,
     int CandidateCount,
-    TitleBackgroundPhase2MObjectTableStats ObjectTableStats,
+    TitleBackgroundCharacterPlacementObjectTableStats ObjectTableStats,
     string Status,
     string CandidateStatus,
     string CandidateReason,

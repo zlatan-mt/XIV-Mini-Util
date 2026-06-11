@@ -21,7 +21,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         return true;
     }
 
-    private static string Phase2MStatusToQuickCheckTriState(string status)
+    private static string CharacterPlacementStatusToQuickCheckTriState(string status)
     {
         return status.Equals("observed", StringComparison.OrdinalIgnoreCase)
             ? "True"
@@ -189,7 +189,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             var detailedLines = GetDiagnosticLines(includeDetailedPhase2Diagnostics: true)
                 .Where(line => !line.Contains(".objectCandidate[", StringComparison.Ordinal))
                 .ToList();
-            AddPhase2MTopCandidateLines(detailedLines);
+            AddCharacterPlacementTopCandidateLines(detailedLines);
             var dump = _transitionDiagnostics.BuildDetailedDump(transitionSummaryLines, detailedLines);
             File.WriteAllText(path, dump);
             return path;
@@ -201,18 +201,18 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
     }
 
-    private string SavePhase2MPlacementDiagnosticDump()
+    private string SaveCharacterPlacementPlacementDiagnosticDump()
     {
         try
         {
             Directory.CreateDirectory(_configDirectory);
             var path = Path.Combine(_configDirectory, "title-background-placementdiag.txt");
             var lines = new List<string>();
-            AddPhase2MPreLoginCaptureLines(lines);
-            AddPhase2MSummaryLines(lines, TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(_phase2MPlacementFrames.Values));
+            AddCharacterPlacementPreLoginCaptureLines(lines);
+            AddCharacterPlacementSummaryLines(lines, TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(_phase2MPlacementFrames.Values));
             foreach (var frame in _phase2MPlacementFrames.Values.OrderBy(frame => frame.Frame))
             {
-                AddPhase2MPlacementFrameLines(lines, frame);
+                AddCharacterPlacementPlacementFrameLines(lines, frame);
             }
 
             File.WriteAllText(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
@@ -225,7 +225,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
     }
 
-    private string SavePhase2NDeliveryDiagnosticDump(TitleBackgroundPhase2NDeliverySummary summary)
+    private string SaveDeliveryDeliveryDiagnosticDump(TitleBackgroundDeliverySummary summary)
     {
         try
         {
@@ -233,9 +233,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
             var path = Path.Combine(_configDirectory, "title-background-deliverydiag.txt");
             var lines = new List<string>
             {
-                "Phase2N.delivery=character-select-background-mvp",
+                "Delivery.delivery=character-select-background-mvp",
             };
-            TitleBackgroundPhase2NDeliveryDiagnostic.AddLines(lines, summary);
+            TitleBackgroundDeliveryDiagnostic.AddLines(lines, summary);
             File.WriteAllText(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
             return path;
         }
@@ -360,7 +360,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             currentDistance,
             currentSceneCameraPosition,
             currentLookAtVector).ToList();
-        AddPhase2MPreLoginCaptureLines(transitionSummaryLines);
+        AddCharacterPlacementPreLoginCaptureLines(transitionSummaryLines);
         var transitionSafety = transitionSummaryLines
             .FirstOrDefault(line => line.StartsWith("transition.verdict.loginTransitionSafety=", StringComparison.Ordinal))
             ?.Split('=')[1] ?? "unknown";
@@ -392,13 +392,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var phase2GGeneratedCurveOverrideEffective = BuildPhase2GGeneratedCurveOverrideEffectiveVerdict(phase2FCurveSamples);
         var phase2GFinalLookAtYMatchesGeneratedCurve = BuildPhase2GFinalLookAtYMatchesGeneratedCurveVerdict(phase2DLatestSample);
         var phase2GFinalYawPitchDistanceMatchesPreset = BuildPhase2GFinalCameraStateMatchesPresetVerdict(phase2DLatestSample);
-        var phase2MSummary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(_phase2MPlacementFrames.Values);
-        EvaluatePhase2MExperimentalApply(phase2MSummary);
-        var phase2MObjectTableStats = GetLatestPhase2MObjectTableStats();
-        var phase2MActorCandidateStatus = GetLatestPhase2MActorCandidateStatus();
-        var phase2MActorCandidateReason = GetLatestPhase2MActorCandidateReason();
-        var phase2MActorSource = GetLatestPhase2MActorSource();
-        var phase2MNextNativeSourceToInspect = GetLatestPhase2MNextNativeSourceToInspect();
+        var phase2MSummary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(_phase2MPlacementFrames.Values);
+        EvaluateCharacterPlacementExperimentalApply(phase2MSummary);
+        var phase2MObjectTableStats = GetLatestCharacterPlacementObjectTableStats();
+        var phase2MActorCandidateStatus = GetLatestCharacterPlacementActorCandidateStatus();
+        var phase2MActorCandidateReason = GetLatestCharacterPlacementActorCandidateReason();
+        var phase2MActorSource = GetLatestCharacterPlacementActorSource();
+        var phase2MNextNativeSourceToInspect = GetLatestCharacterPlacementNextNativeSourceToInspect();
         var phase2NCurrentLobbyMapAvailable = TryReadCurrentLobbyMap(out var phase2NCurrentLobbyMap);
         var phase2NCurrentObjectTableValid = !_clientState.IsLoggedIn
             && phase2NCurrentLobbyMapAvailable
@@ -409,7 +409,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             : "post-login-world-object-table-not-valid-for-chara-select";
         var phase2NSceneOverrideActiveAfterLoginDetected = _transitionDiagnostics.StaleSceneOverrideStateAfterLogin
             || (_clientState.IsLoggedIn && _activeSceneOverride);
-        var phase2NDeliverySummary = TitleBackgroundPhase2NDeliveryDiagnostic.BuildSummary(
+        var phase2NDeliverySummary = TitleBackgroundDeliveryDiagnostic.BuildSummary(
             _configuration.TitleBackgroundCharacterSelectBackgroundMode,
             _configuration.TitleBackgroundCharacterSelectLightingMode,
             _configuration.TitleBackgroundSelectedPresetId,
@@ -426,7 +426,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             phase2MSummary.DrawObjectNonNullCount,
             phase2MSummary.ModelLikeNonNullCount,
             phase2MSummary.BestCandidate,
-            GetLatestPhase2MSourceDiscovery(),
+            GetLatestCharacterPlacementSourceDiscovery(),
             transitionSafety,
             phase2NCurrentObjectTableValid,
             phase2NCurrentObjectTableInvalidReason,
@@ -438,10 +438,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
             phase2NSceneOverrideActiveAfterLoginDetected,
             _transitionDiagnostics.Phase2GAppliedAfterLogin);
         var deliveryDetailPath = !includeDetailedPhase2Diagnostics
-            ? SavePhase2NDeliveryDiagnosticDump(phase2NDeliverySummary)
+            ? SaveDeliveryDeliveryDiagnosticDump(phase2NDeliverySummary)
             : string.Empty;
         var placementDetailPath = !includeDetailedPhase2Diagnostics && _phase2MPlacementFrames.Count > 0
-            ? SavePhase2MPlacementDiagnosticDump()
+            ? SaveCharacterPlacementPlacementDiagnosticDump()
             : string.Empty;
         if (!includeDetailedPhase2Diagnostics)
         {
@@ -516,12 +516,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 $"phase2M.sourceDiscovery.nextNativeSourceToInspect={phase2MSummary.NextNativeSourceToInspect}",
                 $"phase2M.nextAction={phase2MSummary.NextAction}",
                 $"phase2M.nextAction.reason={phase2MSummary.NextActionReason}",
-                $"phase2M.experimental.applyMode={_configuration.TitleBackgroundPhase2MExperimentalApplyMode}",
+                $"phase2M.experimental.applyMode={_configuration.TitleBackgroundCharacterPlacementExperimentalApplyMode}",
                 $"phase2M.experimental.lastStatus={FormatNone(_phase2MExperimentalLastStatus)}",
                 $"phase2M.experimental.writeCount={_phase2MExperimentalWriteCount}",
                 $"phase2M.experimental.skippedCount={_phase2MExperimentalSkippedCount}",
                 $"verdict.phase2M.visualPlacementSafety={phase2MSummary.VisualPlacementSafety}",
-                ..TitleBackgroundPhase2NDeliveryDiagnostic.BuildLineList(phase2NDeliverySummary),
+                ..TitleBackgroundDeliveryDiagnostic.BuildLineList(phase2NDeliverySummary),
                 $"transition.detailDump={FormatNone(string.IsNullOrWhiteSpace(transitionDetailPath) ? string.Empty : Path.GetFileName(transitionDetailPath))}",
                 $"placement.detailDump={FormatNone(string.IsNullOrWhiteSpace(placementDetailPath) ? string.Empty : Path.GetFileName(placementDetailPath))}",
                 $"delivery.detailDump={FormatNone(string.IsNullOrWhiteSpace(deliveryDetailPath) ? string.Empty : Path.GetFileName(deliveryDetailPath))}",
@@ -803,10 +803,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
             "Phase2D.timeline=extended-scene-ready-accepted-relative-frames; character-select ActiveCamera/LobbyCamera samples through frame 600",
             "Phase2D.verdictScope=timeline-only; finalCameraStabilizationObserved and distanceEventuallyOverwritten are based on character-select samples, not report-time current camera",
             "Phase2F.timeline=extended-scene-ready-accepted-relative-frames; read-only LobbyCameraExpanded curve point samples through frame 600",
-            "Phase2M.placement=diagnostics-only; actor/object-table, camera delta, and ground-height availability are retained for post-login dump",
+            "CharacterPlacement.placement=diagnostics-only; actor/object-table, camera delta, and ground-height availability are retained for post-login dump",
         };
 
-        TitleBackgroundPhase2NDeliveryDiagnostic.AddLines(lines, phase2NDeliverySummary);
+        TitleBackgroundDeliveryDiagnostic.AddLines(lines, phase2NDeliverySummary);
         lines.AddRange(transitionSummaryLines);
         lines.AddRange(_transitionDiagnostics.BuildTraceLines());
 
@@ -862,7 +862,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
         foreach (var frame in _phase2MPlacementFrames.Values.OrderBy(frame => frame.Frame))
         {
-            AddPhase2MPlacementFrameLines(lines, frame);
+            AddCharacterPlacementPlacementFrameLines(lines, frame);
         }
 
         foreach (var call in _phase2ECalculateLookAtYCalls)

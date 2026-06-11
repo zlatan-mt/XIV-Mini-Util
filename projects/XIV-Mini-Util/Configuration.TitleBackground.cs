@@ -1,6 +1,7 @@
 // Path: projects/XIV-Mini-Util/Configuration.TitleBackground.cs
 // Description: TitleBackground 関連の保存設定を保持する
 // Reason: Configuration の巨大化を抑え、JSON プロパティ互換を維持したまま機能別に分割するため
+using System.Text.Json.Serialization;
 using XivMiniUtil.Services.TitleBackground;
 
 namespace XivMiniUtil;
@@ -43,7 +44,10 @@ public sealed partial class Configuration
     public string TitleBackgroundLastQuickCheckNextAction { get; set; } = string.Empty;
     public string TitleBackgroundLastQuickCheckTime { get; set; } = string.Empty;
     public string TitleBackgroundLastQuickCheckDetailFileName { get; set; } = string.Empty;
-    public TitleBackgroundPhase2MExperimentalApplyMode TitleBackgroundPhase2MExperimentalApplyMode { get; set; } = TitleBackgroundPhase2MExperimentalApplyMode.None;
+    // SavePluginConfig (Dalamud) は Newtonsoft.Json、ExportToBase64 は System.Text.Json を使うため両方の互換属性が必要
+    [Newtonsoft.Json.JsonProperty("TitleBackgroundPhase2MExperimentalApplyMode")]
+    [JsonPropertyName("TitleBackgroundPhase2MExperimentalApplyMode")]
+    public TitleBackgroundCharacterPlacementExperimentalApplyMode TitleBackgroundCharacterPlacementExperimentalApplyMode { get; set; } = TitleBackgroundCharacterPlacementExperimentalApplyMode.None;
     public TitleBackgroundResolverMode TitleBackgroundCreateSceneResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
     public TitleBackgroundResolverMode TitleBackgroundLobbyUpdateResolverMode { get; set; } = TitleBackgroundResolverMode.AutoDiagnosticOnly;
     public string TitleBackgroundTerritoryPath { get; set; } = string.Empty;
@@ -109,7 +113,7 @@ public sealed partial class Configuration
         TitleBackgroundLastQuickCheckNextAction = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckNextAction);
         TitleBackgroundLastQuickCheckTime = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckTime);
         TitleBackgroundLastQuickCheckDetailFileName = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckDetailFileName);
-        TitleBackgroundPhase2MExperimentalApplyMode = NormalizeTitleBackgroundPhase2MExperimentalApplyMode(source.TitleBackgroundPhase2MExperimentalApplyMode);
+        TitleBackgroundCharacterPlacementExperimentalApplyMode = NormalizeTitleBackgroundCharacterPlacementExperimentalApplyMode(source.TitleBackgroundCharacterPlacementExperimentalApplyMode);
         TitleBackgroundCreateSceneResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundCreateSceneResolverMode);
         TitleBackgroundLobbyUpdateResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundLobbyUpdateResolverMode);
         TitleBackgroundTerritoryPath = NormalizeTitleBackgroundTerritoryPath(source.TitleBackgroundTerritoryPath);
@@ -235,10 +239,10 @@ public sealed partial class Configuration
             changed = true;
         }
 
-        var normalizedPhase2MExperimentalApplyMode = NormalizeTitleBackgroundPhase2MExperimentalApplyMode(TitleBackgroundPhase2MExperimentalApplyMode);
-        if (TitleBackgroundPhase2MExperimentalApplyMode != normalizedPhase2MExperimentalApplyMode)
+        var normalizedCharacterPlacementExperimentalApplyMode = NormalizeTitleBackgroundCharacterPlacementExperimentalApplyMode(TitleBackgroundCharacterPlacementExperimentalApplyMode);
+        if (TitleBackgroundCharacterPlacementExperimentalApplyMode != normalizedCharacterPlacementExperimentalApplyMode)
         {
-            TitleBackgroundPhase2MExperimentalApplyMode = normalizedPhase2MExperimentalApplyMode;
+            TitleBackgroundCharacterPlacementExperimentalApplyMode = normalizedCharacterPlacementExperimentalApplyMode;
             changed = true;
         }
 

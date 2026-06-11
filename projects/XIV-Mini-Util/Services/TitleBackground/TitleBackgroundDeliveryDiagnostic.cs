@@ -1,7 +1,8 @@
-// Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundPhase2NDeliveryDiagnostic.cs
+// Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundDeliveryDiagnostic.cs
 // Description: Character Select 背景配送 MVP の互換性・fallback・安全判定をまとめる
 // Reason: 実機 write を増やさずに Phase 2N の配送状態を /xmutbgdiag とテストで判断するため
 using System.Numerics;
+using XivMiniUtil.Services.Common;
 
 namespace XivMiniUtil.Services.TitleBackground;
 
@@ -44,7 +45,7 @@ public enum TitleBackgroundCharacterSelectExpectedBrightness
     TooDark,
 }
 
-internal readonly record struct TitleBackgroundPhase2NForegroundPreserveResult(
+internal readonly record struct TitleBackgroundForegroundPreserveResult(
     bool Available,
     string Reason,
     string OriginalScenePath,
@@ -56,7 +57,7 @@ internal readonly record struct TitleBackgroundPhase2NForegroundPreserveResult(
     bool Applied,
     string SkippedReason);
 
-internal readonly record struct TitleBackgroundPhase2NNativeSourceProbe(
+internal readonly record struct TitleBackgroundNativePreviewSourceProbe(
     string Name,
     bool Available,
     string ReadStatus,
@@ -66,7 +67,7 @@ internal readonly record struct TitleBackgroundPhase2NNativeSourceProbe(
     int ModelLikeNonNullCount,
     string Error);
 
-internal readonly record struct TitleBackgroundPhase2NLightingDiagnostic(
+internal readonly record struct TitleBackgroundLightingDiagnostic(
     TitleBackgroundCharacterSelectLightingMode Mode,
     bool Available,
     string CurrentWeather,
@@ -85,7 +86,7 @@ internal readonly record struct TitleBackgroundPhase2NLightingDiagnostic(
     string BrightLayerCandidates,
     string RecommendedAction);
 
-internal readonly record struct TitleBackgroundPhase2NPresetCompatibility(
+internal readonly record struct TitleBackgroundPresetCompatibility(
     string CurrentPresetId,
     TitleBackgroundCharacterSelectCompatibility ExpectedCompatibility,
     TitleBackgroundCharacterSelectExpectedBrightness ExpectedBrightness,
@@ -95,7 +96,7 @@ internal readonly record struct TitleBackgroundPhase2NPresetCompatibility(
     bool SafeToUse,
     bool CharacterExpectedVisible);
 
-internal readonly record struct TitleBackgroundPhase2NOverrideCompatibility(
+internal readonly record struct TitleBackgroundOverrideCompatibility(
     string Source,
     string Id,
     string DisplayName,
@@ -112,7 +113,7 @@ internal readonly record struct TitleBackgroundPhase2NOverrideCompatibility(
     string RecommendedAction,
     string Warning);
 
-internal readonly record struct TitleBackgroundPhase2NOverrideCandidateDiagnostic(
+internal readonly record struct TitleBackgroundOverrideCandidateDiagnostic(
     TitleBackgroundCharacterSelectOverrideCandidate Selected,
     IReadOnlyList<TitleBackgroundCharacterSelectOverrideCandidate> Available,
     IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot> ManualSlots,
@@ -122,7 +123,7 @@ internal readonly record struct TitleBackgroundPhase2NOverrideCandidateDiagnosti
     int RegistryBrightCount,
     string RegistryDefaultId);
 
-internal readonly record struct TitleBackgroundPhase2NBackgroundApplicationDiagnostic(
+internal readonly record struct TitleBackgroundDeliveryBackgroundApplicationDiagnostic(
     bool Observed,
     bool LastHistoricalOverrideApplied,
     string LastHistoricalOverridePath,
@@ -130,12 +131,12 @@ internal readonly record struct TitleBackgroundPhase2NBackgroundApplicationDiagn
     bool VisualConfirmationRequired,
     string UserVerdict);
 
-internal readonly record struct TitleBackgroundPhase2NSafetyDiagnostic(
+internal readonly record struct TitleBackgroundDeliverySafetyDiagnostic(
     string Verdict,
     string Reason,
     bool BlocksBackgroundCandidatePromotion);
 
-internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
+internal readonly record struct TitleBackgroundDeliverySummary(
     string FeatureGoal,
     TitleBackgroundCharacterSelectBackgroundMode BackgroundMode,
     string BackgroundModeReason,
@@ -143,24 +144,24 @@ internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
     string CharacterVisibilityObserved,
     string CharacterVisibilityBlocker,
     bool NativePreviewSourceSearched,
-    IReadOnlyList<TitleBackgroundPhase2NNativeSourceProbe> NativePreviewSources,
+    IReadOnlyList<TitleBackgroundNativePreviewSourceProbe> NativePreviewSources,
     string NativePreviewSourceBestSource,
     string NativePreviewSourceBestCandidate,
     string NativePreviewSourceResolution,
     bool NativePreviewSourceCurrentObjectTableIgnored,
     string NativePreviewSourceCurrentObjectTableIgnoredReason,
-    TitleBackgroundPhase2NForegroundPreserveResult ForegroundPreserve,
-    TitleBackgroundPhase2NPresetCompatibility PresetCompatibility,
-    TitleBackgroundPhase2NOverrideCompatibility OverrideCompatibility,
-    TitleBackgroundPhase2NOverrideCandidateDiagnostic OverrideCandidate,
-    TitleBackgroundPhase2NLightingDiagnostic Lighting,
+    TitleBackgroundForegroundPreserveResult ForegroundPreserve,
+    TitleBackgroundPresetCompatibility PresetCompatibility,
+    TitleBackgroundOverrideCompatibility OverrideCompatibility,
+    TitleBackgroundOverrideCandidateDiagnostic OverrideCandidate,
+    TitleBackgroundLightingDiagnostic Lighting,
     bool ObjectTableActorRejected,
     string ObjectTableActorRejectedReason,
     bool ActorPlacementReady,
     string ActorPlacementBlocker,
     string DeliveryVerdict,
-    TitleBackgroundPhase2NBackgroundApplicationDiagnostic BackgroundApplication,
-    TitleBackgroundPhase2NSafetyDiagnostic Safety,
+    TitleBackgroundDeliveryBackgroundApplicationDiagnostic BackgroundApplication,
+    TitleBackgroundDeliverySafetyDiagnostic Safety,
     string BackgroundDeliveryVerdict,
     string TransitionSafetyVerdict,
     string PostLoginLeakVerdict,
@@ -175,7 +176,7 @@ internal readonly record struct TitleBackgroundPhase2NDeliverySummary(
     string NextAction,
     string NextActionReason);
 
-internal static class TitleBackgroundPhase2NDeliveryDiagnostic
+internal static class TitleBackgroundDeliveryDiagnostic
 {
     public const string OriginalCharaSelectScenePath = "ffxiv/zon_z1/chr/z1c1/level/z1c1";
 
@@ -195,15 +196,16 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             layerFilterKey);
     }
 
-    public static List<string> BuildLineList(TitleBackgroundPhase2NDeliverySummary summary)
+    public static List<string> BuildLineList(TitleBackgroundDeliverySummary summary)
     {
         var lines = new List<string>();
         AddLines(lines, summary);
         return lines;
     }
 
-    public static void AddLines(List<string> lines, TitleBackgroundPhase2NDeliverySummary summary)
+    public static void AddLines(List<string> lines, TitleBackgroundDeliverySummary summary)
     {
+        var aliasStartIndex = lines.Count;
         lines.Add($"phase2N.featureGoal={summary.FeatureGoal}");
         lines.Add($"phase2N.backgroundMode={summary.BackgroundMode}");
         lines.Add($"phase2N.backgroundMode.reason={FormatNone(summary.BackgroundModeReason)}");
@@ -350,6 +352,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         lines.Add($"phase2N.mvpKnownLimitation={FormatNone(summary.MvpKnownLimitation)}");
         lines.Add($"phase2N.nextAction={FormatNone(summary.NextAction)}");
         lines.Add($"phase2N.nextAction.reason={FormatNone(summary.NextActionReason)}");
+        DiagnosticReportBuilder.AddPrefixAliasLines(lines, aliasStartIndex, "phase2N.", "delivery.");
     }
 
     private static string FormatNone(string? value)
@@ -357,7 +360,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         return string.IsNullOrWhiteSpace(value) ? "none" : value;
     }
 
-    public static TitleBackgroundPhase2NDeliverySummary BuildSummary(
+    public static TitleBackgroundDeliverySummary BuildSummary(
         TitleBackgroundCharacterSelectBackgroundMode backgroundMode,
         TitleBackgroundCharacterSelectLightingMode lightingMode,
         string selectedPresetId,
@@ -374,7 +377,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         int drawObjectNonNullCount,
         int modelLikeNonNullCount,
         string bestCandidate,
-        IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> sourceDiscovery,
+        IReadOnlyList<TitleBackgroundCharacterPlacementSourceDiscovery> sourceDiscovery,
         string transitionSafety,
         bool currentObjectTableValidForCharaSelect = true,
         string currentObjectTableInvalidReason = "none",
@@ -394,7 +397,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             overrideTerritoryId,
             layerFilterKey,
             availableCandidates);
-        var overrideCandidateDiagnostic = new TitleBackgroundPhase2NOverrideCandidateDiagnostic(
+        var overrideCandidateDiagnostic = new TitleBackgroundOverrideCandidateDiagnostic(
             overrideCandidate,
             availableCandidates,
             normalizedManualSlots,
@@ -516,7 +519,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             nextAction,
             characterBlocker);
 
-        return new TitleBackgroundPhase2NDeliverySummary(
+        return new TitleBackgroundDeliverySummary(
             "character-select-background",
             backgroundMode,
             modeReason,
@@ -557,7 +560,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             nextActionReason);
     }
 
-    private static TitleBackgroundPhase2NBackgroundApplicationDiagnostic BuildBackgroundApplication(
+    private static TitleBackgroundDeliveryBackgroundApplicationDiagnostic BuildBackgroundApplication(
         bool lastOverrideApplied,
         bool historicalLastOverrideApplied,
         string historicalLastOverridePath,
@@ -567,7 +570,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             ? "none"
             : historicalLastOverridePath;
         var observed = lastOverrideApplied || historicalLastOverrideApplied;
-        return new TitleBackgroundPhase2NBackgroundApplicationDiagnostic(
+        return new TitleBackgroundDeliveryBackgroundApplicationDiagnostic(
             observed,
             historicalLastOverrideApplied,
             historicalPath,
@@ -576,7 +579,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             observed ? "background-applied-character-hidden" : "not-confirmed");
     }
 
-    private static TitleBackgroundPhase2NSafetyDiagnostic BuildSafety(
+    private static TitleBackgroundDeliverySafetyDiagnostic BuildSafety(
         string transitionSafety,
         bool sceneReadyAcceptedMultipleTimes,
         bool activeAfterLoginDetected,
@@ -584,7 +587,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
     {
         if (activeAfterLoginDetected || phase2GAppliedAfterLogin)
         {
-            return new TitleBackgroundPhase2NSafetyDiagnostic(
+            return new TitleBackgroundDeliverySafetyDiagnostic(
                 "unsafe",
                 activeAfterLoginDetected ? "scene-override-active-after-login" : "phase2g-applied-after-login",
                 true);
@@ -592,17 +595,17 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
 
         if (sceneReadyAcceptedMultipleTimes || transitionSafety == "unsafe")
         {
-            return new TitleBackgroundPhase2NSafetyDiagnostic(
+            return new TitleBackgroundDeliverySafetyDiagnostic(
                 "warning",
                 sceneReadyAcceptedMultipleTimes ? "scene-ready-accepted-multiple-times" : "login-transition-safety-unsafe",
                 true);
         }
 
-        return new TitleBackgroundPhase2NSafetyDiagnostic("safe", "none", false);
+        return new TitleBackgroundDeliverySafetyDiagnostic("safe", "none", false);
     }
 
     private static string BuildTransitionSafetyVerdict(
-        TitleBackgroundPhase2NSafetyDiagnostic safety,
+        TitleBackgroundDeliverySafetyDiagnostic safety,
         bool sceneReadyAcceptedMultipleTimes)
     {
         if (sceneReadyAcceptedMultipleTimes)
@@ -688,13 +691,13 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
     }
 
     public static string EvaluateExperimentalActorPlacement(
-        TitleBackgroundPhase2MExperimentalApplyMode mode,
-        TitleBackgroundPhase2MSummary summary,
+        TitleBackgroundCharacterPlacementExperimentalApplyMode mode,
+        TitleBackgroundCharacterPlacementSummary summary,
         bool sceneGenerationMatches,
         bool isCharaSelectActive,
         bool isLoggedIn)
     {
-        if (mode == TitleBackgroundPhase2MExperimentalApplyMode.None)
+        if (mode == TitleBackgroundCharacterPlacementExperimentalApplyMode.None)
         {
             return "skip:none-mode";
         }
@@ -714,13 +717,13 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             return "skip:scene-generation-mismatch";
         }
 
-        if (mode == TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot
+        if (mode == TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementOneShot
             && summary.Resolution == "stub-only")
         {
             return "skip:stub-only-object-table";
         }
 
-        return TitleBackgroundPhase2MPlacementDiagnostic.EvaluateExperimentalApply(
+        return TitleBackgroundCharacterPlacementDiagnostic.EvaluateExperimentalApply(
             mode,
             summary,
             sceneGenerationMatches,
@@ -728,7 +731,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             isLoggedIn);
     }
 
-    private static TitleBackgroundPhase2NPresetCompatibility BuildPresetCompatibility(
+    private static TitleBackgroundPresetCompatibility BuildPresetCompatibility(
         string selectedPresetId,
         string territoryPath,
         uint territoryId,
@@ -747,7 +750,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 : overrideCandidate.Id == TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId
                     ? "synthetic custom override compatibility entry; full scene override works as background-only and selected character is not expected to be visible"
                     : overrideCandidate.Warning;
-            return new TitleBackgroundPhase2NPresetCompatibility(
+            return new TitleBackgroundPresetCompatibility(
                 presetId,
                 overrideCandidate.ExpectedCompatibility,
                 overrideCandidate.ExpectedBrightness,
@@ -760,7 +763,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 overrideCandidate.CharacterExpectedVisible);
         }
 
-        return new TitleBackgroundPhase2NPresetCompatibility(
+        return new TitleBackgroundPresetCompatibility(
             presetId,
             TitleBackgroundCharacterSelectCompatibility.Unknown,
             TitleBackgroundCharacterSelectExpectedBrightness.Unknown,
@@ -773,12 +776,12 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             false);
     }
 
-    private static TitleBackgroundPhase2NOverrideCompatibility BuildOverrideCompatibility(
+    private static TitleBackgroundOverrideCompatibility BuildOverrideCompatibility(
         string selectedPresetId,
         string territoryPath,
         uint territoryId,
         uint layerFilterKey,
-        TitleBackgroundPhase2NPresetCompatibility presetCompatibility,
+        TitleBackgroundPresetCompatibility presetCompatibility,
         TitleBackgroundCharacterSelectOverrideCandidate overrideCandidate)
     {
         var hasSelectedPreset = !string.IsNullOrWhiteSpace(selectedPresetId);
@@ -801,7 +804,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 or TitleBackgroundCharacterSelectCompatibility.BackgroundOnly
                 or TitleBackgroundCharacterSelectCompatibility.CharacterHidden);
 
-        return new TitleBackgroundPhase2NOverrideCompatibility(
+        return new TitleBackgroundOverrideCompatibility(
             source,
             id,
             displayName,
@@ -819,11 +822,11 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             presetCompatibility.Warning);
     }
 
-    private static TitleBackgroundPhase2NForegroundPreserveResult BuildForegroundPreserve(
+    private static TitleBackgroundForegroundPreserveResult BuildForegroundPreserve(
         TitleBackgroundCharacterSelectBackgroundMode backgroundMode,
         string overrideScenePath)
     {
-        return new TitleBackgroundPhase2NForegroundPreserveResult(
+        return new TitleBackgroundForegroundPreserveResult(
             false,
             "unsupported: no safe public hook point found to keep original CharaSelect stage while replacing only the background",
             OriginalCharaSelectScenePath,
@@ -838,18 +841,18 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
                 : "mode-not-selected");
     }
 
-    private static IReadOnlyList<TitleBackgroundPhase2NNativeSourceProbe> BuildNativeSourceProbes(
-        IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> sourceDiscovery,
+    private static IReadOnlyList<TitleBackgroundNativePreviewSourceProbe> BuildNativeSourceProbes(
+        IReadOnlyList<TitleBackgroundCharacterPlacementSourceDiscovery> sourceDiscovery,
         int zeroPositionCandidateCount,
         int nonZeroPositionCandidateCount,
         int drawObjectNonNullCount,
         int modelLikeNonNullCount)
     {
-        var probes = new List<TitleBackgroundPhase2NNativeSourceProbe>();
+        var probes = new List<TitleBackgroundNativePreviewSourceProbe>();
         foreach (var source in sourceDiscovery)
         {
             var objectTableLike = source.Name is "ObjectTable" or "PlayerObjects" or "CharacterManagerObjects";
-            probes.Add(new TitleBackgroundPhase2NNativeSourceProbe(
+            probes.Add(new TitleBackgroundNativePreviewSourceProbe(
                 source.Name,
                 source.Available,
                 source.Available ? "read" : "not-available",
@@ -862,12 +865,12 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
 
         if (probes.All(probe => probe.Name != "CharaSelectCharacterManager"))
         {
-            probes.Add(new TitleBackgroundPhase2NNativeSourceProbe("CharaSelectCharacterManager", false, "not-resolved", 0, 0, 0, 0, "no public field or signature-safe source"));
+            probes.Add(new TitleBackgroundNativePreviewSourceProbe("CharaSelectCharacterManager", false, "not-resolved", 0, 0, 0, 0, "no public field or signature-safe source"));
         }
 
         if (probes.All(probe => !probe.Name.StartsWith("UIStage", StringComparison.Ordinal)))
         {
-            probes.Add(new TitleBackgroundPhase2NNativeSourceProbe("UIStage CharaSelect model source", false, "not-resolved", 0, 0, 0, 0, "no safe model owner path found"));
+            probes.Add(new TitleBackgroundNativePreviewSourceProbe("UIStage CharaSelect model source", false, "not-resolved", 0, 0, 0, 0, "no safe model owner path found"));
         }
 
         return probes;
@@ -876,7 +879,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
     private static string BuildNativeResolution(
         string phase2MResolution,
         string transformValidity,
-        IReadOnlyList<TitleBackgroundPhase2NNativeSourceProbe> nativeSources)
+        IReadOnlyList<TitleBackgroundNativePreviewSourceProbe> nativeSources)
     {
         if (phase2MResolution == "single" && transformValidity == "valid-world-transform")
         {
@@ -901,7 +904,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         return "not-found";
     }
 
-    private static TitleBackgroundPhase2NLightingDiagnostic BuildLightingDiagnostic(
+    private static TitleBackgroundLightingDiagnostic BuildLightingDiagnostic(
         TitleBackgroundCharacterSelectLightingMode mode,
         TitleBackgroundCharacterSelectExpectedBrightness expectedBrightness,
         uint layerFilterKey,
@@ -918,7 +921,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
             ? "safe-public-write-api-not-found"
             : "read-only";
 
-        return new TitleBackgroundPhase2NLightingDiagnostic(
+        return new TitleBackgroundLightingDiagnostic(
             mode,
             true,
             "not-read",
@@ -942,7 +945,7 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         TitleBackgroundCharacterSelectBackgroundMode mode,
         bool sceneOverrideEnabled,
         bool lastOverrideApplied,
-        TitleBackgroundPhase2NForegroundPreserveResult foreground,
+        TitleBackgroundForegroundPreserveResult foreground,
         string nativeResolution)
     {
         return mode switch
@@ -967,8 +970,8 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         bool lastOverrideApplied,
         string nativeResolution,
         bool foregroundAvailable,
-        TitleBackgroundPhase2NPresetCompatibility compatibility,
-        TitleBackgroundPhase2NLightingDiagnostic lighting)
+        TitleBackgroundPresetCompatibility compatibility,
+        TitleBackgroundLightingDiagnostic lighting)
     {
         if (transitionSafety == "unsafe")
         {
@@ -1009,3 +1012,5 @@ internal static class TitleBackgroundPhase2NDeliveryDiagnostic
         return ("blocked-character-source-not-found", "try-compatible-preset", "native preview source was not found and no applied background was observed");
     }
 }
+
+

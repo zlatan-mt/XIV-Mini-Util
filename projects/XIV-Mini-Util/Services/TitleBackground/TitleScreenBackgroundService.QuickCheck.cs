@@ -123,10 +123,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var currentLobbyMapRemainedAfterLogin = _clientState.IsLoggedIn
             && currentLobbyMapAvailable
             && currentLobbyMap != GameLobbyType.None;
-        var phase2MSummary = TitleBackgroundPhase2MPlacementDiagnostic.BuildSummary(_phase2MPlacementFrames.Values);
+        var phase2MSummary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(_phase2MPlacementFrames.Values);
         var characterKnownLimitation = !candidate.CharacterExpectedVisible
             || string.Equals(phase2MSummary.ActorVisible, "not-observed", StringComparison.OrdinalIgnoreCase);
-        var actorSourceAmbiguous = string.Equals(GetLatestPhase2MActorCandidateStatus(), "ambiguous", StringComparison.OrdinalIgnoreCase)
+        var actorSourceAmbiguous = string.Equals(GetLatestCharacterPlacementActorCandidateStatus(), "ambiguous", StringComparison.OrdinalIgnoreCase)
             || string.Equals(phase2MSummary.Resolution, "ambiguous", StringComparison.OrdinalIgnoreCase);
         var zeroTransformStubs = phase2MSummary.ZeroPositionCandidateCount > 0
             && phase2MSummary.NonZeroPositionCandidateCount == 0;
@@ -249,7 +249,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             FormatFloat(cameraProfile.Distance ?? _charaSelectCameraAdapter.RuntimeState.Distance),
             FormatVector(cameraProfile.LookAtOffset),
             FormatVector(cameraProfile.PositionOffset),
-            Phase2MStatusToQuickCheckTriState(phase2MSummary.CameraFramesActor),
+            CharacterPlacementStatusToQuickCheckTriState(phase2MSummary.CameraFramesActor),
             VerdictToQuickCheckTriState(finalYawPitchDistanceMatchesProfile),
             cameraProfile.HasProfile,
             visibleProfileAppliedState == "True",

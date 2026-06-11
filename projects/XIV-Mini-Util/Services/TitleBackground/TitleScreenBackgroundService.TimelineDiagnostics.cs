@@ -92,12 +92,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
             ? string.Empty
             : $"frame {frame}: active={activeError}; lobby={lobbyError}; expandedLobby={expandedError}";
 
-        CapturePhase2MPlacementFrame(frame, frame == 0 ? "scene-ready-accepted" : "timeline");
+        CaptureCharacterPlacementPlacementFrame(frame, frame == 0 ? "scene-ready-accepted" : "timeline");
     }
 
-    private void CapturePhase2MPlacementFrame(int frame, string reason)
+    private void CaptureCharacterPlacementPlacementFrame(int frame, string reason)
     {
-        if (!TitleBackgroundPhase2MPlacementDiagnostic.ShouldCaptureFrame(frame)
+        if (!TitleBackgroundCharacterPlacementDiagnostic.ShouldCaptureFrame(frame)
             || _phase2MPlacementFrames.ContainsKey(frame))
         {
             return;
@@ -118,13 +118,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var activeLookAt = activeCaptured ? activeCamera.LookAtVector : (Vector3?)null;
         var activeCameraPosition = activeCaptured ? activeCamera.SceneCameraPosition : (Vector3?)null;
 
-        var actorResult = CapturePhase2MActorCandidate(configuredCharacterPosition, activeLookAt, activeCameraPosition);
+        var actorResult = CaptureCharacterPlacementActorCandidate(configuredCharacterPosition, activeLookAt, activeCameraPosition);
         var actor = actorResult.Actor;
         var actorPosition = actor?.Position;
         _phase2MPlacementCaptureSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
         _phase2MPlacementCaptureReason = reason;
 
-        _phase2MPlacementFrames[frame] = new TitleBackgroundPhase2MPlacementFrame(
+        _phase2MPlacementFrames[frame] = new TitleBackgroundCharacterPlacementFrame(
             frame,
             reason,
             activeCaptured,
@@ -174,47 +174,47 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 : null);
     }
 
-    private TitleBackgroundPhase2MActorCandidateResult CapturePhase2MActorCandidate(
+    private TitleBackgroundCharacterPlacementActorCandidateResult CaptureCharacterPlacementActorCandidate(
         Vector3 configuredCharacterPosition,
         Vector3? activeLookAt,
         Vector3? activeCameraPosition)
     {
         try
         {
-            var scanned = new List<TitleBackgroundPhase2MActorCandidate>();
+            var scanned = new List<TitleBackgroundCharacterPlacementActorCandidate>();
             var seenKeys = new HashSet<string>(StringComparer.Ordinal);
-            var sources = new List<TitleBackgroundPhase2MSourceDiscovery>();
+            var sources = new List<TitleBackgroundCharacterPlacementSourceDiscovery>();
             var length = Math.Max(0, _objectTable.Length);
             var beforeCount = scanned.Count;
             for (var index = 0; index < length; index++)
             {
-                AddPhase2MScannedObject(scanned, seenKeys, index, "ObjectTable", _objectTable[index], configuredCharacterPosition, activeLookAt, activeCameraPosition);
+                AddCharacterPlacementScannedObject(scanned, seenKeys, index, "ObjectTable", _objectTable[index], configuredCharacterPosition, activeLookAt, activeCameraPosition);
             }
-            sources.Add(BuildPhase2MSourceDiscovery("ObjectTable", true, length, scanned, beforeCount, string.Empty));
+            sources.Add(BuildCharacterPlacementSourceDiscovery("ObjectTable", true, length, scanned, beforeCount, string.Empty));
 
             var sourceIndex = 0;
             beforeCount = scanned.Count;
             foreach (var gameObject in _objectTable.PlayerObjects)
             {
                 sourceIndex++;
-                AddPhase2MScannedObject(scanned, seenKeys, sourceIndex, "PlayerObjects", gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
+                AddCharacterPlacementScannedObject(scanned, seenKeys, sourceIndex, "PlayerObjects", gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
             }
-            sources.Add(BuildPhase2MSourceDiscovery("PlayerObjects", true, sourceIndex, scanned, beforeCount, string.Empty));
+            sources.Add(BuildCharacterPlacementSourceDiscovery("PlayerObjects", true, sourceIndex, scanned, beforeCount, string.Empty));
 
             sourceIndex = 0;
             beforeCount = scanned.Count;
             foreach (var gameObject in _objectTable.CharacterManagerObjects)
             {
                 sourceIndex++;
-                AddPhase2MScannedObject(scanned, seenKeys, sourceIndex, "CharacterManagerObjects", gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
+                AddCharacterPlacementScannedObject(scanned, seenKeys, sourceIndex, "CharacterManagerObjects", gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
             }
-            sources.Add(BuildPhase2MSourceDiscovery("CharacterManagerObjects", true, sourceIndex, scanned, beforeCount, string.Empty));
-            sources.Add(new TitleBackgroundPhase2MSourceDiscovery("ClientObjectManager", false, 0, 0, "not-exposed-through-managed-api"));
-            sources.Add(new TitleBackgroundPhase2MSourceDiscovery("CharaSelectCharacterManager", false, 0, 0, "native-source-not-resolved"));
-            sources.Add(new TitleBackgroundPhase2MSourceDiscovery("UIStage CharaSelect model source", false, 0, 0, "native-source-not-resolved"));
-            sources.Add(new TitleBackgroundPhase2MSourceDiscovery("DrawObject owner/source", false, 0, 0, "reverse-lookup-not-exposed-through-managed-api"));
+            sources.Add(BuildCharacterPlacementSourceDiscovery("CharacterManagerObjects", true, sourceIndex, scanned, beforeCount, string.Empty));
+            sources.Add(new TitleBackgroundCharacterPlacementSourceDiscovery("ClientObjectManager", false, 0, 0, "not-exposed-through-managed-api"));
+            sources.Add(new TitleBackgroundCharacterPlacementSourceDiscovery("CharaSelectCharacterManager", false, 0, 0, "native-source-not-resolved"));
+            sources.Add(new TitleBackgroundCharacterPlacementSourceDiscovery("UIStage CharaSelect model source", false, 0, 0, "native-source-not-resolved"));
+            sources.Add(new TitleBackgroundCharacterPlacementSourceDiscovery("DrawObject owner/source", false, 0, 0, "reverse-lookup-not-exposed-through-managed-api"));
 
-            var stats = BuildPhase2MObjectTableStats(scanned);
+            var stats = BuildCharacterPlacementObjectTableStats(scanned);
             var candidates = scanned
                 .Where(candidate => candidate.PlayerLike
                     || candidate.BattleCharacterLike
@@ -242,8 +242,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 var reason = candidates.Length == 0
                     ? "objectTable-unavailable-or-not-exposed"
                     : "no-player-or-near-focus-candidate";
-                return new TitleBackgroundPhase2MActorCandidateResult(
-                    TitleBackgroundPhase2MActorMatchKind.None,
+                return new TitleBackgroundCharacterPlacementActorCandidateResult(
+                    TitleBackgroundCharacterPlacementActorMatchKind.None,
                     null,
                     candidates,
                     sources,
@@ -256,11 +256,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     "native character-select actor manager or lobby UI character instance");
             }
 
-            var stableCandidates = FilterPhase2MStableCandidates(matchingCandidates);
+            var stableCandidates = FilterCharacterPlacementStableCandidates(matchingCandidates);
             if (stableCandidates.Length == 1)
             {
-                return new TitleBackgroundPhase2MActorCandidateResult(
-                    TitleBackgroundPhase2MActorMatchKind.Single,
+                return new TitleBackgroundCharacterPlacementActorCandidateResult(
+                    TitleBackgroundCharacterPlacementActorMatchKind.Single,
                     stableCandidates[0],
                     candidates,
                     sources,
@@ -275,8 +275,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
             if (matchingCandidates.Length == 1)
             {
-                return new TitleBackgroundPhase2MActorCandidateResult(
-                    TitleBackgroundPhase2MActorMatchKind.Single,
+                return new TitleBackgroundCharacterPlacementActorCandidateResult(
+                    TitleBackgroundCharacterPlacementActorMatchKind.Single,
                     matchingCandidates[0],
                     candidates,
                     sources,
@@ -289,8 +289,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     "none");
             }
 
-            return new TitleBackgroundPhase2MActorCandidateResult(
-                TitleBackgroundPhase2MActorMatchKind.Ambiguous,
+            return new TitleBackgroundCharacterPlacementActorCandidateResult(
+                TitleBackgroundCharacterPlacementActorMatchKind.Ambiguous,
                 matchingCandidates[0],
                 candidates,
                 sources,
@@ -304,11 +304,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
         catch (Exception ex)
         {
-            return new TitleBackgroundPhase2MActorCandidateResult(
-                TitleBackgroundPhase2MActorMatchKind.None,
+            return new TitleBackgroundCharacterPlacementActorCandidateResult(
+                TitleBackgroundCharacterPlacementActorMatchKind.None,
                 null,
                 [],
-                [new TitleBackgroundPhase2MSourceDiscovery("ObjectTable", false, 0, 0, ex.GetType().Name)],
+                [new TitleBackgroundCharacterPlacementSourceDiscovery("ObjectTable", false, 0, 0, ex.GetType().Name)],
                 0,
                 default,
                 "error",
@@ -319,8 +319,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
     }
 
-    private static void AddPhase2MScannedObject(
-        List<TitleBackgroundPhase2MActorCandidate> candidates,
+    private static void AddCharacterPlacementScannedObject(
+        List<TitleBackgroundCharacterPlacementActorCandidate> candidates,
         HashSet<string> seenKeys,
         int sourceIndex,
         string source,
@@ -334,23 +334,23 @@ public sealed unsafe partial class TitleScreenBackgroundService
             return;
         }
 
-        var candidate = TryCreatePhase2MActorCandidate(sourceIndex, source, gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
+        var candidate = TryCreateCharacterPlacementActorCandidate(sourceIndex, source, gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
         if (!candidate.HasValue)
         {
             return;
         }
 
-        if (seenKeys.Add(BuildPhase2MCandidateKey(candidate.Value)))
+        if (seenKeys.Add(BuildCharacterPlacementCandidateKey(candidate.Value)))
         {
             candidates.Add(candidate.Value);
         }
     }
 
-    private static TitleBackgroundPhase2MSourceDiscovery BuildPhase2MSourceDiscovery(
+    private static TitleBackgroundCharacterPlacementSourceDiscovery BuildCharacterPlacementSourceDiscovery(
         string name,
         bool available,
         int count,
-        IReadOnlyList<TitleBackgroundPhase2MActorCandidate> scanned,
+        IReadOnlyList<TitleBackgroundCharacterPlacementActorCandidate> scanned,
         int startIndex,
         string error)
     {
@@ -358,34 +358,34 @@ public sealed unsafe partial class TitleScreenBackgroundService
             .Skip(startIndex)
             .Where(candidate => candidate.Source == name)
             .ToArray();
-        return new TitleBackgroundPhase2MSourceDiscovery(
+        return new TitleBackgroundCharacterPlacementSourceDiscovery(
             name,
             available,
             count,
             localCandidates.Length,
             error,
-            localCandidates.Count(candidate => !IsZeroPhase2MPosition(candidate.Position)),
+            localCandidates.Count(candidate => !IsZeroCharacterPlacementPosition(candidate.Position)),
             localCandidates.Count(candidate => candidate.DrawObjectNonNull),
             localCandidates.Count(candidate => candidate.ModelLikeNonNull));
     }
 
-    private TitleBackgroundPhase2MActorCandidate[] FilterPhase2MStableCandidates(TitleBackgroundPhase2MActorCandidate[] candidates)
+    private TitleBackgroundCharacterPlacementActorCandidate[] FilterCharacterPlacementStableCandidates(TitleBackgroundCharacterPlacementActorCandidate[] candidates)
     {
-        return candidates.Where(IsStablePhase2MCandidate).ToArray();
+        return candidates.Where(IsStableCharacterPlacementCandidate).ToArray();
     }
 
-    private bool IsStablePhase2MCandidate(TitleBackgroundPhase2MActorCandidate candidate)
+    private bool IsStableCharacterPlacementCandidate(TitleBackgroundCharacterPlacementActorCandidate candidate)
     {
-        var key = BuildPhase2MCandidateKey(candidate);
+        var key = BuildCharacterPlacementCandidateKey(candidate);
         var matched = _phase2MPlacementFrames.Values
             .SelectMany(frame => frame.ObjectCandidates)
-            .Where(existing => BuildPhase2MCandidateKey(existing) == key)
+            .Where(existing => BuildCharacterPlacementCandidateKey(existing) == key)
             .ToArray();
         return matched.Length >= 2
             && matched.All(existing => Vector3.Distance(existing.Position, candidate.Position) <= TitleBackgroundCameraProbeReport.StabilizationVectorTolerance);
     }
 
-    private static string BuildPhase2MCandidateKey(TitleBackgroundPhase2MActorCandidate candidate)
+    private static string BuildCharacterPlacementCandidateKey(TitleBackgroundCharacterPlacementActorCandidate candidate)
     {
         if (candidate.GameObjectId != 0)
         {
@@ -405,16 +405,16 @@ public sealed unsafe partial class TitleScreenBackgroundService
         return $"{candidate.Source}:{candidate.ObjectIndex}:{candidate.ObjectKind}:{candidate.Name}";
     }
 
-    private static bool IsZeroPhase2MPosition(Vector3 position)
+    private static bool IsZeroCharacterPlacementPosition(Vector3 position)
     {
         return Math.Abs(position.X) <= 0.001f
             && Math.Abs(position.Y) <= 0.001f
             && Math.Abs(position.Z) <= 0.001f;
     }
 
-    private static TitleBackgroundPhase2MObjectTableStats BuildPhase2MObjectTableStats(IReadOnlyCollection<TitleBackgroundPhase2MActorCandidate> candidates)
+    private static TitleBackgroundCharacterPlacementObjectTableStats BuildCharacterPlacementObjectTableStats(IReadOnlyCollection<TitleBackgroundCharacterPlacementActorCandidate> candidates)
     {
-        return new TitleBackgroundPhase2MObjectTableStats(
+        return new TitleBackgroundCharacterPlacementObjectTableStats(
             candidates.Count,
             candidates.Count(candidate => candidate.Named),
             candidates.Count(candidate => candidate.PlayerLike),
@@ -498,7 +498,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         return string.IsNullOrWhiteSpace(text) ? "present" : text;
     }
 
-    private TitleBackgroundPhase2MObjectTableStats GetLatestPhase2MObjectTableStats()
+    private TitleBackgroundCharacterPlacementObjectTableStats GetLatestCharacterPlacementObjectTableStats()
     {
         return _phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
@@ -506,7 +506,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             .FirstOrDefault();
     }
 
-    private string GetLatestPhase2MActorCandidateStatus()
+    private string GetLatestCharacterPlacementActorCandidateStatus()
     {
         return _phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
@@ -514,7 +514,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             .FirstOrDefault() ?? "none";
     }
 
-    private string GetLatestPhase2MActorCandidateReason()
+    private string GetLatestCharacterPlacementActorCandidateReason()
     {
         return _phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
@@ -522,7 +522,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             .FirstOrDefault() ?? "none";
     }
 
-    private string GetLatestPhase2MActorSource()
+    private string GetLatestCharacterPlacementActorSource()
     {
         return _phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
@@ -530,7 +530,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             .FirstOrDefault() ?? "none";
     }
 
-    private string GetLatestPhase2MNextNativeSourceToInspect()
+    private string GetLatestCharacterPlacementNextNativeSourceToInspect()
     {
         return _phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
@@ -538,7 +538,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             .FirstOrDefault() ?? "none";
     }
 
-    private IReadOnlyList<TitleBackgroundPhase2MSourceDiscovery> GetLatestPhase2MSourceDiscovery()
+    private IReadOnlyList<TitleBackgroundCharacterPlacementSourceDiscovery> GetLatestCharacterPlacementSourceDiscovery()
     {
         return _phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
@@ -546,7 +546,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             .FirstOrDefault() ?? [];
     }
 
-    private static TitleBackgroundPhase2MActorCandidate? TryCreatePhase2MActorCandidate(
+    private static TitleBackgroundCharacterPlacementActorCandidate? TryCreateCharacterPlacementActorCandidate(
         int sourceIndex,
         string source,
         IGameObject gameObject,
@@ -605,7 +605,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var customizeText = FormatReflectObject(customize);
         var drawObjectNonNull = drawObject != null && drawObjectText != "0x0" && drawObjectText != "none";
         var modelLikeNonNull = model != null && modelText != "0x0" && modelText != "none";
-        var (score, scoreReason) = ScorePhase2MCandidate(
+        var (score, scoreReason) = ScoreCharacterPlacementCandidate(
             position,
             named,
             targetableStatus,
@@ -617,7 +617,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             gameObject.EntityId,
             source);
 
-        return new TitleBackgroundPhase2MActorCandidate(
+        return new TitleBackgroundCharacterPlacementActorCandidate(
             sourceIndex,
             source,
             gameObject.ObjectIndex,
@@ -661,7 +661,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             scoreReason);
     }
 
-    private static (int Score, string Reason) ScorePhase2MCandidate(
+    private static (int Score, string Reason) ScoreCharacterPlacementCandidate(
         Vector3 position,
         bool named,
         bool visibleHint,
@@ -708,10 +708,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
     }
 
-    private void EvaluatePhase2MExperimentalApply(TitleBackgroundPhase2MSummary summary)
+    private void EvaluateCharacterPlacementExperimentalApply(TitleBackgroundCharacterPlacementSummary summary)
     {
-        var mode = _configuration.TitleBackgroundPhase2MExperimentalApplyMode;
-        var status = TitleBackgroundPhase2NDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
+        var mode = _configuration.TitleBackgroundCharacterPlacementExperimentalApplyMode;
+        var status = TitleBackgroundDeliveryDiagnostic.EvaluateExperimentalActorPlacement(
             mode,
             summary,
             _activeCharaSelectSceneGeneration > 0
@@ -719,7 +719,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _charaSelectTitleBackgroundSessionActive,
             _clientState.IsLoggedIn);
 
-        if (mode == TitleBackgroundPhase2MExperimentalApplyMode.None)
+        if (mode == TitleBackgroundCharacterPlacementExperimentalApplyMode.None)
         {
             _phase2MExperimentalLastStatus = status;
             return;
@@ -735,11 +735,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _phase2MExperimentalSkippedCount++;
         _phase2MExperimentalLastStatus = mode switch
         {
-            TitleBackgroundPhase2MExperimentalApplyMode.CameraAnchorOnly => "skip:unsupported-camera-anchor-write-not-exposed",
-            TitleBackgroundPhase2MExperimentalApplyMode.GeneratedCurvePlusCameraAnchor => "skip:unsupported-camera-anchor-write-not-exposed",
-            TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementPreviewOnly => "preview-only:target-delta-dumped",
-            TitleBackgroundPhase2MExperimentalApplyMode.ActorPlacementOneShot => "skip:actor-write-not-implemented-without-validated-native-source",
-            TitleBackgroundPhase2MExperimentalApplyMode.VisibilityProbeOnly => "read-only:visibility-probe-dumped",
+            TitleBackgroundCharacterPlacementExperimentalApplyMode.CameraAnchorOnly => "skip:unsupported-camera-anchor-write-not-exposed",
+            TitleBackgroundCharacterPlacementExperimentalApplyMode.GeneratedCurvePlusCameraAnchor => "skip:unsupported-camera-anchor-write-not-exposed",
+            TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementPreviewOnly => "preview-only:target-delta-dumped",
+            TitleBackgroundCharacterPlacementExperimentalApplyMode.ActorPlacementOneShot => "skip:actor-write-not-implemented-without-validated-native-source",
+            TitleBackgroundCharacterPlacementExperimentalApplyMode.VisibilityProbeOnly => "read-only:visibility-probe-dumped",
             _ => "skip:unknown-mode",
         };
     }
