@@ -346,7 +346,7 @@ internal static class TitleBackgroundQuickCheckEvaluator
             return "background mode is disabled";
         }
 
-        if (!TitleBackgroundPhase2NDeliveryDiagnostic.IsMutationMode(input.BackgroundMode))
+        if (!TitleBackgroundDeliveryDiagnostic.IsMutationMode(input.BackgroundMode))
         {
             return "background mode does not apply scene override";
         }

@@ -1,0 +1,17 @@
+Command:
+dotnet build projects/XIV-Mini-Util/XivMiniUtil.csproj -c Release -p:DevPluginOutputDir=
+
+Result:
+Succeeded with 1 known warning.
+
+Output directory:
+projects/XIV-Mini-Util/bin/Release
+
+Files:
+Name,Length
+XivMiniUtil.deps.json,427
+XivMiniUtil.dll,1276928
+XivMiniUtil.json,719
+
+Known warning:
+projects/XIV-Mini-Util/Services/Shop/ColorantItemResolver.cs(868,18): warning CS0618: 'AtkValueType.String8' is obsolete ('Renamed to ConstString')

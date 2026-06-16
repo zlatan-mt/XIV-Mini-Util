@@ -1,0 +1,11 @@
+Command:
+dotnet run --project tools/CharaSelectLogicTests/CharaSelectLogicTests.csproj
+
+Result:
+Passed.
+
+Important output:
+CharaSelect logic tests passed.
+
+Known warning:
+projects/XIV-Mini-Util/Services/Shop/ColorantItemResolver.cs(868,18): warning CS0618: 'AtkValueType.String8' is obsolete ('Renamed to ConstString')

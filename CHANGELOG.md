@@ -6,10 +6,17 @@
 
 ## Unreleased
 
+- なし
+
+## 0.3.8 - 2026-06-11
+
 - キャラ選択画面でキャラ別に保存したエモートを再生する設定を追加
 - ログイン中に実行したエモートをキャラ選択用エモートとして記録できるようにした
 - ログイン待機中にログイン先テリトリーのLayoutを事前読み込みする設定を追加
 - `/xmu version` で、ゲーム内に読み込まれているDLLのパス、バージョン、更新時刻を確認できるようにした
+- リファクタリング: TitleBackground / CharaSelect / Settings / Configuration を機能別 partial に分割し、診断・hook・UI の責務を整理
+- 診断キー: 旧 `phase2M.*` / `phase2N.*` を維持しつつ、新しい `characterPlacement.*` / `delivery.*` alias を追加
+- 開発ツール: 現役ゲートではない shop snapshot 調査ツールを削除し、`CharaSelectLogicTests` に Configuration / Shop / command registration の純ロジック検証を追加
 
 ## 0.3.7 - 2026-05-04
 
