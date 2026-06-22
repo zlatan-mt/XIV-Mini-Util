@@ -23,6 +23,62 @@ public enum TitleBackgroundQuickCheckRunState
     Failed,
 }
 
+public enum TitleBackgroundAutomaticCheckState
+{
+    Idle,
+    WaitingForCharacterSelect,
+    Collecting,
+    Completed,
+    Failed,
+}
+
+internal readonly record struct TitleBackgroundAutomaticCheckStatus(
+    TitleBackgroundAutomaticCheckState State,
+    string StatusLine,
+    string NextActionLine,
+    bool CanCopyLastReport);
+
+internal static class TitleBackgroundAutomaticCheckLogic
+{
+    public static readonly TimeSpan LoginTransitionTimeout = TimeSpan.FromSeconds(10);
+
+    public static bool ShouldForcePartialCompletion(
+        TitleBackgroundAutomaticCheckState state,
+        bool isLoggedIn,
+        DateTimeOffset? loginObservedAt,
+        DateTimeOffset now)
+    {
+        return state == TitleBackgroundAutomaticCheckState.Collecting
+            && isLoggedIn
+            && loginObservedAt.HasValue
+            && now - loginObservedAt.Value >= LoginTransitionTimeout;
+    }
+}
+
+internal static class TitleBackgroundAutomaticCheckReportBuilder
+{
+    public const string FileName = "title-background-auto-check.txt";
+
+    public static string Build(
+        DateTimeOffset completedAt,
+        IReadOnlyList<string> quickCheckLines,
+        IReadOnlyList<string> diagnosticLines,
+        bool partial = false)
+    {
+        var lines = new List<string>
+        {
+            "[XIV Mini Util] Title Background automatic check",
+            $"[XIV Mini Util] completedAt={completedAt:yyyy-MM-dd HH:mm:ss zzz}",
+            $"[XIV Mini Util] completion={(partial ? "partial" : "complete")}",
+            "[XIV Mini Util] --- QuickCheck ---",
+        };
+        lines.AddRange(quickCheckLines.Select(line => $"[XIV Mini Util] {line}"));
+        lines.Add("[XIV Mini Util] --- Diagnostic ---");
+        lines.AddRange(diagnosticLines.Select(line => $"[XIV Mini Util] {line}"));
+        return string.Join(Environment.NewLine, lines);
+    }
+}
+
 public enum TitleBackgroundSettingsDisplayMode
 {
     Simple,
@@ -206,6 +262,9 @@ internal static class TitleBackgroundQuickCheckEvaluator
             warnings.Add("visual confirmation is required");
         }
 
+        var nativeCharacterSourceUnresolved = input.ActorSourceAmbiguous
+            || input.ObjectTableZeroTransformStubs;
+
         if (input.CharacterVisualStatus is TitleBackgroundCharacterVisualStatus.VisibleButTooSmall
                 or TitleBackgroundCharacterVisualStatus.VisibleTopDown)
         {
@@ -292,6 +351,7 @@ internal static class TitleBackgroundQuickCheckEvaluator
         var reason = level switch
         {
             TitleBackgroundQuickCheckLevel.NG => ngReason,
+            TitleBackgroundQuickCheckLevel.WARN when nativeCharacterSourceUnresolved => "native character source is unresolved",
             TitleBackgroundQuickCheckLevel.WARN when capturedProfileMissing => "captured legacy visible camera profile is missing",
             TitleBackgroundQuickCheckLevel.WARN when warnings.Any(warning => warning.Contains("camera does not frame the character", StringComparison.Ordinal)) => "camera does not frame the character",
             TitleBackgroundQuickCheckLevel.WARN when warnings.Any(warning => warning.Contains("visual confirmation", StringComparison.Ordinal)
@@ -459,6 +519,12 @@ internal static class TitleBackgroundQuickCheckEvaluator
         if (warnings.Any(warning => warning.Contains("sceneReady accepted multiple", StringComparison.Ordinal)))
         {
             return "retry once from clean title screen if needed";
+        }
+
+        if (warnings.Count > 0
+            && (input.ActorSourceAmbiguous || input.ObjectTableZeroTransformStubs))
+        {
+            return "paste the automatically copied report for native character source investigation";
         }
 
         if (warnings.Any(warning => warning.Contains("framing needs adjustment", StringComparison.Ordinal)))
@@ -838,7 +904,7 @@ internal readonly record struct TitleBackgroundSimpleUiSummary(
 internal static class TitleBackgroundQuickCheckUiPresenter
 {
     private const string SimpleCandidateId = TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId;
-    private const string SimpleSetupAction = "Click Auto Setup.";
+    private const string SimpleSetupAction = "Click Automatic Check.";
     private const string SimpleAdvancedAction = "Open Advanced diagnostics.";
 
     public static TitleBackgroundQuickCheckUiSummary BuildSummary(Configuration configuration)
@@ -882,8 +948,8 @@ internal static class TitleBackgroundQuickCheckUiPresenter
         [
             "Character Select Background",
             "Status",
-            "Auto Setup",
-            "Check",
+            "Automatic Check",
+            "Copy Last Report",
         ];
     }
 
@@ -924,8 +990,8 @@ internal static class TitleBackgroundQuickCheckUiPresenter
                 TitleBackgroundSimpleUiStatus.Ready,
                 level,
                 "Status: Ready",
-                "n4f4 recommended is ready. Click Check after opening Character Select.",
-                "Click Check."),
+                "n4f4 recommended is ready. Start Automatic Check, then log in from Character Select.",
+                "Click Automatic Check."),
         };
     }
 

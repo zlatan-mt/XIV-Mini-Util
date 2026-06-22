@@ -7,6 +7,205 @@ namespace XivMiniUtil.Services.TitleBackground;
 
 public sealed unsafe partial class TitleScreenBackgroundService
 {
+    internal IReadOnlyList<string> StartAutomaticQuickCheck()
+    {
+        if (!TitleBackgroundQuickCheckUiPresenter.IsSimpleAutoSetupConfigured(_configuration))
+        {
+            ApplySimpleAutoSetup();
+        }
+
+        _automaticCheckRequested = true;
+        _automaticCheckCompletionDueAt = null;
+        _automaticCheckLoginObservedAt = null;
+        _pendingAutomaticCheckClipboardText = string.Empty;
+
+        if (_clientState.IsLoggedIn)
+        {
+            _quickCheckState = TitleBackgroundQuickCheckState.Idle;
+            _automaticCheckState = TitleBackgroundAutomaticCheckState.WaitingForCharacterSelect;
+            _automaticCheckStatus = "待機中: ログアウトして Character Select を開いてください。";
+        }
+        else
+        {
+            ArmAutomaticQuickCheck();
+        }
+
+        return
+        [
+            "[XMU AutoCheck] START",
+            _automaticCheckStatus,
+            "ログイン後に診断ログを自動保存し、クリップボードへコピーします。",
+        ];
+    }
+
+    internal TitleBackgroundAutomaticCheckStatus GetAutomaticQuickCheckStatus()
+    {
+        EnsureAutomaticCheckReportAvailability();
+        var nextAction = _automaticCheckState switch
+        {
+            TitleBackgroundAutomaticCheckState.WaitingForCharacterSelect => "ログアウトし、Character Select からログインしてください。",
+            TitleBackgroundAutomaticCheckState.Collecting => "そのままログインしてください。操作やコマンド入力は不要です。",
+            TitleBackgroundAutomaticCheckState.Completed => "結果はコピー済みです。このまま貼り付けられます。",
+            TitleBackgroundAutomaticCheckState.Failed => "もう一度「自動確認を開始」を押してください。",
+            _ => "「自動確認を開始」を押した後、Character Select からログインしてください。",
+        };
+        return new TitleBackgroundAutomaticCheckStatus(
+            _automaticCheckState,
+            _automaticCheckStatus,
+            nextAction,
+            _automaticCheckReportAvailable);
+    }
+
+    internal bool QueueLastAutomaticCheckReportForClipboard()
+    {
+        try
+        {
+            EnsureAutomaticCheckReportAvailability();
+            if (string.IsNullOrWhiteSpace(_lastAutomaticCheckReport) && _automaticCheckReportAvailable)
+            {
+                var path = Path.Combine(_configDirectory, TitleBackgroundAutomaticCheckReportBuilder.FileName);
+                _lastAutomaticCheckReport = File.ReadAllText(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            _automaticCheckStatus = "前回の確認ログを読み込めませんでした。";
+            _log.Warning(ex, "[XMU BG] Failed to read previous automatic check report.");
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_lastAutomaticCheckReport))
+        {
+            return false;
+        }
+
+        _pendingAutomaticCheckClipboardText = _lastAutomaticCheckReport;
+        _automaticCheckStatus = "前回の確認ログをクリップボードへコピーします。";
+        return true;
+    }
+
+    private void EnsureAutomaticCheckReportAvailability()
+    {
+        if (_automaticCheckReportAvailabilityInitialized)
+        {
+            return;
+        }
+
+        _automaticCheckReportAvailable = File.Exists(
+            Path.Combine(_configDirectory, TitleBackgroundAutomaticCheckReportBuilder.FileName));
+        _automaticCheckReportAvailabilityInitialized = true;
+    }
+
+    internal bool TryConsumeAutomaticCheckClipboardText(out string text)
+    {
+        text = _pendingAutomaticCheckClipboardText;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        _pendingAutomaticCheckClipboardText = string.Empty;
+        return true;
+    }
+
+    private void ArmAutomaticQuickCheck()
+    {
+        StartQuickCheck();
+        _automaticCheckState = TitleBackgroundAutomaticCheckState.Collecting;
+        _automaticCheckStatus = "収集中: Character Select からログインしてください。";
+    }
+
+    private void UpdateAutomaticQuickCheck()
+    {
+        if (!_automaticCheckRequested)
+        {
+            return;
+        }
+
+        if (_automaticCheckState == TitleBackgroundAutomaticCheckState.WaitingForCharacterSelect
+            && !_clientState.IsLoggedIn)
+        {
+            ArmAutomaticQuickCheck();
+            return;
+        }
+
+        if (_automaticCheckState != TitleBackgroundAutomaticCheckState.Collecting)
+        {
+            return;
+        }
+
+        if (!_clientState.IsLoggedIn)
+        {
+            _automaticCheckLoginObservedAt = null;
+            return;
+        }
+
+        var now = DateTimeOffset.Now;
+        _automaticCheckLoginObservedAt ??= now;
+        var transitionObserved = _quickCheckState.RunState == TitleBackgroundQuickCheckRunState.LoggedInObserved;
+        var forcePartial = !transitionObserved
+            && TitleBackgroundAutomaticCheckLogic.ShouldForcePartialCompletion(
+                _automaticCheckState,
+                _clientState.IsLoggedIn,
+                _automaticCheckLoginObservedAt,
+                now);
+        if (!transitionObserved && !forcePartial)
+        {
+            _automaticCheckStatus = "ログインを検出しました。診断の完了を待っています。";
+            return;
+        }
+
+        _automaticCheckCompletionDueAt ??= forcePartial ? now : now.AddSeconds(1);
+        if (now < _automaticCheckCompletionDueAt.Value)
+        {
+            _automaticCheckStatus = "ログイン完了を確認中です。";
+            return;
+        }
+
+        CompleteAutomaticQuickCheck(forcePartial);
+    }
+
+    private void CompleteAutomaticQuickCheck(bool partial)
+    {
+        try
+        {
+            var result = EvaluateQuickCheck();
+            SaveQuickCheckResult(result);
+            _quickCheckState = _quickCheckState with { RunState = result.RunState };
+            var quickCheckLines = TitleBackgroundQuickCheckEvaluator.BuildChatLines(result);
+            var diagnosticLines = GetDiagnosticLines(automaticInvocation: true);
+            var report = TitleBackgroundAutomaticCheckReportBuilder.Build(
+                result.CompletedAt,
+                quickCheckLines,
+                diagnosticLines,
+                partial);
+            File.WriteAllText(
+                Path.Combine(_configDirectory, TitleBackgroundAutomaticCheckReportBuilder.FileName),
+                report);
+
+            _lastAutomaticCheckReport = report;
+            _pendingAutomaticCheckClipboardText = report;
+            _automaticCheckReportAvailable = true;
+            _automaticCheckReportAvailabilityInitialized = true;
+            _automaticCheckState = TitleBackgroundAutomaticCheckState.Completed;
+            _automaticCheckStatus = partial
+                ? $"部分完了: {result.Level}。遷移検出が完了しなかったため、取得済みログを自動コピーしました。"
+                : $"完了: {result.Level}。確認ログを自動コピーしました。";
+        }
+        catch (Exception ex)
+        {
+            _automaticCheckState = TitleBackgroundAutomaticCheckState.Failed;
+            _automaticCheckStatus = "自動確認ログの作成に失敗しました。";
+            _log.Warning(ex, "[XMU BG] Automatic QuickCheck failed.");
+        }
+        finally
+        {
+            _automaticCheckRequested = false;
+            _automaticCheckCompletionDueAt = null;
+            _automaticCheckLoginObservedAt = null;
+        }
+    }
+
     public IReadOnlyList<string> StartQuickCheck()
     {
         var currentMap = TryReadCurrentLobbyMap(out var map) ? map.ToString() : "unknown";
@@ -75,6 +274,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
     public IReadOnlyList<string> ResetQuickCheck()
     {
         _quickCheckState = TitleBackgroundQuickCheckState.Idle;
+        _automaticCheckRequested = false;
+        _automaticCheckCompletionDueAt = null;
+        _automaticCheckLoginObservedAt = null;
+        _automaticCheckState = TitleBackgroundAutomaticCheckState.Idle;
+        _automaticCheckStatus = "自動確認は未開始です。";
         _configuration.TitleBackgroundLastQuickCheckResult = TitleBackgroundQuickCheckLevel.NotRun;
         _configuration.TitleBackgroundLastQuickCheckCandidateId = string.Empty;
         _configuration.TitleBackgroundLastQuickCheckReason = string.Empty;

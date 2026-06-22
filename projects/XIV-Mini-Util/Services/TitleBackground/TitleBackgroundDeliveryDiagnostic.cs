@@ -148,6 +148,12 @@ internal readonly record struct TitleBackgroundDeliverySummary(
     string NativePreviewSourceBestSource,
     string NativePreviewSourceBestCandidate,
     string NativePreviewSourceResolution,
+    string NativePreviewSourceCaptureContext,
+    string NativePreviewSourceReadStatus,
+    int NativePreviewSourceObservedFrameCount,
+    string NativePreviewSourceAddressStable,
+    bool NativePreviewSourcePostLoginReadAttempted,
+    string NativePreviewSourceBlocker,
     bool NativePreviewSourceCurrentObjectTableIgnored,
     string NativePreviewSourceCurrentObjectTableIgnoredReason,
     TitleBackgroundForegroundPreserveResult ForegroundPreserve,
@@ -229,6 +235,12 @@ internal static class TitleBackgroundDeliveryDiagnostic
         lines.Add($"phase2N.nativePreviewSource.bestSource={FormatNone(summary.NativePreviewSourceBestSource)}");
         lines.Add($"phase2N.nativePreviewSource.bestCandidate={FormatNone(summary.NativePreviewSourceBestCandidate)}");
         lines.Add($"phase2N.nativePreviewSource.resolution={FormatNone(summary.NativePreviewSourceResolution)}");
+        lines.Add($"phase2N.nativePreviewSource.captureContext={FormatNone(summary.NativePreviewSourceCaptureContext)}");
+        lines.Add($"phase2N.nativePreviewSource.readStatus={FormatNone(summary.NativePreviewSourceReadStatus)}");
+        lines.Add($"phase2N.nativePreviewSource.observedFrameCount={summary.NativePreviewSourceObservedFrameCount}");
+        lines.Add($"phase2N.nativePreviewSource.addressStable={FormatNone(summary.NativePreviewSourceAddressStable)}");
+        lines.Add($"phase2N.nativePreviewSource.postLoginReadAttempted={summary.NativePreviewSourcePostLoginReadAttempted}");
+        lines.Add($"phase2N.nativePreviewSource.blocker={FormatNone(summary.NativePreviewSourceBlocker)}");
         lines.Add($"phase2N.nativePreviewSource.currentObjectTableIgnored={summary.NativePreviewSourceCurrentObjectTableIgnored}");
         lines.Add($"phase2N.nativePreviewSource.currentObjectTableIgnoredReason={FormatNone(summary.NativePreviewSourceCurrentObjectTableIgnoredReason)}");
         lines.Add($"phase2N.foregroundPreserve.available={summary.ForegroundPreserve.Available}");
@@ -387,7 +399,8 @@ internal static class TitleBackgroundDeliveryDiagnostic
         string historicalLastOverridePath = "",
         bool sceneReadyAcceptedMultipleTimes = false,
         bool activeAfterLoginDetected = false,
-        bool phase2GAppliedAfterLogin = false)
+        bool phase2GAppliedAfterLogin = false,
+        TitleBackgroundCharacterSourceSummary nativeCharacterSource = default)
     {
         var normalizedManualSlots = manualCandidateSlots ?? [];
         var availableCandidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates(normalizedManualSlots);
@@ -433,16 +446,20 @@ internal static class TitleBackgroundDeliveryDiagnostic
             nonZeroPositionCandidateCount,
             drawObjectNonNullCount,
             modelLikeNonNullCount);
-        var nativeResolution = currentObjectTableIgnored
-            ? "not-verifiable-post-login"
-            : BuildNativeResolution(phase2MResolution, phase2MTransformValidity, nativeSources);
+        var hasPreLoginNativeCapture = nativeCharacterSource.CaptureContext == "pre-login";
+        var nativeResolution = hasPreLoginNativeCapture
+            ? nativeCharacterSource.Resolution
+            : currentObjectTableIgnored
+                ? "not-verifiable-post-login"
+                : BuildNativeResolution(phase2MResolution, phase2MTransformValidity, nativeSources);
         var objectTableRejected = currentObjectTableIgnored
             || phase2MResolution == "stub-only"
             || (zeroPositionCandidateCount > 0
                 && nonZeroPositionCandidateCount == 0
                 && drawObjectNonNullCount == 0
                 && modelLikeNonNullCount == 0);
-        var actorPlacementReady = nativeResolution == "found-single" && !objectTableRejected;
+        var actorPlacementReady = nativeResolution == "found-single"
+            && (!hasPreLoginNativeCapture || nativeCharacterSource.AddressStable == "true");
         var lighting = BuildLightingDiagnostic(
             lightingMode,
             presetCompatibility.ExpectedBrightness,
@@ -465,9 +482,13 @@ internal static class TitleBackgroundDeliveryDiagnostic
             nonZeroPositionCandidateCount,
             drawObjectNonNullCount,
             modelLikeNonNullCount);
-        var characterBlocker = currentObjectTableIgnored
-            ? "post-login-object-table-not-valid"
-            : objectTableRejected
+        var characterBlocker = actorPlacementReady
+            ? "none"
+            : hasPreLoginNativeCapture && nativeResolution == "not-found"
+                ? "native-preview-source-not-found"
+                : currentObjectTableIgnored
+                    ? "post-login-object-table-not-valid"
+                    : objectTableRejected
             ? "stub-only-object-table"
             : nativeResolution == "not-found"
                 ? "native-preview-source-not-found"
@@ -502,7 +523,9 @@ internal static class TitleBackgroundDeliveryDiagnostic
         var userMessage = backgroundApplication.Observed && !overrideCompatibility.CharacterExpectedVisible
             ? "Background was applied as background-only. Selected character model is expected to remain hidden."
             : "Background application still requires Character Select screenshot confirmation.";
-        var userNextAction = "Take screenshot in Character Select, then run /xmutbgdiag after login.";
+        var userNextAction = nativeResolution == "found-single"
+            ? "Paste the automatically copied report for read-only native source review."
+            : "Run Automatic Check once and paste the copied report.";
         var transitionUserMessage = postLoginLeakVerdict == "not-observed" && sceneReadyAcceptedMultipleTimes
             ? "No post-login scene override leak observed, but sceneReady was accepted multiple times in this session."
             : postLoginLeakVerdict == "not-observed"
@@ -531,6 +554,12 @@ internal static class TitleBackgroundDeliveryDiagnostic
             nativeResolution == "found-single" ? nativeSources.FirstOrDefault(source => source.NonZeroTransformCount > 0).Name ?? "none" : "none",
             nativeResolution == "found-single" ? bestCandidate : "none",
             nativeResolution,
+            hasPreLoginNativeCapture ? nativeCharacterSource.CaptureContext : "not-observed",
+            hasPreLoginNativeCapture ? nativeCharacterSource.ReadStatus : "not-run",
+            hasPreLoginNativeCapture ? nativeCharacterSource.ObservedFrameCount : 0,
+            hasPreLoginNativeCapture ? nativeCharacterSource.AddressStable : "not-observed",
+            nativeCharacterSource.PostLoginReadAttempted,
+            hasPreLoginNativeCapture ? nativeCharacterSource.Blocker : "pre-login-native-source-not-captured",
             currentObjectTableIgnored,
             currentObjectTableIgnoredReason,
             foreground,
@@ -541,7 +570,7 @@ internal static class TitleBackgroundDeliveryDiagnostic
             objectTableRejected,
             currentObjectTableIgnored ? currentObjectTableIgnoredReason : objectTableRejected ? "zero-transform-stub-only" : "none",
             actorPlacementReady,
-            actorPlacementReady ? "none" : currentObjectTableIgnored ? currentObjectTableIgnoredReason : objectTableRejected ? "stub-only-object-table" : $"native-preview-source-{nativeResolution}",
+            actorPlacementReady ? "none" : hasPreLoginNativeCapture ? nativeCharacterSource.Blocker : currentObjectTableIgnored ? currentObjectTableIgnoredReason : objectTableRejected ? "stub-only-object-table" : $"native-preview-source-{nativeResolution}",
             verdict,
             backgroundApplication,
             safety,
@@ -650,11 +679,10 @@ internal static class TitleBackgroundDeliveryDiagnostic
         string characterBlocker)
     {
         var nativeSourceAcceptableForBackgroundOnly = currentObjectTableIgnored
-            || nativeResolution is "not-found" or "not-verifiable-post-login";
+            || nativeResolution is "found-single" or "found-ambiguous" or "found-but-no-transform" or "not-found" or "not-verifiable-post-login";
         if (deliveryVerdict == "working-background-only"
             && backgroundUsable
             && !characterExpectedVisible
-            && !actorPlacementReady
             && nativeSourceAcceptableForBackgroundOnly
             && transitionSafety == "safe")
         {
@@ -673,11 +701,6 @@ internal static class TitleBackgroundDeliveryDiagnostic
         int drawObjectNonNullCount,
         int modelLikeNonNullCount)
     {
-        if (objectTableRejected || nativeResolution == "not-found")
-        {
-            return "not-observed";
-        }
-
         if (nativeResolution == "found-single"
             && nonZeroPositionCandidateCount > 0
             && (drawObjectNonNullCount > 0 || modelLikeNonNullCount > 0))
@@ -685,6 +708,11 @@ internal static class TitleBackgroundDeliveryDiagnostic
             return string.Equals(phase2MActorVisible, "observed", StringComparison.Ordinal)
                 ? "observed"
                 : "not-verifiable";
+        }
+
+        if (objectTableRejected || nativeResolution == "not-found")
+        {
+            return "not-observed";
         }
 
         return "not-verifiable";
@@ -851,15 +879,16 @@ internal static class TitleBackgroundDeliveryDiagnostic
         var probes = new List<TitleBackgroundNativePreviewSourceProbe>();
         foreach (var source in sourceDiscovery)
         {
-            var objectTableLike = source.Name is "ObjectTable" or "PlayerObjects" or "CharacterManagerObjects";
             probes.Add(new TitleBackgroundNativePreviewSourceProbe(
                 source.Name,
                 source.Available,
-                source.Available ? "read" : "not-available",
+                source.ReadStatus == "unknown"
+                    ? source.Available ? "read" : "not-available"
+                    : source.ReadStatus,
                 source.CandidateCount,
-                objectTableLike ? source.NonZeroTransformCount : 0,
-                objectTableLike ? source.DrawObjectNonNullCount : 0,
-                objectTableLike ? source.ModelLikeNonNullCount : 0,
+                source.NonZeroTransformCount,
+                source.DrawObjectNonNullCount,
+                source.ModelLikeNonNullCount,
                 string.IsNullOrWhiteSpace(source.Error) ? "none" : source.Error));
         }
 
@@ -988,7 +1017,8 @@ internal static class TitleBackgroundDeliveryDiagnostic
             return ("needs-one-more-experimental-run", "try-preserve-foreground", "foreground preserve route needs real-game verification");
         }
 
-        if (nativeResolution == "found-single")
+        if (nativeResolution == "found-single"
+            && mode == TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource)
         {
             return ("needs-one-more-experimental-run", "try-native-preview-source", "native preview source candidate is ready but default-off");
         }
@@ -1000,7 +1030,9 @@ internal static class TitleBackgroundDeliveryDiagnostic
 
         if (lastOverrideApplied)
         {
-            return ("working-background-only", "use-background-only", "background delivery works; selected character source is not available");
+            return nativeResolution == "found-single"
+                ? ("working-background-only", "review-native-source", "background delivery works; read-only current character source was captured")
+                : ("working-background-only", "use-background-only", "background delivery works; selected character source is not available");
         }
 
         if (compatibility.ExpectedCompatibility is TitleBackgroundCharacterSelectCompatibility.BackgroundOnly

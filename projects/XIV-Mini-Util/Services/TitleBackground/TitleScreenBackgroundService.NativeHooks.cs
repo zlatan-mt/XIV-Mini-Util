@@ -60,6 +60,17 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     CalculateCameraCurveLowAndHighPointDetour);
             }
 
+            // Opportunistically install the lobby FixOn hook when its address resolves.
+            // This is the only entry point that can set the full camera pose+focus
+            // (the curve hooks only adjust look-at height). It does not gate readiness:
+            // if FixOn does not resolve, background override still works.
+            if (_addressResolver.FixOn != nint.Zero)
+            {
+                _cameraFixOnHook = _gameInteropProvider.HookFromAddress<LobbyCameraFixOnDelegate>(
+                    _addressResolver.FixOn,
+                    LobbyCameraFixOnDetour);
+            }
+
             _createSceneHook.Enable();
             _lobbyUpdateHook.Enable();
             _loadLobbySceneHook.Enable();
@@ -67,7 +78,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _calculateLobbyCameraLookAtYHook?.Enable();
             _setCameraCurveMidPointHook?.Enable();
             _calculateCameraCurveLowAndHighPointHook?.Enable();
-            RecordTransitionEvent("hooks enabled", "InitializeHooks");
+            _cameraFixOnHook?.Enable();
+            RecordTransitionEvent("hooks enabled", $"InitializeHooks; fixOnHook={(_cameraFixOnHook != null)}");
 
             _state = TitleBackgroundServiceState.Disabled;
             _stateReason = "無効";
@@ -288,6 +300,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)
     {
+        _fixOnDetourCallCount++;
         RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.FixOn);
         float[]? cameraOverride = null;
         float[]? focusOverride = null;
@@ -298,7 +311,36 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _lastObservedFixOnCamera = TryReadVector(cameraPos);
             _lastObservedFixOnFocus = TryReadVector(focusPos);
             _lastObservedFixOnFovY = fovY;
-            if (ShouldOverrideCamera())
+            if (TryBuildCharaSelectCharacterCameraAim(out var aim))
+            {
+                _cameraApplyPending = false;
+                cameraOverride =
+                [
+                    aim.Camera.X,
+                    aim.Camera.Y,
+                    aim.Camera.Z,
+                ];
+                focusOverride =
+                [
+                    aim.Focus.X,
+                    aim.Focus.Y,
+                    aim.Focus.Z,
+                ];
+                overrideFovY = aim.FovY;
+                _lastCameraOverrideApplied = true;
+                invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(true);
+                _lastAppliedCamera = aim.Camera;
+                _lastAppliedFocus = aim.Focus;
+                _lastAppliedFovY = aim.FovY;
+                _charaSelectCameraAimAppliedCount++;
+                _lastCharaSelectCameraAimTarget = aim.Focus;
+                _log.Information(
+                    "[XMU BG] CharaSelect character auto-aim applied. camera={Camera}, focus={Focus}, fovY={FovY}",
+                    FormatVector(aim.Camera),
+                    FormatVector(aim.Focus),
+                    aim.FovY);
+            }
+            else if (ShouldOverrideCamera())
             {
                 _cameraApplyPending = false;
                 var plan = TitleBackgroundCameraOverridePlan.FromConfiguration(_configuration);
@@ -713,6 +755,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
         CapturePhase2CTimelineOnFrameworkUpdate();
         CaptureCameraProbeTimelineOnFrameworkUpdate();
+        MaintainCharaSelectCharacterPlacement();
         UpdateSelfTestOnFrameworkUpdate();
+        UpdateAutomaticQuickCheck();
     }
 }

@@ -33,6 +33,15 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundCharaSelectCameraAdapter _charaSelectCameraAdapter = new();
     private readonly TitleBackgroundTransitionDiagnosticRecorder _transitionDiagnostics = new();
     private TitleBackgroundQuickCheckState _quickCheckState = TitleBackgroundQuickCheckState.Idle;
+    private TitleBackgroundAutomaticCheckState _automaticCheckState = TitleBackgroundAutomaticCheckState.Idle;
+    private bool _automaticCheckRequested;
+    private DateTimeOffset? _automaticCheckCompletionDueAt;
+    private DateTimeOffset? _automaticCheckLoginObservedAt;
+    private string _automaticCheckStatus = "自動確認は未開始です。";
+    private string _lastAutomaticCheckReport = string.Empty;
+    private string _pendingAutomaticCheckClipboardText = string.Empty;
+    private bool _automaticCheckReportAvailabilityInitialized;
+    private bool _automaticCheckReportAvailable;
 
     private Hook<CreateSceneDelegate>? _createSceneHook;
     private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
@@ -75,6 +84,15 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private Vector3? _lastAppliedFocus;
     private float? _lastAppliedFovY;
     private string _lastFixOnInvocationMode = "not-run";
+    private int _fixOnDetourCallCount;
+    private int _charaSelectCameraAimAppliedCount;
+    private Vector3? _lastCharaSelectCameraAimTarget;
+    private Vector3? _lastPreLoginCharacterDrawPosition;
+    private float _lastPreLoginCharacterDrawRotation;
+    private int _preLoginCharacterDrawObservedCount;
+    private int _charaSelectCharacterPlacementCount;
+    private string _charaSelectCharacterPlacementLastError = "none";
+    private Vector3? _lastCharaSelectCharacterPlacementTarget;
     private string _lastPostFixOnCameraCaptureStatus = "not-run";
     private string _lastPostFixOnCameraCaptureError = string.Empty;
     private Vector3? _lastPostFixOnSceneCameraPosition;
@@ -131,6 +149,10 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly Dictionary<int, TitleBackgroundCharacterPlacementFrame> _phase2MPlacementFrames = [];
     private int _phase2MPlacementCaptureSceneGeneration;
     private string _phase2MPlacementCaptureReason = "not-run";
+    private int _phase2MPlacementSkippedPostLoginCount;
+    private int _phase2MPlacementSkippedInactiveCount;
+    private int _phase2MPlacementSkippedSceneGenerationCount;
+    private string _phase2MPlacementLastSkipReason = "none";
     private string _phase2MExperimentalLastStatus = "not-run";
     private int _phase2MExperimentalWriteCount;
     private int _phase2MExperimentalSkippedCount;
@@ -245,6 +267,13 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     internal TitleBackgroundSimpleUiSummary RunSimpleAutoSetup()
     {
+        ApplySimpleAutoSetup();
+        StartQuickCheck();
+        return TitleBackgroundQuickCheckUiPresenter.BuildSimpleSummary(_configuration);
+    }
+
+    private void ApplySimpleAutoSetup()
+    {
         if (_configuration.CharaSelectSceneCompositionEnabled)
         {
             _charaSelectService?.DisableSceneCompositionForTitleBackgroundRoute();
@@ -254,11 +283,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _configuration.Save();
         RecordTransitionEvent("simple auto setup applied", "n4f4 recommended");
         ReloadNativeIntegration();
-        _charaSelectService?.ResetTitleBackgroundCharacterCompositionBridgeSnapshot();
-        TryInvokeIntegratedCompositionRoute();
-        _charaSelectService?.ApplyTitleBackgroundCharacterCompositionBridgeRuntimeState();
-        StartQuickCheck();
-        return TitleBackgroundQuickCheckUiPresenter.BuildSimpleSummary(_configuration);
     }
 
     internal TitleBackgroundSimpleUiSummary RunSimpleCheck()
@@ -949,6 +973,55 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             currentMap);
     }
 
+    // Auto-aim the lobby camera at the actual selected character (read from the
+    // live DrawObject) when the integrated composition bridge is active. Runs only
+    // inside the game's FixOn hook (sanctioned) — never as Framework.Update writeback.
+    // Gate for the n4f4 + character compositing path: bridge active, pre-login,
+    // on the CharaSelect lobby, service ready.
+    private bool IsCharaSelectCharacterCompositionActive()
+    {
+        if (_clientState.IsLoggedIn
+            || !_configuration.TitleBackgroundCameraOverrideEnabled
+            || _state != TitleBackgroundServiceState.Ready)
+        {
+            return false;
+        }
+
+        var bridgeActive = _configuration.TitleBackgroundOverrideEnabled
+            && _configuration.TitleBackgroundIntegratedCompositionEnabled
+            && !_configuration.CharaSelectSceneCompositionEnabled
+            && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly;
+        if (!bridgeActive)
+        {
+            return false;
+        }
+
+        return TryReadCurrentLobbyMap(out var currentMap) && currentMap == GameLobbyType.CharaSelect;
+    }
+
+    private bool TryBuildCharaSelectCharacterCameraAim(out TitleBackgroundCharaSelectCameraAimResult aim)
+    {
+        aim = default;
+        if (!IsCharaSelectCharacterCompositionActive())
+        {
+            return false;
+        }
+
+        if (!TitleBackgroundCharacterSourceProbe.TryReadCurrentCharacterAim(out var position, out var rotation))
+        {
+            return false;
+        }
+
+        aim = TitleBackgroundCharaSelectCameraAim.Compute(
+            position,
+            rotation,
+            TitleBackgroundCharaSelectCameraAim.DefaultDistance,
+            TitleBackgroundCharaSelectCameraAim.DefaultFocusHeight,
+            TitleBackgroundCharaSelectCameraAim.DefaultCameraHeight,
+            _configuration.TitleBackgroundFovY);
+        return aim.HasAim;
+    }
+
     private bool TryReadCurrentLobbyMap(out GameLobbyType map)
     {
         map = GameLobbyType.None;
@@ -1591,6 +1664,22 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2M.preLoginCapture.lastFrame={(frames.Length > 0 ? frames[^1].ToString() : "none")}");
         lines.Add($"phase2M.preLoginCapture.frameCount={frames.Length}");
         lines.Add($"phase2M.preLoginCapture.reason={FormatNone(_phase2MPlacementCaptureReason)}");
+        lines.Add($"phase2M.preLoginCapture.skippedPostLoginCount={_phase2MPlacementSkippedPostLoginCount}");
+        lines.Add($"phase2M.preLoginCapture.skippedInactiveCount={_phase2MPlacementSkippedInactiveCount}");
+        lines.Add($"phase2M.preLoginCapture.skippedSceneGenerationCount={_phase2MPlacementSkippedSceneGenerationCount}");
+        lines.Add($"phase2M.preLoginCapture.lastSkipReason={FormatNone(_phase2MPlacementLastSkipReason)}");
+        lines.Add($"cameraAim.fixOnHookInstalled={_cameraFixOnHook != null}");
+        lines.Add($"cameraAim.fixOnHookEnabled={IsHookEnabled(_cameraFixOnHook)}");
+        lines.Add($"cameraAim.fixOnCallCount={_fixOnDetourCallCount}");
+        lines.Add($"cameraAim.charaSelectAimAppliedCount={_charaSelectCameraAimAppliedCount}");
+        lines.Add($"cameraAim.charaSelectAimLastTarget={(_lastCharaSelectCameraAimTarget.HasValue ? FormatVector(_lastCharaSelectCameraAimTarget.Value) : "none")}");
+        lines.Add($"characterDraw.preLoginObservedCount={_preLoginCharacterDrawObservedCount}");
+        lines.Add($"characterDraw.preLoginDrawPosition={(_lastPreLoginCharacterDrawPosition.HasValue ? FormatVector(_lastPreLoginCharacterDrawPosition.Value) : "none")}");
+        lines.Add($"characterDraw.preLoginDrawPositionNonZero={(_lastPreLoginCharacterDrawPosition.HasValue && !TitleBackgroundCharacterSourceEvaluation.IsZeroPosition(_lastPreLoginCharacterDrawPosition.Value))}");
+        lines.Add($"characterDraw.preLoginDrawRotation={FormatFloat(_lastPreLoginCharacterDrawRotation)}");
+        lines.Add($"characterPlace.appliedFrameCount={_charaSelectCharacterPlacementCount}");
+        lines.Add($"characterPlace.lastTarget={(_lastCharaSelectCharacterPlacementTarget.HasValue ? FormatVector(_lastCharaSelectCharacterPlacementTarget.Value) : "none")}");
+        lines.Add($"characterPlace.lastError={FormatNone(_charaSelectCharacterPlacementLastError)}");
     }
 
     private IReadOnlyList<TitleBackgroundCharacterSelectManualCandidateSlot> BuildPhase2PManualCandidateSlots()
@@ -1635,6 +1724,15 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2M.actorCandidate.resolution={summary.Resolution}");
         lines.Add($"phase2M.sourceDiscovery.bestSource={summary.BestSource}");
         lines.Add($"phase2M.sourceDiscovery.nextNativeSourceToInspect={summary.NextNativeSourceToInspect}");
+        lines.Add($"phase2M.nativeCharacterSource.captureContext={summary.NativeCharacterSource.CaptureContext}");
+        lines.Add("phase2M.nativeCharacterSource.api=FFXIVClientStructs.CharaSelectCharacterList.GetCurrentCharacter");
+        lines.Add($"phase2M.nativeCharacterSource.readStatus={summary.NativeCharacterSource.ReadStatus}");
+        lines.Add($"phase2M.nativeCharacterSource.observedFrameCount={summary.NativeCharacterSource.ObservedFrameCount}");
+        lines.Add($"phase2M.nativeCharacterSource.addressStable={summary.NativeCharacterSource.AddressStable}");
+        lines.Add($"phase2M.nativeCharacterSource.postLoginReadAttempted={summary.NativeCharacterSource.PostLoginReadAttempted}");
+        lines.Add($"phase2M.nativeCharacterSource.bestSource={summary.NativeCharacterSource.BestSource}");
+        lines.Add($"phase2M.nativeCharacterSource.resolution={summary.NativeCharacterSource.Resolution}");
+        lines.Add($"phase2M.nativeCharacterSource.blocker={summary.NativeCharacterSource.Blocker}");
         lines.Add($"phase2M.nextAction={summary.NextAction}");
         lines.Add($"phase2M.nextAction.reason={summary.NextActionReason}");
         DiagnosticReportBuilder.AddPrefixAliasLines(lines, aliasStartIndex, "phase2M.", "characterPlacement.");
@@ -1746,6 +1844,23 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"{prefix}.groundHeight.source={frame.GroundHeightStatus}");
         lines.Add($"{prefix}.groundHeight.y={FormatFloat(frame.GroundY)}");
 
+        if (frame.NativeCharacterSource is { } nativeSource)
+        {
+            lines.Add($"{prefix}.nativeCharacterSource.captureContext={FormatNone(nativeSource.CaptureContext)}");
+            lines.Add($"{prefix}.nativeCharacterSource.readStatus={FormatNone(nativeSource.ReadStatus)}");
+            lines.Add($"{prefix}.nativeCharacterSource.characterAddress={FormatAddress(nativeSource.CharacterAddress)}");
+            lines.Add($"{prefix}.nativeCharacterSource.listAddress={FormatAddress(nativeSource.ListAddress)}");
+            lines.Add($"{prefix}.nativeCharacterSource.contentIdPresent={nativeSource.ContentId != 0}");
+            lines.Add($"{prefix}.nativeCharacterSource.clientObjectIndex={nativeSource.ClientObjectIndex}");
+            lines.Add($"{prefix}.nativeCharacterSource.objectIndex={nativeSource.ObjectIndex}");
+            lines.Add($"{prefix}.nativeCharacterSource.entityId={FormatEntityId(nativeSource.EntityId)}");
+            lines.Add($"{prefix}.nativeCharacterSource.position={FormatVector(nativeSource.Position)}");
+            lines.Add($"{prefix}.nativeCharacterSource.rotation={FormatFloat(nativeSource.Rotation)}");
+            lines.Add($"{prefix}.nativeCharacterSource.scale={FormatFloat(nativeSource.Scale)}");
+            lines.Add($"{prefix}.nativeCharacterSource.drawObjectAddress={FormatAddress(nativeSource.DrawObjectAddress)}");
+            lines.Add($"{prefix}.nativeCharacterSource.error={FormatNone(nativeSource.Error)}");
+        }
+
         for (var i = 0; i < frame.ObjectCandidates.Count; i++)
         {
             AddCharacterPlacementObjectCandidateLines(lines, $"{prefix}.objectCandidate[{i}]", frame.ObjectCandidates[i]);
@@ -1758,6 +1873,9 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             lines.Add($"{prefix}.sourceDiscovery.source[{i}].available={source.Available}");
             lines.Add($"{prefix}.sourceDiscovery.source[{i}].count={source.Count}");
             lines.Add($"{prefix}.sourceDiscovery.source[{i}].candidateCount={source.CandidateCount}");
+            lines.Add($"{prefix}.sourceDiscovery.source[{i}].readStatus={source.ReadStatus}");
+            lines.Add($"{prefix}.sourceDiscovery.source[{i}].captureContext={source.CaptureContext}");
+            lines.Add($"{prefix}.sourceDiscovery.source[{i}].rootAddress={FormatAddress(source.RootAddress)}");
             lines.Add($"{prefix}.sourceDiscovery.source[{i}].error={FormatNone(source.Error)}");
         }
     }
