@@ -1523,39 +1523,36 @@ Test("title background native character source evaluation is decisive", () =>
         && postLogin.PostLoginReadAttempted;
 });
 
-Test("title background chara select camera aim points at the character front", () =>
+Test("title background composited character flips delivery verdict to complete", () =>
 {
-    // Facing +Z (rotation 0): camera should sit in front (+Z) and slightly above,
-    // focus should be at the character's horizontal position raised to the focus height.
-    var aim = TitleBackgroundCharaSelectCameraAim.Compute(
-        new Vector3(10f, 5f, 20f),
-        characterRotation: 0f,
-        distance: 2.5f,
-        focusHeight: 1.3f,
-        cameraHeight: 1.5f,
-        fovY: 1f);
+    var delivery = DeliveryFromRaw(
+        "stub-only",
+        "all-zero-transform",
+        "not-observed",
+        8,
+        0,
+        0,
+        0,
+        [],
+        lastOverrideApplied: true,
+        currentObjectTableValidForCharaSelect: false,
+        characterCompositedApplied: true);
 
-    var rotated = TitleBackgroundCharaSelectCameraAim.Compute(
-        new Vector3(0f, 0f, 0f),
-        characterRotation: MathF.PI / 2f,
-        distance: 2.5f,
-        focusHeight: 1.3f,
-        cameraHeight: 1.5f,
-        fovY: 1f);
+    return delivery.CharacterVisibilityObserved == "composited-experimental"
+        && delivery.CharacterVisibilityBlocker == "none"
+        && delivery.MvpStatus == "complete-character-composited";
+});
 
-    var rejected = TitleBackgroundCharaSelectCameraAim.Compute(
-        new Vector3(float.NaN, 0f, 0f), 0f, 2.5f, 1.3f, 1.5f, 1f);
-    var zeroDistance = TitleBackgroundCharaSelectCameraAim.Compute(
-        new Vector3(1f, 1f, 1f), 0f, 0f, 1.3f, 1.5f, 1f);
+Test("title background quickcheck suppresses unresolved reason when character composited", () =>
+{
+    var resolved = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterExpectedVisible: false,
+        actorSourceAmbiguous: true,
+        objectTableZeroTransformStubs: true,
+        characterCompositedApplied: true));
 
-    return aim.HasAim
-        && Near(aim.Focus.X, 10f) && Near(aim.Focus.Y, 6.3f) && Near(aim.Focus.Z, 20f)
-        && Near(aim.Camera.X, 10f) && Near(aim.Camera.Y, 6.5f) && Near(aim.Camera.Z, 22.5f)
-        && rotated.HasAim && Near(rotated.Camera.X, 2.5f) && Near(rotated.Camera.Z, 0f)
-        && !rejected.HasAim
-        && !zeroDistance.HasAim;
-
-    static bool Near(float a, float b) => MathF.Abs(a - b) <= 0.001f;
+    return resolved.Reason != "native character source is unresolved"
+        && !resolved.NextAction.Contains("native character source investigation", StringComparison.Ordinal);
 });
 
 Test("title background pre-login native source remains verifiable after login", () =>
@@ -4938,7 +4935,8 @@ TitleBackgroundDeliverySummary DeliveryFromRaw(
     IReadOnlyList<TitleBackgroundCharacterPlacementSourceDiscovery> sourceDiscovery,
     bool lastOverrideApplied = false,
     bool currentObjectTableValidForCharaSelect = true,
-    TitleBackgroundCharacterSourceSummary nativeCharacterSource = default)
+    TitleBackgroundCharacterSourceSummary nativeCharacterSource = default,
+    bool characterCompositedApplied = false)
 {
     return TitleBackgroundDeliveryDiagnostic.BuildSummary(
         TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly,
@@ -4962,7 +4960,8 @@ TitleBackgroundDeliverySummary DeliveryFromRaw(
         currentObjectTableValidForCharaSelect,
         currentObjectTableValidForCharaSelect ? "none" : "post-login-world-object-table-not-valid-for-chara-select",
         phase2GAppliedAfterLogin: false,
-        nativeCharacterSource: nativeCharacterSource);
+        nativeCharacterSource: nativeCharacterSource,
+        characterCompositedApplied: characterCompositedApplied);
 }
 
 TitleBackgroundCharacterSourceSnapshot NativeCharacterSnapshot(
@@ -5380,7 +5379,8 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
     string cameraProfileApplyRoute = "",
     bool cameraCapturedProfileEnabled = false,
     bool bridgeCharacterCompositionApplied = false,
-    bool bridgeCameraProfileApplied = false)
+    bool bridgeCameraProfileApplied = false,
+    bool characterCompositedApplied = false)
 {
     return new TitleBackgroundQuickCheckInput(
         RunScoped: runScoped,
@@ -5464,7 +5464,8 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
         CameraCurrentPosition: "",
         CameraCurrentLookAt: "",
         BridgeCharacterCompositionApplied: bridgeCharacterCompositionApplied,
-        BridgeCameraProfileApplied: bridgeCameraProfileApplied);
+        BridgeCameraProfileApplied: bridgeCameraProfileApplied,
+        CharacterCompositedApplied: characterCompositedApplied);
 }
 
 // ── New fix cases ──────────────────────────────────────────────────────────

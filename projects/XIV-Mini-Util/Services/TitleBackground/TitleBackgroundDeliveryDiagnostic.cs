@@ -400,7 +400,8 @@ internal static class TitleBackgroundDeliveryDiagnostic
         bool sceneReadyAcceptedMultipleTimes = false,
         bool activeAfterLoginDetected = false,
         bool phase2GAppliedAfterLogin = false,
-        TitleBackgroundCharacterSourceSummary nativeCharacterSource = default)
+        TitleBackgroundCharacterSourceSummary nativeCharacterSource = default,
+        bool characterCompositedApplied = false)
     {
         var normalizedManualSlots = manualCandidateSlots ?? [];
         var availableCandidates = TitleBackgroundCharacterSelectOverrideCandidateRegistry.BuildAvailableCandidates(normalizedManualSlots);
@@ -475,14 +476,18 @@ internal static class TitleBackgroundDeliveryDiagnostic
             TitleBackgroundCharacterSelectBackgroundMode.NativePreviewModelSource => actorPlacementReady ? "visible-experimental" : "unsupported",
             _ => "unknown",
         };
-        var characterObserved = BuildCharacterVisibilityObserved(
-            phase2MActorVisible,
-            nativeResolution,
-            objectTableRejected,
-            nonZeroPositionCandidateCount,
-            drawObjectNonNullCount,
-            modelLikeNonNullCount);
-        var characterBlocker = actorPlacementReady
+        var characterObserved = characterCompositedApplied
+            ? "composited-experimental"
+            : BuildCharacterVisibilityObserved(
+                phase2MActorVisible,
+                nativeResolution,
+                objectTableRejected,
+                nonZeroPositionCandidateCount,
+                drawObjectNonNullCount,
+                modelLikeNonNullCount);
+        var characterBlocker = characterCompositedApplied
+            ? "none"
+            : actorPlacementReady
             ? "none"
             : hasPreLoginNativeCapture && nativeResolution == "not-found"
                 ? "native-preview-source-not-found"
@@ -520,7 +525,9 @@ internal static class TitleBackgroundDeliveryDiagnostic
         var transitionSafetyVerdict = BuildTransitionSafetyVerdict(safety, sceneReadyAcceptedMultipleTimes);
         var postLoginLeakVerdict = BuildPostLoginLeakVerdict(activeAfterLoginDetected, phase2GAppliedAfterLogin);
         var candidateHumanStatus = BuildCandidateHumanStatus(overrideCandidate);
-        var userMessage = backgroundApplication.Observed && !overrideCompatibility.CharacterExpectedVisible
+        var userMessage = characterCompositedApplied
+            ? "Background and selected character are both composited on Character Select (experimental)."
+            : backgroundApplication.Observed && !overrideCompatibility.CharacterExpectedVisible
             ? "Background was applied as background-only. Selected character model is expected to remain hidden."
             : "Background application still requires Character Select screenshot confirmation.";
         var userNextAction = nativeResolution == "found-single"
@@ -531,16 +538,18 @@ internal static class TitleBackgroundDeliveryDiagnostic
             : postLoginLeakVerdict == "not-observed"
                 ? "No post-login scene override leak observed."
                 : "Post-login scene override leak was observed; do not promote this candidate.";
-        var (mvpStatus, mvpBlockingIssue, mvpKnownLimitation) = BuildMvpSummary(
-            verdict,
-            transitionSafety,
-            overrideCompatibility.BackgroundUsable,
-            overrideCompatibility.CharacterExpectedVisible,
-            actorPlacementReady,
-            currentObjectTableIgnored,
-            nativeResolution,
-            nextAction,
-            characterBlocker);
+        var (mvpStatus, mvpBlockingIssue, mvpKnownLimitation) = characterCompositedApplied
+            ? ("complete-character-composited", "none", "experimental-per-frame-character-placement")
+            : BuildMvpSummary(
+                verdict,
+                transitionSafety,
+                overrideCompatibility.BackgroundUsable,
+                overrideCompatibility.CharacterExpectedVisible,
+                actorPlacementReady,
+                currentObjectTableIgnored,
+                nativeResolution,
+                nextAction,
+                characterBlocker);
 
         return new TitleBackgroundDeliverySummary(
             "character-select-background",

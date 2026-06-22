@@ -471,6 +471,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             FormatVector(currentPosition),
             FormatVector(currentLookAt),
             bridgeSnapshot.AppliedStage && bridgeSnapshot.AppliedCharacter,
-            cameraProfile.HasProfile && runtimeHasProfilePose);
+            cameraProfile.HasProfile && runtimeHasProfilePose,
+            _charaSelectCharacterPlacementCount > 0);
     }
 }
