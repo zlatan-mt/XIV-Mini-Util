@@ -117,16 +117,23 @@ public sealed partial class SettingsTab
         ImGui.TextWrapped(summary.ResultLine);
         ImGui.TextDisabled(summary.NextActionLine);
 
-        if (ImGui.Button("Auto Setup##TitleBackgroundSimpleAutoSetup"))
+        var automaticStatus = _titleScreenBackgroundService.GetAutomaticQuickCheckStatus();
+        if (ImGui.Button("自動確認を開始##TitleBackgroundSimpleAutomaticCheck"))
         {
-            _titleScreenBackgroundService.RunSimpleAutoSetup();
+            _titleScreenBackgroundService.StartAutomaticQuickCheck();
         }
 
-        ImGui.SameLine();
-        if (ImGui.Button("Check##TitleBackgroundSimpleCheck"))
+        if (automaticStatus.CanCopyLastReport)
         {
-            _titleScreenBackgroundService.RunSimpleCheck();
+            ImGui.SameLine();
+            if (ImGui.Button("前回ログを再コピー##TitleBackgroundSimpleCopyLastCheck"))
+            {
+                _titleScreenBackgroundService.QueueLastAutomaticCheckReportForClipboard();
+            }
         }
+
+        ImGui.TextWrapped(automaticStatus.StatusLine);
+        ImGui.TextDisabled(automaticStatus.NextActionLine);
     }
 
     private void DrawTitleBackgroundAdvancedDrawer()
@@ -209,6 +216,21 @@ public sealed partial class SettingsTab
         {
             _titleScreenBackgroundService.ResetQuickCheck();
         }
+
+        if (ImGui.Button("Start Automatic Check"))
+        {
+            _titleScreenBackgroundService.StartAutomaticQuickCheck();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Copy Last Automatic Report"))
+        {
+            _titleScreenBackgroundService.QueueLastAutomaticCheckReportForClipboard();
+        }
+
+        var automaticStatus = _titleScreenBackgroundService.GetAutomaticQuickCheckStatus();
+        ImGui.TextWrapped($"Automatic Check: {automaticStatus.StatusLine}");
+        ImGui.TextDisabled(automaticStatus.NextActionLine);
 
         var summary = TitleBackgroundQuickCheckUiPresenter.BuildSummary(_configuration);
         ImGui.Text(summary.LastResultLine);

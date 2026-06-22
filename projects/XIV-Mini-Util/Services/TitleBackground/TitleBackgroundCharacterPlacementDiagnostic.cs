@@ -63,7 +63,10 @@ internal readonly record struct TitleBackgroundCharacterPlacementSourceDiscovery
     string Error,
     int NonZeroTransformCount = 0,
     int DrawObjectNonNullCount = 0,
-    int ModelLikeNonNullCount = 0);
+    int ModelLikeNonNullCount = 0,
+    string ReadStatus = "unknown",
+    string CaptureContext = "unknown",
+    nint RootAddress = default);
 
 internal readonly record struct TitleBackgroundCharacterPlacementObjectTableStats(
     int TotalScanned,
@@ -112,7 +115,8 @@ internal readonly record struct TitleBackgroundCharacterPlacementFrame(
     float CurveHigh,
     float? ActorYMinusPresetCharacterY,
     float? ActorYMinusFocusY,
-    float? ActorYMinusNativeLookAtY);
+    float? ActorYMinusNativeLookAtY,
+    TitleBackgroundCharacterSourceSnapshot? NativeCharacterSource = null);
 
 internal readonly record struct TitleBackgroundCharacterPlacementSummary(
     string ActorDiagnosticStatus,
@@ -145,7 +149,8 @@ internal readonly record struct TitleBackgroundCharacterPlacementSummary(
     string BestSource,
     string NextNativeSourceToInspect,
     string NextAction,
-    string NextActionReason);
+    string NextActionReason,
+    TitleBackgroundCharacterSourceSummary NativeCharacterSource);
 
 public enum TitleBackgroundCharacterPlacementExperimentalApplyMode
 {
@@ -169,6 +174,9 @@ internal static class TitleBackgroundCharacterPlacementDiagnostic
     public static TitleBackgroundCharacterPlacementSummary BuildSummary(
         IReadOnlyCollection<TitleBackgroundCharacterPlacementFrame> frames)
     {
+        var nativeSourceSummary = TitleBackgroundCharacterSourceEvaluation.Evaluate(
+            frames.Where(frame => frame.NativeCharacterSource.HasValue)
+                .Select(frame => frame.NativeCharacterSource!.Value));
         if (frames.Count == 0)
         {
             return new TitleBackgroundCharacterPlacementSummary(
@@ -202,7 +210,8 @@ internal static class TitleBackgroundCharacterPlacementDiagnostic
                 "none",
                 "CharacterManager",
                 "insufficient-data",
-                "CharacterPlacement pre-login capture is unavailable");
+                "CharacterPlacement pre-login capture is unavailable",
+                nativeSourceSummary);
         }
 
         var ordered = frames.OrderBy(frame => frame.Frame).ToArray();
@@ -291,7 +300,8 @@ internal static class TitleBackgroundCharacterPlacementDiagnostic
             bestSource,
             nextNativeSource,
             nextAction,
-            nextActionReason);
+            nextActionReason,
+            nativeSourceSummary);
     }
 
     public static string EvaluateExperimentalApply(

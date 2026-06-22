@@ -1352,8 +1352,8 @@ Test("title background quickcheck ui simple mode is bounded", () =>
     var items = TitleBackgroundQuickCheckUiPresenter.GetSimpleModeItems(configuration);
     return items.Contains("Character Select Background")
         && items.Contains("Status")
-        && items.Contains("Auto Setup")
-        && items.Contains("Check")
+        && items.Contains("Automatic Check")
+        && items.Contains("Copy Last Report")
         && !items.Contains("Start QuickCheck")
         && !items.Contains("Run Check")
         && !items.Contains("Capture legacy visible camera")
@@ -1371,8 +1371,8 @@ Test("title background settings simple panel hides advanced diagnostics", () =>
     var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
 
     return simplePanel.Contains("Character Select Background", StringComparison.Ordinal)
-        && simplePanel.Contains("Auto Setup", StringComparison.Ordinal)
-        && simplePanel.Contains("Check", StringComparison.Ordinal)
+        && simplePanel.Contains("StartAutomaticQuickCheck", StringComparison.Ordinal)
+        && simplePanel.Contains("QueueLastAutomaticCheckReportForClipboard", StringComparison.Ordinal)
         && !simplePanel.Contains("Capture legacy visible camera", StringComparison.Ordinal)
         && !simplePanel.Contains("Save as n4f4 visible profile", StringComparison.Ordinal)
         && !simplePanel.Contains("Clear captured profile", StringComparison.Ordinal)
@@ -1383,18 +1383,280 @@ Test("title background settings simple panel hides advanced diagnostics", () =>
         && !simplePanel.Contains("Reset Check", StringComparison.Ordinal);
 });
 
-Test("title background settings simple check uses one-button quickcheck entrypoint", () =>
+Test("title background settings simple check uses automatic quickcheck entrypoint", () =>
 {
     var root = FindRepositoryRoot();
     var settingsText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
-    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var serviceText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"), "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
     var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
-    var simpleCheck = ExtractMethodBody(serviceText, "internal TitleBackgroundSimpleUiSummary RunSimpleCheck()");
+    var automaticCheck = ExtractMethodBody(serviceText, "internal IReadOnlyList<string> StartAutomaticQuickCheck()");
 
-    return simplePanel.Contains("RunSimpleCheck()", StringComparison.Ordinal)
+    return simplePanel.Contains("StartAutomaticQuickCheck()", StringComparison.Ordinal)
         && !simplePanel.Contains("RunQuickCheck()", StringComparison.Ordinal)
-        && simpleCheck.Contains("StartQuickCheck()", StringComparison.Ordinal)
-        && simpleCheck.Contains("RunQuickCheck()", StringComparison.Ordinal);
+        && automaticCheck.Contains("WaitingForCharacterSelect", StringComparison.Ordinal)
+        && automaticCheck.Contains("ArmAutomaticQuickCheck()", StringComparison.Ordinal);
+});
+
+Test("title background automatic check report is ready to paste", () =>
+{
+    var report = TitleBackgroundAutomaticCheckReportBuilder.Build(
+        new DateTimeOffset(2026, 6, 22, 21, 30, 0, TimeSpan.FromHours(9)),
+        ["[XMU QuickCheck] WARN", "Background: applied"],
+        ["sceneReadySignal.acceptedCount=1", "transition.verdict.loginTransitionSafety=safe"]);
+
+    return report.Contains("Title Background automatic check", StringComparison.Ordinal)
+        && report.Contains("completion=complete", StringComparison.Ordinal)
+        && report.Contains("--- QuickCheck ---", StringComparison.Ordinal)
+        && report.Contains("[XIV Mini Util] Background: applied", StringComparison.Ordinal)
+        && report.Contains("--- Diagnostic ---", StringComparison.Ordinal)
+        && report.Contains("[XIV Mini Util] transition.verdict.loginTransitionSafety=safe", StringComparison.Ordinal);
+});
+
+Test("title background automatic check times out only after login", () =>
+{
+    var now = new DateTimeOffset(2026, 6, 22, 21, 30, 10, TimeSpan.FromHours(9));
+    var loginObservedAt = now - TitleBackgroundAutomaticCheckLogic.LoginTransitionTimeout;
+
+    return !TitleBackgroundAutomaticCheckLogic.ShouldForcePartialCompletion(
+            TitleBackgroundAutomaticCheckState.Collecting,
+            isLoggedIn: false,
+            loginObservedAt,
+            now)
+        && !TitleBackgroundAutomaticCheckLogic.ShouldForcePartialCompletion(
+            TitleBackgroundAutomaticCheckState.Collecting,
+            isLoggedIn: true,
+            loginObservedAt.AddMilliseconds(1),
+            now)
+        && TitleBackgroundAutomaticCheckLogic.ShouldForcePartialCompletion(
+            TitleBackgroundAutomaticCheckState.Collecting,
+            isLoggedIn: true,
+            loginObservedAt,
+            now);
+});
+
+Test("title background automatic partial report is explicit", () =>
+{
+    var report = TitleBackgroundAutomaticCheckReportBuilder.Build(
+        DateTimeOffset.Now,
+        ["[XMU QuickCheck] WARN"],
+        ["transition.verdict.loginTransitionSafety=unknown"],
+        partial: true);
+
+    return report.Contains("completion=partial", StringComparison.Ordinal)
+        && report.Contains("transition.verdict.loginTransitionSafety=unknown", StringComparison.Ordinal);
+});
+
+Test("title background quickcheck prioritizes unresolved native character source", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterExpectedVisible: false,
+        actorSourceAmbiguous: true,
+        objectTableZeroTransformStubs: true,
+        cameraFramingMode: TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended,
+        cameraProfileSource: "candidate",
+        cameraFramesCharacter: "False",
+        cameraVisibleProfileResolved: false,
+        cameraVisibleProfileApplied: false));
+
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.Reason == "native character source is unresolved"
+        && result.NextAction.Contains("automatically copied report", StringComparison.Ordinal)
+        && !result.NextAction.Contains("legacy", StringComparison.OrdinalIgnoreCase);
+});
+
+Test("title background automatic check completes and queues clipboard on framework update", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"), "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
+    var pluginText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Plugin.cs"));
+    var update = ExtractMethodBody(serviceText, "private void UpdateAutomaticQuickCheck()");
+    var complete = ExtractMethodBody(serviceText, "private void CompleteAutomaticQuickCheck(bool partial)");
+
+    return update.Contains("LoggedInObserved", StringComparison.Ordinal)
+        && update.Contains("CompleteAutomaticQuickCheck(forcePartial)", StringComparison.Ordinal)
+        && complete.Contains("GetDiagnosticLines(automaticInvocation: true)", StringComparison.Ordinal)
+        && complete.Contains("_pendingAutomaticCheckClipboardText = report", StringComparison.Ordinal)
+        && pluginText.Contains("ImGui.SetClipboardText(text)", StringComparison.Ordinal)
+        && pluginText.Contains("CopyPendingTitleBackgroundAutomaticCheckReport", StringComparison.Ordinal);
+});
+
+Test("title background native character capture gate is pre-login only", () =>
+{
+    var allowed = TitleBackgroundCharacterSourceCaptureGate.Evaluate(
+        isLoggedIn: false,
+        isCharaSelectActive: true,
+        activeSceneGeneration: 2,
+        runtimeSceneGeneration: 2);
+    var postLogin = TitleBackgroundCharacterSourceCaptureGate.Evaluate(true, true, 2, 2);
+    var inactive = TitleBackgroundCharacterSourceCaptureGate.Evaluate(false, false, 2, 2);
+    var stale = TitleBackgroundCharacterSourceCaptureGate.Evaluate(false, true, 1, 2);
+
+    return allowed.Allowed && allowed.Status == "pre-login"
+        && !postLogin.Allowed && postLogin.Status == "skipped-post-login"
+        && !inactive.Allowed && inactive.Status == "skipped-inactive-chara-select"
+        && !stale.Allowed && stale.Status == "skipped-scene-generation-mismatch";
+});
+
+Test("title background native character source evaluation is decisive", () =>
+{
+    var zero = TitleBackgroundCharacterSourceEvaluation.Evaluate(
+        [NativeCharacterSnapshot(0, new nint(0x1000), Vector3.Zero)]);
+    var stable = TitleBackgroundCharacterSourceEvaluation.Evaluate(
+        [
+            NativeCharacterSnapshot(0, new nint(0x2000), new Vector3(1f, 2f, 3f)),
+            NativeCharacterSnapshot(1, new nint(0x2000), new Vector3(1f, 2f, 3f)),
+        ]);
+    var ambiguous = TitleBackgroundCharacterSourceEvaluation.Evaluate(
+        [
+            NativeCharacterSnapshot(0, new nint(0x3000), new Vector3(1f, 2f, 3f)),
+            NativeCharacterSnapshot(1, new nint(0x4000), new Vector3(1f, 2f, 3f)),
+        ]);
+    var postLogin = TitleBackgroundCharacterSourceEvaluation.Evaluate(
+        [NativeCharacterSnapshot(0, new nint(0x5000), new Vector3(1f, 2f, 3f), captureContext: "post-login")]);
+
+    return zero.Resolution == "found-but-no-transform"
+        && stable.Resolution == "found-single"
+        && stable.AddressStable == "true"
+        && stable.ObservedFrameCount == 2
+        && ambiguous.Resolution == "found-ambiguous"
+        && ambiguous.AddressStable == "false"
+        && postLogin.PostLoginReadAttempted;
+});
+
+Test("title background chara select camera aim points at the character front", () =>
+{
+    // Facing +Z (rotation 0): camera should sit in front (+Z) and slightly above,
+    // focus should be at the character's horizontal position raised to the focus height.
+    var aim = TitleBackgroundCharaSelectCameraAim.Compute(
+        new Vector3(10f, 5f, 20f),
+        characterRotation: 0f,
+        distance: 2.5f,
+        focusHeight: 1.3f,
+        cameraHeight: 1.5f,
+        fovY: 1f);
+
+    var rotated = TitleBackgroundCharaSelectCameraAim.Compute(
+        new Vector3(0f, 0f, 0f),
+        characterRotation: MathF.PI / 2f,
+        distance: 2.5f,
+        focusHeight: 1.3f,
+        cameraHeight: 1.5f,
+        fovY: 1f);
+
+    var rejected = TitleBackgroundCharaSelectCameraAim.Compute(
+        new Vector3(float.NaN, 0f, 0f), 0f, 2.5f, 1.3f, 1.5f, 1f);
+    var zeroDistance = TitleBackgroundCharaSelectCameraAim.Compute(
+        new Vector3(1f, 1f, 1f), 0f, 0f, 1.3f, 1.5f, 1f);
+
+    return aim.HasAim
+        && Near(aim.Focus.X, 10f) && Near(aim.Focus.Y, 6.3f) && Near(aim.Focus.Z, 20f)
+        && Near(aim.Camera.X, 10f) && Near(aim.Camera.Y, 6.5f) && Near(aim.Camera.Z, 22.5f)
+        && rotated.HasAim && Near(rotated.Camera.X, 2.5f) && Near(rotated.Camera.Z, 0f)
+        && !rejected.HasAim
+        && !zeroDistance.HasAim;
+
+    static bool Near(float a, float b) => MathF.Abs(a - b) <= 0.001f;
+});
+
+Test("title background pre-login native source remains verifiable after login", () =>
+{
+    var nativeSummary = TitleBackgroundCharacterSourceEvaluation.Evaluate(
+    [
+        NativeCharacterSnapshot(0, new nint(0x6000), new Vector3(1f, 2f, 3f)),
+        NativeCharacterSnapshot(1, new nint(0x6000), new Vector3(1f, 2f, 3f)),
+    ]);
+    var delivery = DeliveryFromRaw(
+        "single",
+        "valid-world-transform",
+        "observed",
+        0,
+        1,
+        1,
+        0,
+        [
+            new TitleBackgroundCharacterPlacementSourceDiscovery(
+                TitleBackgroundCharacterSourceEvaluation.SourceName,
+                true,
+                1,
+                1,
+                "none",
+                1,
+                1,
+                0,
+                "read",
+                "pre-login",
+                new nint(0x6000)),
+        ],
+        lastOverrideApplied: true,
+        currentObjectTableValidForCharaSelect: false,
+        nativeCharacterSource: nativeSummary);
+    var lines = TitleBackgroundDeliveryDiagnostic.BuildLineList(delivery);
+
+    return delivery.NativePreviewSourceResolution == "found-single"
+        && delivery.NativePreviewSourceCaptureContext == "pre-login"
+        && delivery.NativePreviewSourceCurrentObjectTableIgnored
+        && delivery.ActorPlacementReady
+        && delivery.MvpStatus == "complete-background-only"
+        && !delivery.NativePreviewSourcePostLoginReadAttempted
+        && lines.Contains("phase2N.nativePreviewSource.captureContext=pre-login")
+        && lines.Contains("delivery.nativePreviewSource.captureContext=pre-login");
+});
+
+Test("title background single native sample is not placement ready", () =>
+{
+    var nativeSummary = TitleBackgroundCharacterSourceEvaluation.Evaluate(
+    [
+        NativeCharacterSnapshot(0, new nint(0x6000), new Vector3(1f, 2f, 3f)),
+    ]);
+    var delivery = DeliveryFromRaw(
+        "single",
+        "valid-world-transform",
+        "observed",
+        0,
+        1,
+        1,
+        0,
+        [
+            new TitleBackgroundCharacterPlacementSourceDiscovery(
+                TitleBackgroundCharacterSourceEvaluation.SourceName,
+                true,
+                1,
+                1,
+                "none",
+                1,
+                1,
+                0,
+                "read",
+                "pre-login",
+                new nint(0x6000)),
+        ],
+        currentObjectTableValidForCharaSelect: false,
+        nativeCharacterSource: nativeSummary);
+
+    return nativeSummary.Resolution == "found-single"
+        && nativeSummary.AddressStable == "single-sample"
+        && !delivery.ActorPlacementReady;
+});
+
+Test("title background native probe uses existing pipeline without object table stat contamination", () =>
+{
+    var root = FindRepositoryRoot();
+    var timeline = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.TimelineDiagnostics.cs"));
+    var probe = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundCharacterSourceProbe.cs"));
+    var statsIndex = timeline.IndexOf("var stats = BuildCharacterPlacementObjectTableStats(scanned);", StringComparison.Ordinal);
+    var nativeIndex = timeline.IndexOf("var nativeCandidate = TryCreateNativeCharacterPlacementActorCandidate", StringComparison.Ordinal);
+    var gateIndex = timeline.IndexOf("TitleBackgroundCharacterSourceCaptureGate.Evaluate", StringComparison.Ordinal);
+    var captureIndex = timeline.IndexOf("TitleBackgroundCharacterSourceProbe.Capture(frame)", StringComparison.Ordinal);
+
+    // The pre-login diagnostic capture still flows through the existing pipeline
+    // (stats computed before native candidate; gate before capture) and never uses
+    // a signature resolver. Character placement writes (the n4f4 compositing path) are
+    // intentionally allowed via the dedicated TrySetCurrentCharacterDrawPosition method.
+    return statsIndex >= 0 && nativeIndex > statsIndex
+        && gateIndex >= 0 && captureIndex > gateIndex
+        && probe.Contains("CharaSelectCharacterList.GetCurrentCharacter()", StringComparison.Ordinal)
+        && !probe.Contains("TitleBackgroundAddressResolver", StringComparison.Ordinal)
+        && probe.Contains("TrySetCurrentCharacterDrawPosition", StringComparison.Ordinal);
 });
 
 Test("title background simple auto setup configures n4f4 recommended route", () =>
@@ -3115,7 +3377,7 @@ Test("title background phase2q old sharlayan delivery exposes observed unverifie
         && delivery.CandidateHumanName == "Old Sharlayan outdoor test"
         && delivery.CandidateHumanStatus == "Observed / Unverified / Background-only"
         && delivery.UserMessage == "Background was applied as background-only. Selected character model is expected to remain hidden."
-        && delivery.UserNextAction == "Take screenshot in Character Select, then run /xmutbgdiag after login.";
+        && delivery.UserNextAction == "Run Automatic Check once and paste the copied report.";
 });
 
 Test("title background phase2q background application survives transition safety warning", () =>
@@ -4675,7 +4937,8 @@ TitleBackgroundDeliverySummary DeliveryFromRaw(
     int modelLikeNonNullCount,
     IReadOnlyList<TitleBackgroundCharacterPlacementSourceDiscovery> sourceDiscovery,
     bool lastOverrideApplied = false,
-    bool currentObjectTableValidForCharaSelect = true)
+    bool currentObjectTableValidForCharaSelect = true,
+    TitleBackgroundCharacterSourceSummary nativeCharacterSource = default)
 {
     return TitleBackgroundDeliveryDiagnostic.BuildSummary(
         TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly,
@@ -4697,7 +4960,36 @@ TitleBackgroundDeliverySummary DeliveryFromRaw(
         sourceDiscovery,
         "safe",
         currentObjectTableValidForCharaSelect,
-        currentObjectTableValidForCharaSelect ? "none" : "post-login-world-object-table-not-valid-for-chara-select");
+        currentObjectTableValidForCharaSelect ? "none" : "post-login-world-object-table-not-valid-for-chara-select",
+        phase2GAppliedAfterLogin: false,
+        nativeCharacterSource: nativeCharacterSource);
+}
+
+TitleBackgroundCharacterSourceSnapshot NativeCharacterSnapshot(
+    int frame,
+    nint address,
+    Vector3 position,
+    bool drawObjectNonNull = true,
+    string captureContext = "pre-login")
+{
+    return new TitleBackgroundCharacterSourceSnapshot(
+        frame,
+        captureContext,
+        "read",
+        address,
+        new nint(0x100),
+        0x1234,
+        200,
+        200,
+        0xE0000001,
+        "Pc",
+        position,
+        0.5f,
+        1f,
+        0.5f,
+        drawObjectNonNull ? new nint(0x7000) : nint.Zero,
+        "race=1;tribe=1;sex=1",
+        "none");
 }
 
 TitleBackgroundCharacterPlacementFrame CharacterPlacementFrame(

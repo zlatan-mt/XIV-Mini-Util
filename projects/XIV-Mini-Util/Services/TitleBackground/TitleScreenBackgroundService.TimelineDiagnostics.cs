@@ -19,6 +19,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _phase2MPlacementFrames.Clear();
         _phase2MPlacementCaptureSceneGeneration = 0;
         _phase2MPlacementCaptureReason = "reset";
+        _phase2MPlacementSkippedPostLoginCount = 0;
+        _phase2MPlacementSkippedInactiveCount = 0;
+        _phase2MPlacementSkippedSceneGenerationCount = 0;
+        _phase2MPlacementLastSkipReason = "none";
         _phase2MExperimentalWriteCount = 0;
         _runtimeRestoreAppliedFrame = null;
         _curveApplyAppliedFrame = null;
@@ -103,6 +107,30 @@ public sealed unsafe partial class TitleScreenBackgroundService
             return;
         }
 
+        var captureGate = TitleBackgroundCharacterSourceCaptureGate.Evaluate(
+            _clientState.IsLoggedIn,
+            _charaSelectTitleBackgroundSessionActive,
+            _activeCharaSelectSceneGeneration,
+            _charaSelectCameraAdapter.RuntimeState.SceneGeneration);
+        if (!captureGate.Allowed)
+        {
+            switch (captureGate.Status)
+            {
+                case "skipped-post-login":
+                    _phase2MPlacementSkippedPostLoginCount++;
+                    break;
+                case "skipped-inactive-chara-select":
+                    _phase2MPlacementSkippedInactiveCount++;
+                    break;
+                case "skipped-scene-generation-mismatch":
+                    _phase2MPlacementSkippedSceneGenerationCount++;
+                    break;
+            }
+
+            _phase2MPlacementLastSkipReason = captureGate.Status;
+            return;
+        }
+
         var activeCaptured = TryCaptureActiveCameraSnapshot(out var activeCamera, out _);
         var lobbyCaptured = TryCaptureLobbyCameraSnapshot(out var lobbyCamera, out _);
         var configuredCharacterPosition = _charaSelectCameraAdapter.Input.CharacterPosition;
@@ -118,7 +146,19 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var activeLookAt = activeCaptured ? activeCamera.LookAtVector : (Vector3?)null;
         var activeCameraPosition = activeCaptured ? activeCamera.SceneCameraPosition : (Vector3?)null;
 
-        var actorResult = CaptureCharacterPlacementActorCandidate(configuredCharacterPosition, activeLookAt, activeCameraPosition);
+        var nativeCharacterSource = TitleBackgroundCharacterSourceProbe.Capture(frame);
+        if (TitleBackgroundCharacterSourceProbe.TryReadCurrentCharacterAim(out var drawPosition, out var drawRotation))
+        {
+            _lastPreLoginCharacterDrawPosition = drawPosition;
+            _lastPreLoginCharacterDrawRotation = drawRotation;
+            _preLoginCharacterDrawObservedCount++;
+        }
+
+        var actorResult = CaptureCharacterPlacementActorCandidate(
+            configuredCharacterPosition,
+            activeLookAt,
+            activeCameraPosition,
+            nativeCharacterSource);
         var actor = actorResult.Actor;
         var actorPosition = actor?.Position;
         _phase2MPlacementCaptureSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
@@ -171,13 +211,15 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 : null,
             actorPosition.HasValue && nativeLookAtY.HasValue
                 ? actorPosition.Value.Y - nativeLookAtY.Value
-                : null);
+                : null,
+            nativeCharacterSource);
     }
 
     private TitleBackgroundCharacterPlacementActorCandidateResult CaptureCharacterPlacementActorCandidate(
         Vector3 configuredCharacterPosition,
         Vector3? activeLookAt,
-        Vector3? activeCameraPosition)
+        Vector3? activeCameraPosition,
+        TitleBackgroundCharacterSourceSnapshot nativeCharacterSource)
     {
         try
         {
@@ -209,12 +251,35 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 AddCharacterPlacementScannedObject(scanned, seenKeys, sourceIndex, "CharacterManagerObjects", gameObject, configuredCharacterPosition, activeLookAt, activeCameraPosition);
             }
             sources.Add(BuildCharacterPlacementSourceDiscovery("CharacterManagerObjects", true, sourceIndex, scanned, beforeCount, string.Empty));
+            var stats = BuildCharacterPlacementObjectTableStats(scanned);
+
+            var nativeCandidate = TryCreateNativeCharacterPlacementActorCandidate(
+                nativeCharacterSource,
+                configuredCharacterPosition,
+                activeLookAt,
+                activeCameraPosition);
+            if (nativeCandidate.HasValue
+                && seenKeys.Add(BuildCharacterPlacementCandidateKey(nativeCandidate.Value)))
+            {
+                scanned.Add(nativeCandidate.Value);
+            }
+
+            sources.Add(new TitleBackgroundCharacterPlacementSourceDiscovery(
+                TitleBackgroundCharacterSourceEvaluation.SourceName,
+                nativeCharacterSource.ReadStatus == "read",
+                nativeCharacterSource.HasCharacter ? 1 : 0,
+                nativeCandidate.HasValue ? 1 : 0,
+                nativeCharacterSource.Error,
+                nativeCharacterSource.HasNonZeroTransform ? 1 : 0,
+                nativeCharacterSource.DrawObjectNonNull ? 1 : 0,
+                0,
+                nativeCharacterSource.ReadStatus,
+                nativeCharacterSource.CaptureContext,
+                nativeCharacterSource.CharacterAddress));
             sources.Add(new TitleBackgroundCharacterPlacementSourceDiscovery("ClientObjectManager", false, 0, 0, "not-exposed-through-managed-api"));
-            sources.Add(new TitleBackgroundCharacterPlacementSourceDiscovery("CharaSelectCharacterManager", false, 0, 0, "native-source-not-resolved"));
             sources.Add(new TitleBackgroundCharacterPlacementSourceDiscovery("UIStage CharaSelect model source", false, 0, 0, "native-source-not-resolved"));
             sources.Add(new TitleBackgroundCharacterPlacementSourceDiscovery("DrawObject owner/source", false, 0, 0, "reverse-lookup-not-exposed-through-managed-api"));
 
-            var stats = BuildCharacterPlacementObjectTableStats(scanned);
             var candidates = scanned
                 .Where(candidate => candidate.PlayerLike
                     || candidate.BattleCharacterLike
@@ -230,12 +295,18 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 .ThenBy(candidate => candidate.DistanceFromActiveLookAt ?? float.MaxValue)
                 .Take(16)
                 .ToArray();
-            var matchingCandidates = candidates
-                .Where(candidate => candidate.PlayerLike
-                    || candidate.BattleCharacterLike
-                    || candidate.NearConfiguredCharacter
-                    || candidate.NearCameraLookAt)
+            var nativeResolvedCandidates = candidates
+                .Where(candidate => candidate.Source == TitleBackgroundCharacterSourceEvaluation.SourceName
+                    && !IsZeroCharacterPlacementPosition(candidate.Position))
                 .ToArray();
+            var matchingCandidates = nativeResolvedCandidates.Length > 0
+                ? nativeResolvedCandidates
+                : candidates
+                    .Where(candidate => candidate.PlayerLike
+                        || candidate.BattleCharacterLike
+                        || candidate.NearConfiguredCharacter
+                        || candidate.NearCameraLookAt)
+                    .ToArray();
 
             if (matchingCandidates.Length == 0)
             {
@@ -661,6 +732,84 @@ public sealed unsafe partial class TitleScreenBackgroundService
             scoreReason);
     }
 
+    private static TitleBackgroundCharacterPlacementActorCandidate? TryCreateNativeCharacterPlacementActorCandidate(
+        TitleBackgroundCharacterSourceSnapshot snapshot,
+        Vector3 configuredCharacterPosition,
+        Vector3? activeLookAt,
+        Vector3? activeCameraPosition)
+    {
+        if (!snapshot.HasCharacter || !TitleBackgroundCameraMath.IsFiniteVector(snapshot.Position))
+        {
+            return null;
+        }
+
+        var distanceFromConfiguredCharacter = Vector3.Distance(snapshot.Position, configuredCharacterPosition);
+        var distanceFromActiveLookAt = activeLookAt.HasValue
+            ? Vector3.Distance(snapshot.Position, activeLookAt.Value)
+            : (float?)null;
+        var distanceFromActiveCameraPosition = activeCameraPosition.HasValue
+            ? Vector3.Distance(snapshot.Position, activeCameraPosition.Value)
+            : (float?)null;
+        var nearConfiguredCharacter = distanceFromConfiguredCharacter <= 100f;
+        var nearCameraLookAt = distanceFromActiveLookAt is <= 100f;
+        var nearCameraPosition = distanceFromActiveCameraPosition is <= 100f;
+        var visibleHint = snapshot.DrawObjectNonNull;
+        var (score, scoreReason) = ScoreCharacterPlacementCandidate(
+            snapshot.Position,
+            named: false,
+            visibleHint,
+            snapshot.DrawObjectNonNull,
+            modelLikeNonNull: false,
+            nearConfiguredCharacter,
+            nearCameraLookAt,
+            gameObjectId: 0,
+            snapshot.EntityId,
+            TitleBackgroundCharacterSourceEvaluation.SourceName);
+
+        return new TitleBackgroundCharacterPlacementActorCandidate(
+            snapshot.ClientObjectIndex >= 0 ? snapshot.ClientObjectIndex : snapshot.ObjectIndex,
+            TitleBackgroundCharacterSourceEvaluation.SourceName,
+            snapshot.ObjectIndex,
+            snapshot.ObjectKind,
+            string.Empty,
+            0,
+            snapshot.EntityId,
+            snapshot.CharacterAddress,
+            snapshot.Position,
+            snapshot.Rotation,
+            snapshot.Scale,
+            snapshot.HitboxRadius,
+            null,
+            null,
+            false,
+            visibleHint ? "draw-object-present" : "draw-object-missing",
+            "character-select-current",
+            snapshot.ContentId == 0 ? "contentId-missing" : "contentId-present",
+            snapshot.Customize,
+            "none",
+            snapshot.DrawObjectNonNull ? $"0x{snapshot.DrawObjectAddress.ToInt64():X}" : "none",
+            snapshot.DrawObjectNonNull,
+            "none",
+            false,
+            snapshot.Error,
+            false,
+            true,
+            true,
+            false,
+            false,
+            visibleHint,
+            distanceFromConfiguredCharacter,
+            distanceFromActiveLookAt,
+            distanceFromActiveCameraPosition,
+            snapshot.Position.Y - configuredCharacterPosition.Y,
+            nearConfiguredCharacter,
+            nearCameraLookAt,
+            nearCameraPosition,
+            "CharaSelectCurrentCharacter",
+            score,
+            scoreReason);
+    }
+
     private static (int Score, string Reason) ScoreCharacterPlacementCandidate(
         Vector3 position,
         bool named,
@@ -687,6 +836,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         AddScore(entityId != 0 && entityId != 0xE0000000, 5, "entityId-valid");
         AddScore(source == "CharacterManagerObjects", 3, "source-priority-character-manager");
         AddScore(source == "PlayerObjects", 2, "source-priority-player-objects");
+        AddScore(source == TitleBackgroundCharacterSourceEvaluation.SourceName, 50, "source-priority-chara-select-current");
 
         if (zeroTransform)
         {
@@ -1267,6 +1417,55 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _lastPostFixOnCameraCaptureStatus = "success";
         _lastPostFixOnCameraCaptureError = string.Empty;
     }
+
+    // B (independent compositing): place the character at the point the engine's
+    // camera is already looking at, every frame. The camera is NEVER touched, so there
+    // is no fight with the engine's camera solve -> no jitter. Only this code writes the
+    // character draw position, so it is stable. Tightly gated + guarded. Actor write is
+    // used here under explicit user direction.
+    private void MaintainCharaSelectCharacterPlacement()
+    {
+        try
+        {
+            if (!IsCharaSelectCharacterCompositionActive())
+            {
+                return;
+            }
+
+            if (!TryCaptureActiveCameraSnapshot(out var camera, out var error))
+            {
+                _charaSelectCharacterPlacementLastError = string.IsNullOrWhiteSpace(error) ? "camera-unavailable" : error;
+                return;
+            }
+
+            var lookAt = camera.LookAtVector;
+            if (!TitleBackgroundCameraMath.IsFiniteVector(lookAt))
+            {
+                _charaSelectCharacterPlacementLastError = "lookat-non-finite";
+                return;
+            }
+
+            // Drop the body so the character's torso (not feet) sits on the camera focus.
+            var target = new Vector3(lookAt.X, lookAt.Y - CharaSelectCharacterFocusBodyDrop, lookAt.Z);
+            if (TitleBackgroundCharacterSourceProbe.TrySetCurrentCharacterDrawPosition(target))
+            {
+                _charaSelectCharacterPlacementCount++;
+                _lastCharaSelectCharacterPlacementTarget = target;
+                _charaSelectCharacterPlacementLastError = "none";
+            }
+            else
+            {
+                _charaSelectCharacterPlacementLastError = "draw-position-write-failed";
+            }
+        }
+        catch (Exception ex)
+        {
+            _charaSelectCharacterPlacementLastError = ex.GetType().Name;
+            MarkRuntimeError(ex, nameof(MaintainCharaSelectCharacterPlacement));
+        }
+    }
+
+    private const float CharaSelectCharacterFocusBodyDrop = 0.9f;
 
     private bool TryCaptureActiveCameraSnapshot(out TitleBackgroundActiveCameraSnapshot snapshot, out string errorMessage)
     {

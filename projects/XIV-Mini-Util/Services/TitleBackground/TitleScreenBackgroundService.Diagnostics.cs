@@ -318,16 +318,22 @@ public sealed unsafe partial class TitleScreenBackgroundService
             || currentMap == GameLobbyType.Title;
     }
 
-    public IReadOnlyList<string> GetDiagnosticLines(bool includeDetailedPhase2Diagnostics = false)
+    public IReadOnlyList<string> GetDiagnosticLines(
+        bool includeDetailedPhase2Diagnostics = false,
+        bool automaticInvocation = false)
     {
         if (!includeDetailedPhase2Diagnostics)
         {
-            RecordTransitionEvent("command /xmutbgdiag executed", "normal");
+            RecordTransitionEvent(
+                automaticInvocation ? "automatic verification diagnostic collected" : "command /xmutbgdiag executed",
+                "normal");
             if (_clientState.IsLoggedIn && !_postLoginDiagnosticSeen)
             {
                 _postLoginDiagnosticSeen = true;
                 RecordTransitionEvent("entering logged-in world if detectable", "first logged-in diagnostic");
-                RecordTransitionEvent("first post-login /xmutbgdiag", "normal");
+                RecordTransitionEvent(
+                    automaticInvocation ? "first post-login automatic diagnostic" : "first post-login /xmutbgdiag",
+                    "normal");
             }
         }
 
@@ -436,7 +442,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _lastHistoricalOverridePath,
             _sceneReadySignalAcceptedCount > 1,
             phase2NSceneOverrideActiveAfterLoginDetected,
-            _transitionDiagnostics.Phase2GAppliedAfterLogin);
+            _transitionDiagnostics.Phase2GAppliedAfterLogin,
+            phase2MSummary.NativeCharacterSource);
         var deliveryDetailPath = !includeDetailedPhase2Diagnostics
             ? SaveDeliveryDeliveryDiagnosticDump(phase2NDeliverySummary)
             : string.Empty;

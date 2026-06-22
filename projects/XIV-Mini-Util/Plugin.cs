@@ -215,6 +215,7 @@ public sealed class Plugin : IDalamudPlugin
         _windowSystem.AddWindow(_shopSearchResultWindow);
 
         _pluginInterface.UiBuilder.Draw += _windowSystem.Draw;
+        _pluginInterface.UiBuilder.Draw += CopyPendingTitleBackgroundAutomaticCheckReport;
         _pluginInterface.UiBuilder.OpenMainUi += OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi += OpenSettingsWindow;
 
@@ -232,6 +233,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         UnregisterCommands();
         _pluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
+        _pluginInterface.UiBuilder.Draw -= CopyPendingTitleBackgroundAutomaticCheckReport;
         _pluginInterface.UiBuilder.OpenMainUi -= OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi -= OpenSettingsWindow;
 
@@ -390,6 +392,18 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.SetClipboardText(text);
         _chatGui.Print($"[XIV Mini Util] title background diagnostic copied to clipboard. lines={lines.Count}");
         _pluginLog.Information("TitleBackground diag copied to clipboard. lines={LineCount}", lines.Count);
+    }
+
+    private void CopyPendingTitleBackgroundAutomaticCheckReport()
+    {
+        if (!_titleScreenBackgroundService.TryConsumeAutomaticCheckClipboardText(out var text))
+        {
+            return;
+        }
+
+        ImGui.SetClipboardText(text);
+        _chatGui.Print("[XIV Mini Util] 自動確認が完了しました。ログをクリップボードへコピーしました。");
+        _pluginLog.Information("TitleBackground automatic check copied to clipboard. chars={CharacterCount}", text.Length);
     }
 
     private void CopyTitleBackgroundCameraProbeLines(IReadOnlyList<string> lines)
