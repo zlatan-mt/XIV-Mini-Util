@@ -443,7 +443,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _sceneReadySignalAcceptedCount > 1,
             phase2NSceneOverrideActiveAfterLoginDetected,
             _transitionDiagnostics.Phase2GAppliedAfterLogin,
-            phase2MSummary.NativeCharacterSource);
+            phase2MSummary.NativeCharacterSource,
+            _charaSelectCharacterPlacementCount > 0);
         var deliveryDetailPath = !includeDetailedPhase2Diagnostics
             ? SaveDeliveryDeliveryDiagnosticDump(phase2NDeliverySummary)
             : string.Empty;

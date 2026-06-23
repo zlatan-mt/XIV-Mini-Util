@@ -84,9 +84,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private Vector3? _lastAppliedFocus;
     private float? _lastAppliedFovY;
     private string _lastFixOnInvocationMode = "not-run";
-    private int _fixOnDetourCallCount;
-    private int _charaSelectCameraAimAppliedCount;
-    private Vector3? _lastCharaSelectCameraAimTarget;
     private Vector3? _lastPreLoginCharacterDrawPosition;
     private float _lastPreLoginCharacterDrawRotation;
     private int _preLoginCharacterDrawObservedCount;
@@ -973,9 +970,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             currentMap);
     }
 
-    // Auto-aim the lobby camera at the actual selected character (read from the
-    // live DrawObject) when the integrated composition bridge is active. Runs only
-    // inside the game's FixOn hook (sanctioned) — never as Framework.Update writeback.
     // Gate for the n4f4 + character compositing path: bridge active, pre-login,
     // on the CharaSelect lobby, service ready.
     private bool IsCharaSelectCharacterCompositionActive()
@@ -997,29 +991,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         }
 
         return TryReadCurrentLobbyMap(out var currentMap) && currentMap == GameLobbyType.CharaSelect;
-    }
-
-    private bool TryBuildCharaSelectCharacterCameraAim(out TitleBackgroundCharaSelectCameraAimResult aim)
-    {
-        aim = default;
-        if (!IsCharaSelectCharacterCompositionActive())
-        {
-            return false;
-        }
-
-        if (!TitleBackgroundCharacterSourceProbe.TryReadCurrentCharacterAim(out var position, out var rotation))
-        {
-            return false;
-        }
-
-        aim = TitleBackgroundCharaSelectCameraAim.Compute(
-            position,
-            rotation,
-            TitleBackgroundCharaSelectCameraAim.DefaultDistance,
-            TitleBackgroundCharaSelectCameraAim.DefaultFocusHeight,
-            TitleBackgroundCharaSelectCameraAim.DefaultCameraHeight,
-            _configuration.TitleBackgroundFovY);
-        return aim.HasAim;
     }
 
     private bool TryReadCurrentLobbyMap(out GameLobbyType map)
@@ -1668,11 +1639,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2M.preLoginCapture.skippedInactiveCount={_phase2MPlacementSkippedInactiveCount}");
         lines.Add($"phase2M.preLoginCapture.skippedSceneGenerationCount={_phase2MPlacementSkippedSceneGenerationCount}");
         lines.Add($"phase2M.preLoginCapture.lastSkipReason={FormatNone(_phase2MPlacementLastSkipReason)}");
-        lines.Add($"cameraAim.fixOnHookInstalled={_cameraFixOnHook != null}");
-        lines.Add($"cameraAim.fixOnHookEnabled={IsHookEnabled(_cameraFixOnHook)}");
-        lines.Add($"cameraAim.fixOnCallCount={_fixOnDetourCallCount}");
-        lines.Add($"cameraAim.charaSelectAimAppliedCount={_charaSelectCameraAimAppliedCount}");
-        lines.Add($"cameraAim.charaSelectAimLastTarget={(_lastCharaSelectCameraAimTarget.HasValue ? FormatVector(_lastCharaSelectCameraAimTarget.Value) : "none")}");
         lines.Add($"characterDraw.preLoginObservedCount={_preLoginCharacterDrawObservedCount}");
         lines.Add($"characterDraw.preLoginDrawPosition={(_lastPreLoginCharacterDrawPosition.HasValue ? FormatVector(_lastPreLoginCharacterDrawPosition.Value) : "none")}");
         lines.Add($"characterDraw.preLoginDrawPositionNonZero={(_lastPreLoginCharacterDrawPosition.HasValue && !TitleBackgroundCharacterSourceEvaluation.IsZeroPosition(_lastPreLoginCharacterDrawPosition.Value))}");

@@ -129,55 +129,6 @@ internal static class TitleBackgroundCharacterSourceEvaluation
     }
 }
 
-internal readonly record struct TitleBackgroundCharaSelectCameraAimResult(
-    bool HasAim,
-    Vector3 Camera,
-    Vector3 Focus,
-    float FovY);
-
-internal static class TitleBackgroundCharaSelectCameraAim
-{
-    // Iteration 1 framing defaults: frontal portrait, slightly above eye level.
-    // Tunable from in-game feedback; kept here so the math stays pure/testable.
-    public const float DefaultDistance = 2.5f;
-    public const float DefaultFocusHeight = 1.3f;
-    public const float DefaultCameraHeight = 1.5f;
-
-    public static TitleBackgroundCharaSelectCameraAimResult Compute(
-        Vector3 characterPosition,
-        float characterRotation,
-        float distance,
-        float focusHeight,
-        float cameraHeight,
-        float fovY)
-    {
-        if (!TitleBackgroundCameraMath.IsFiniteVector(characterPosition)
-            || !float.IsFinite(characterRotation)
-            || !(distance > 0f))
-        {
-            return new TitleBackgroundCharaSelectCameraAimResult(false, default, default, 0f);
-        }
-
-        // FFXIV yaw: forward vector for a facing of `rot` is (sin, 0, cos).
-        // Place the camera in front of the character so we see the face.
-        var forwardX = MathF.Sin(characterRotation);
-        var forwardZ = MathF.Cos(characterRotation);
-        var camera = new Vector3(
-            characterPosition.X + forwardX * distance,
-            characterPosition.Y + cameraHeight,
-            characterPosition.Z + forwardZ * distance);
-        var focus = new Vector3(
-            characterPosition.X,
-            characterPosition.Y + focusHeight,
-            characterPosition.Z);
-        return new TitleBackgroundCharaSelectCameraAimResult(
-            true,
-            camera,
-            focus,
-            TitleBackgroundPreset.ClampFovY(fovY));
-    }
-}
-
 internal static unsafe class TitleBackgroundCharacterSourceProbe
 {
     // Read-only: returns the live CharaSelect character's draw-object world position

@@ -198,7 +198,8 @@ internal readonly record struct TitleBackgroundQuickCheckInput(
     string CameraCurrentPosition = "",
     string CameraCurrentLookAt = "",
     bool BridgeCharacterCompositionApplied = false,
-    bool BridgeCameraProfileApplied = false);
+    bool BridgeCameraProfileApplied = false,
+    bool CharacterCompositedApplied = false);
 
 internal readonly record struct TitleBackgroundQuickCheckResult(
     TitleBackgroundQuickCheckLevel Level,
@@ -262,8 +263,8 @@ internal static class TitleBackgroundQuickCheckEvaluator
             warnings.Add("visual confirmation is required");
         }
 
-        var nativeCharacterSourceUnresolved = input.ActorSourceAmbiguous
-            || input.ObjectTableZeroTransformStubs;
+        var nativeCharacterSourceUnresolved = !input.CharacterCompositedApplied
+            && (input.ActorSourceAmbiguous || input.ObjectTableZeroTransformStubs);
 
         if (input.CharacterVisualStatus is TitleBackgroundCharacterVisualStatus.VisibleButTooSmall
                 or TitleBackgroundCharacterVisualStatus.VisibleTopDown)
@@ -522,6 +523,7 @@ internal static class TitleBackgroundQuickCheckEvaluator
         }
 
         if (warnings.Count > 0
+            && !input.CharacterCompositedApplied
             && (input.ActorSourceAmbiguous || input.ObjectTableZeroTransformStubs))
         {
             return "paste the automatically copied report for native character source investigation";
