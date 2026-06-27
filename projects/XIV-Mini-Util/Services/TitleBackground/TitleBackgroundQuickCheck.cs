@@ -53,6 +53,93 @@ internal static class TitleBackgroundAutomaticCheckLogic
             && loginObservedAt.HasValue
             && now - loginObservedAt.Value >= LoginTransitionTimeout;
     }
+
+    // 判定（Delivery / Transition）に使う sceneReady accepted 回数を解決する。
+    // 自動確認は run-scoped（current run の受理回数のみ）で「複数回受理」を判定し、
+    // プラグイン起動以来の累積回数だけで current run を unsafe にしない。
+    // 通常の長期診断（automaticInvocation=false）は従来どおり累積値を返して傾向を残す。
+    // post-login sceneReady / active override / stale state / Phase2G 漏れなどの危険判定は
+    // この値に依存しない別経路なので、run-scoped 化しても弱まらない。
+    public static int ResolveVerdictSceneReadyAcceptedCount(
+        bool automaticInvocation,
+        bool runScopedActive,
+        int cumulativeAcceptedCount,
+        int runStartAcceptedCount)
+    {
+        if (automaticInvocation && runScopedActive)
+        {
+            return Math.Max(0, cumulativeAcceptedCount - runStartAcceptedCount);
+        }
+
+        return cumulativeAcceptedCount;
+    }
+
+    // 累積カウントを run-scoped で解決する汎用ヘルパー。run-scoped 時は run 開始からの差分、
+    // それ以外は累積を返す。placement / override applied など run 内回数の判定に使う。
+    public static int ResolveRunScopedCount(
+        bool runScoped,
+        int cumulativeCount,
+        int runStartCount)
+    {
+        return runScoped ? Math.Max(0, cumulativeCount - runStartCount) : cumulativeCount;
+    }
+
+    // キャラ配置回数を run-scoped で解決する。前回 run の配置成功を今回の結果へ流用しない。
+    public static int ResolveRunScopedPlacementCount(
+        bool runScoped,
+        int cumulativeCount,
+        int runStartCount)
+    {
+        return ResolveRunScopedCount(runScoped, cumulativeCount, runStartCount);
+    }
+
+    // 地面検証済み配置か。anchor 由来かつ frame が明確な地面 provenance を持つ場合のみ true。
+    // CharaSelectFallback（水上座標の再保存の可能性）/ Unknown / World は地面確認済みにしない。
+    public static bool ResolveGroundPlacementVerified(
+        bool placementApplied,
+        string? placementSource,
+        string? anchorFrame)
+    {
+        return placementApplied
+            && string.Equals(placementSource, TitleBackgroundCharaSelectAnchorLogic.AnchorSource, StringComparison.Ordinal)
+            && TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(anchorFrame);
+    }
+
+    // camera-focus フォールバック由来の配置か（画面内のみ・地面位置未確認）。
+    public static bool ResolveCameraFocusFallbackPlacement(
+        bool placementApplied,
+        string? placementSource)
+    {
+        return placementApplied
+            && string.Equals(placementSource, TitleBackgroundCharaSelectAnchorLogic.CameraFocusSource, StringComparison.Ordinal);
+    }
+
+    // イベント発生型の post-login 異常（post-login sceneReady / Phase2G）を run-scoped で解決する。
+    // run-scoped 時は run 開始 event sequence より後に記録された異常だけを今回の異常として扱い、
+    // 前回 run で検出した sticky な異常を今回の判定へ持ち込まない。
+    public static bool ResolveRunScopedEventAnomaly(
+        bool runScoped,
+        bool detected,
+        long lastEventSeq,
+        long runStartEventSeq)
+    {
+        if (!runScoped)
+        {
+            return detected;
+        }
+
+        return detected && lastEventSeq > runStartEventSeq;
+    }
+
+    // 状態型の post-login 異常（stale adapter / active scene override）を run-scoped で解決する。
+    // run-scoped 時は「現時点の状態」だけを見て、過去 run の sticky 履歴は判定に含めない。
+    public static bool ResolveRunScopedStateAnomaly(
+        bool runScoped,
+        bool historicalDetected,
+        bool freshDetected)
+    {
+        return runScoped ? freshDetected : historicalDetected || freshDetected;
+    }
 }
 
 internal static class TitleBackgroundAutomaticCheckReportBuilder
@@ -63,12 +150,14 @@ internal static class TitleBackgroundAutomaticCheckReportBuilder
         DateTimeOffset completedAt,
         IReadOnlyList<string> quickCheckLines,
         IReadOnlyList<string> diagnosticLines,
-        bool partial = false)
+        bool partial = false,
+        string? runId = null)
     {
         var lines = new List<string>
         {
             "[XIV Mini Util] Title Background automatic check",
             $"[XIV Mini Util] completedAt={completedAt:yyyy-MM-dd HH:mm:ss zzz}",
+            $"[XIV Mini Util] runId={(string.IsNullOrWhiteSpace(runId) ? "none" : runId)}",
             $"[XIV Mini Util] completion={(partial ? "partial" : "complete")}",
             "[XIV Mini Util] --- QuickCheck ---",
         };
@@ -76,6 +165,80 @@ internal static class TitleBackgroundAutomaticCheckReportBuilder
         lines.Add("[XIV Mini Util] --- Diagnostic ---");
         lines.AddRange(diagnosticLines.Select(line => $"[XIV Mini Util] {line}"));
         return string.Join(Environment.NewLine, lines);
+    }
+}
+
+internal static class TitleBackgroundAutomaticCheckDiagnosticSelector
+{
+    private static readonly HashSet<string> IncludedKeys = new(StringComparer.Ordinal)
+    {
+        "runtimeMode",
+        "sceneOverrideEnabled",
+        "lastOverrideApplied",
+        "lastOverrideNewPath",
+        "lastOverrideTerritoryId",
+        "lastOverrideLayerFilterKey",
+        "failureSummary",
+        "hooksReady",
+        "delivery.deliveryVerdict",
+        "delivery.backgroundDeliveryVerdict",
+        "delivery.transitionSafetyVerdict",
+        "delivery.postLoginLeakVerdict",
+        "delivery.mvpStatus",
+        "delivery.mvpBlockingIssue",
+        "delivery.nextAction",
+        "transition.verdict.loginTransitionSafety",
+        "transition.verdict.staleCharaSelectStateAfterLogin",
+        "characterDraw.preLoginDrawPositionNonZero",
+        // 自動確認レポートは run-scoped の配置証拠を出す。累積の last* は出さない（過去 run と混同させない）。
+        "characterPlace.runAppliedFrameCount",
+        "characterPlace.runTarget",
+        "characterPlace.runSource",
+        "characterPlace.runAnchorFrame",
+        "characterPlace.runAnchorFrameGroundProvenance",
+        "characterPlace.lastError",
+        "characterPlace.anchorFrame",
+        "characterPlace.anchorFrameSupported",
+        "view.enabled",
+        "view.candidate",
+        "view.camera",
+        "view.focus",
+        "view.fovY",
+        "view.overrideAppliedCount",
+        "view.overrideLastSource",
+        "environment.dayTimeHours",
+        "environment.weather",
+        "environment.rainy",
+        "environment.brightnessHint",
+        "fixOn.hookInstalled",
+        "fixOn.calls",
+        "fixOn.lastFocusArgs",
+        "fixOn.exp.gateReason",
+        "fixOn.exp.applied",
+        "fixOn.exp.anchorFrame",
+        "fixOn.exp.anchor",
+        "fixOn.exp.observedCamera",
+        "fixOn.exp.observedFocus",
+        "fixOn.exp.overrideFocus",
+        "fixOn.exp.preLoginCamera",
+        "fixOn.exp.preLoginLookAt",
+        "fixOn.exp.preLoginCameraGenerationMatchesFixOn",
+        "fixOn.exp.sceneGeneration",
+        "fixOn.exp.captureContext",
+        "fixOn.exp.charaSelectSession",
+    };
+
+    public static IReadOnlyList<string> Select(IReadOnlyList<string> lines)
+    {
+        return lines
+            .Where(line => IncludedKeys.Contains(GetKey(line)))
+            .ToArray();
+    }
+
+    private static string GetKey(string line)
+    {
+        var separatorIndex = line.IndexOf('=');
+        return separatorIndex < 0 ? line : line[..separatorIndex];
     }
 }
 
@@ -98,7 +261,11 @@ internal readonly record struct TitleBackgroundQuickCheckState(
     TitleBackgroundCharacterSelectBackgroundMode BackgroundModeStart,
     TitleBackgroundCharacterSelectLightingMode LightingModeStart,
     string CurrentLobbyMapStart,
-    bool StartedLoggedIn)
+    bool StartedLoggedIn,
+    // run 開始時点のキャラ配置回数。current run の配置成功判定の baseline。
+    int CharacterPlacementCountStart = 0,
+    // run 開始時点の遷移診断 event sequence。post-login 異常を run-scoped 判定する baseline。
+    long TransitionEventSeqStart = 0)
 {
     public static TitleBackgroundQuickCheckState Idle { get; } = new(
         TitleBackgroundQuickCheckRunState.Idle,
@@ -112,7 +279,9 @@ internal readonly record struct TitleBackgroundQuickCheckState(
         TitleBackgroundCharacterSelectBackgroundMode.Disabled,
         TitleBackgroundCharacterSelectLightingMode.Default,
         "None",
-        false);
+        false,
+        0,
+        0);
 }
 
 internal readonly record struct TitleBackgroundQuickCheckInput(
@@ -199,7 +368,14 @@ internal readonly record struct TitleBackgroundQuickCheckInput(
     string CameraCurrentLookAt = "",
     bool BridgeCharacterCompositionApplied = false,
     bool BridgeCameraProfileApplied = false,
-    bool CharacterCompositedApplied = false);
+    bool CharacterCompositedApplied = false,
+    // passive 観測（カメラを意図的に書き換えない）が有効な run。
+    // true のときは「visible camera profile が未適用」は仕様どおりなので警告しない。
+    bool PassiveCameraObservationActive = false,
+    // 配置がカメラ注視点フォールバック由来（画面内のみ・地面位置は未確認）か。
+    bool CharacterPlacedViaCameraFocusFallback = false,
+    // 配置が地面検証済み（anchor 由来かつ候補・座標系が検証済み）か。強い成功はこの場合だけ許可する。
+    bool CharacterGroundPlacementVerified = false);
 
 internal readonly record struct TitleBackgroundQuickCheckResult(
     TitleBackgroundQuickCheckLevel Level,
@@ -227,6 +403,15 @@ internal static class TitleBackgroundQuickCheckEvaluator
         var warnings = new List<string>();
         var ngReason = GetNgReason(input);
         var loginChecked = IsLoginTransitionChecked(input);
+        // 地面検証済み（anchor 由来かつ frame が明確な地面 provenance を持つ）のみ強い成功を許可する。
+        // camera-focus フォールバックや provenance 不足の anchor は「配置されたが地面位置は未確認」。
+        var characterGroundPlacementVerified = input.CharacterGroundPlacementVerified;
+        var characterPlacedViaCameraFocusFallback = input.CharacterCompositedApplied
+            && input.CharacterPlacedViaCameraFocusFallback
+            && !characterGroundPlacementVerified;
+        // 配置されたが地面検証されていない（camera-focus / provenance 不足 anchor）。false OK を防ぐ。
+        var characterPlacedButGroundNotVerified = input.CharacterCompositedApplied
+            && !characterGroundPlacementVerified;
 
         if (!input.RunScoped)
         {
@@ -281,8 +466,16 @@ internal static class TitleBackgroundQuickCheckEvaluator
             warnings.Add("character not visible or offscreen in frame; camera framing may be misaligned");
         }
 
+        if (characterPlacedButGroundNotVerified)
+        {
+            warnings.Add(characterPlacedViaCameraFocusFallback
+                ? "character placed in frame via camera-focus fallback; ground position is not verified, visual confirmation required"
+                : "character placement applied but ground position is not verified; visual confirmation required");
+        }
+
         if (input.CharacterCompositionBridge.AppliedCharacter
-            && input.CharacterVisualStatus == TitleBackgroundCharacterVisualStatus.Unknown)
+            && input.CharacterVisualStatus == TitleBackgroundCharacterVisualStatus.Unknown
+            && !characterGroundPlacementVerified)
         {
             warnings.Add("background works but character visibility is not visually confirmed; camera framing may still be wrong");
         }
@@ -293,13 +486,18 @@ internal static class TitleBackgroundQuickCheckEvaluator
             warnings.Add("camera does not frame the character");
         }
 
-        var capturedProfileMissing = IsCapturedLegacyProfileMissing(input);
+        var capturedProfileMissing = !input.CharacterCompositedApplied
+            && IsCapturedLegacyProfileMissing(input);
         if (capturedProfileMissing)
         {
             warnings.Add("captured legacy visible camera profile is missing or not applied");
         }
 
-        if (input.CameraVisibleProfileResolved
+        // passive 観測中は仕様としてカメラを書き換えない。未適用は失敗ではないので警告しない。
+        // view / camera override を適用する設定（passive OFF）なのに未適用なら、従来どおり警告して
+        // 本当の適用失敗は隠さない。
+        if (!input.PassiveCameraObservationActive
+            && input.CameraVisibleProfileResolved
             && (!HasValue(input.CameraYaw) || !HasValue(input.CameraPitch) || !HasValue(input.CameraDistance)))
         {
             warnings.Add("visible camera profile resolved but yaw/pitch/distance was not applied");
@@ -308,13 +506,15 @@ internal static class TitleBackgroundQuickCheckEvaluator
         if (IsCustomN4F4(input.CandidateId)
             && (input.CameraFramingMode is TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
                 or TitleBackgroundCharaSelectCameraFramingMode.CustomExperimental)
-            && !input.CameraVisibleProfileApplied)
+            && !input.CameraVisibleProfileApplied
+            && !characterGroundPlacementVerified)
         {
             warnings.Add("n4f4 visible camera profile is not applied; Y-only framing is not enough");
         }
 
         if (input.CameraFramingApplied
-            && IsFalseOrNotObserved(input.CameraFinalYawPitchDistanceMatchesProfile))
+            && IsFalseOrNotObserved(input.CameraFinalYawPitchDistanceMatchesProfile)
+            && !characterGroundPlacementVerified)
         {
             warnings.Add("camera does not frame the character; final yaw/pitch/distance does not match profile");
         }
@@ -544,11 +744,15 @@ internal static class TitleBackgroundQuickCheckEvaluator
         if (warnings.Any(warning => warning.Contains("n4f4 visible camera profile", StringComparison.Ordinal)
                 || warning.Contains("camera does not frame the character", StringComparison.Ordinal)
                 || warning.Contains("yaw/pitch/distance was not applied", StringComparison.Ordinal)
-                || warning.Contains("captured legacy visible camera profile", StringComparison.Ordinal)
-                || warning.Contains("visual confirmation", StringComparison.Ordinal)
+                || warning.Contains("captured legacy visible camera profile", StringComparison.Ordinal)))
+        {
+            return "paste the automatically copied report for camera framing investigation";
+        }
+
+        if (warnings.Any(warning => warning.Contains("visual confirmation", StringComparison.Ordinal)
                 || warning.Contains("visibility is not visually confirmed", StringComparison.Ordinal)))
         {
-            return "Enable legacy shooting composition, confirm character is visible, then click Capture legacy visible camera.";
+            return "paste the automatically copied report and include whether the character was visible";
         }
 
         if (warnings.Any(warning => warning.Contains("bridge not invoked", StringComparison.Ordinal)))
@@ -786,6 +990,24 @@ internal static class TitleBackgroundQuickCheckEvaluator
 
         if (!input.CharacterExpectedVisible || input.CharacterKnownLimitation)
         {
+            // 地面検証済み（anchor 由来・候補/座標系検証済み）のときだけ強い成功文言を出す。
+            if (input.CharacterGroundPlacementVerified)
+            {
+                return "placement verified on ground anchor";
+            }
+
+            // camera-focus フォールバックは画面内に配置されただけで、地面位置は未確認。
+            if (input.CharacterCompositedApplied && input.CharacterPlacedViaCameraFocusFallback)
+            {
+                return "placed in frame / ground position not confirmed";
+            }
+
+            // provenance 不足の anchor 等、配置はされたが地面位置は未確認。
+            if (input.CharacterCompositedApplied)
+            {
+                return "placement applied / ground position not confirmed";
+            }
+
             return "not detected by diagnostics / visual confirmation required";
         }
 

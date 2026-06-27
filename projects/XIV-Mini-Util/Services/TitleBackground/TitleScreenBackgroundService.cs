@@ -42,6 +42,9 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private string _pendingAutomaticCheckClipboardText = string.Empty;
     private bool _automaticCheckReportAvailabilityInitialized;
     private bool _automaticCheckReportAvailable;
+    private TitleBackgroundAutomaticCheckSettingsSnapshot? _automaticCheckSettingsSnapshot;
+    private string _automaticCheckRunId = string.Empty;
+    private bool _automaticCheckSettingsRestored = true;
 
     private Hook<CreateSceneDelegate>? _createSceneHook;
     private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
@@ -91,9 +94,14 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private string _charaSelectCharacterPlacementLastError = "none";
     private Vector3? _lastCharaSelectCharacterPlacementTarget;
     private string _lastCharaSelectCharacterPlacementSource = "none";
+    // 直近の配置で使ったアンカーの frame（地面 provenance 判定に使う）。camera-focus 由来は Unknown。
+    private string _lastCharaSelectCharacterPlacementAnchorFrame = TitleBackgroundCharaSelectAnchorFrame.Unknown;
     private int _fixOnPassiveCallCount;
     private int _fixOnFocusOverrideAppliedCount;
     private string _lastFixOnFocusOverrideSource = "not-run";
+    private int _fixOnViewOverrideAppliedCount;
+    private string _lastFixOnViewOverrideSource = "not-run";
+    private int _lastViewOverrideAppliedGeneration;
     private string _lastFixOnFocusOverrideGateReason = "not-run";
     // FixOn 発火「時点」の scene generation / context を保持する（報告時の値では pre-login 実態を取り違えるため）。
     private int _fixOnExperimentSceneGeneration;
@@ -241,6 +249,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _cameraCaptureService = new TitleBackgroundCameraCaptureService(clientState, objectTable, dataManager, log);
         _framework.Update += OnFrameworkUpdate;
 
+        TryRestoreInterruptedAutomaticCheck();
         RecordTransitionEvent("plugin initialized", "constructor");
         InitializeHooks();
         ApplyFromConfiguration();
@@ -282,7 +291,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     internal TitleBackgroundSimpleUiSummary RunSimpleAutoSetup()
     {
         ApplySimpleAutoSetup();
-        StartQuickCheck();
         return TitleBackgroundQuickCheckUiPresenter.BuildSimpleSummary(_configuration);
     }
 
@@ -349,6 +357,23 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _lastFixOnFocusOverrideGateReason = "not-run";
         _configuration.Save();
         RecordTransitionEvent("fixOnFocusAnchorOverrideEnabled changed", enabled ? "enabled" : "disabled");
+        ReloadNativeIntegration();
+    }
+
+    // 「今の見え方を保存」した CharaSelect カメラを FixOn で適用する機能の ON/OFF。
+    // camera+focus+fov を scene-local 絶対値で 1 回だけ上書きする（TitleEdit 方式）。候補一致時のみ。
+    public void SetFixOnViewOverrideEnabled(bool enabled)
+    {
+        if (_configuration.TitleBackgroundCharaSelectViewEnabled == enabled)
+        {
+            return;
+        }
+
+        _configuration.TitleBackgroundCharaSelectViewEnabled = enabled;
+        _fixOnViewOverrideAppliedCount = 0;
+        _lastFixOnViewOverrideSource = "not-run";
+        _configuration.Save();
+        RecordTransitionEvent("fixOnViewOverrideEnabled changed", enabled ? "enabled" : "disabled");
         ReloadNativeIntegration();
     }
 
@@ -598,6 +623,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
         _disposed = true;
         _framework.Update -= OnFrameworkUpdate;
+        RestoreAutomaticCheckSettingsOnce("service-dispose", reloadNativeIntegration: false);
         RestoreCameraProbeSettingsOnDispose();
         _cameraApplyPending = false;
         ResetCameraOverrideObservation();
@@ -1104,6 +1130,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _fixOnPassiveCallCount = 0;
         _fixOnFocusOverrideAppliedCount = 0;
         _lastFixOnFocusOverrideSource = "not-run";
+        _fixOnViewOverrideAppliedCount = 0;
+        _lastFixOnViewOverrideSource = "not-run";
         _lastFixOnFocusOverrideGateReason = "not-run";
         _lastObservedFixOnCamera = null;
         _lastObservedFixOnFocus = null;
@@ -1283,9 +1311,10 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     private bool ShouldInstallFixOnHook()
     {
-        // passive 観測（上書き無し）と focus-anchor override のどちらかが ON なら装着する。
+        // passive 観測（上書き無し）/ focus-anchor override / view override のいずれかが ON なら装着する。
         return (_configuration.TitleBackgroundFixOnPassiveObservationEnabled
-                || _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled)
+                || _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled
+                || _configuration.TitleBackgroundCharaSelectViewEnabled)
             && _addressResolver.FixOn != nint.Zero;
     }
 
@@ -1794,10 +1823,28 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"characterDraw.preLoginDrawPosition={(_lastPreLoginCharacterDrawPosition.HasValue ? FormatVector(_lastPreLoginCharacterDrawPosition.Value) : "none")}");
         lines.Add($"characterDraw.preLoginDrawPositionNonZero={(_lastPreLoginCharacterDrawPosition.HasValue && !TitleBackgroundCharacterSourceEvaluation.IsZeroPosition(_lastPreLoginCharacterDrawPosition.Value))}");
         lines.Add($"characterDraw.preLoginDrawRotation={FormatFloat(_lastPreLoginCharacterDrawRotation)}");
+        // 累積値（長期診断用）。/xmutbgdiag では従来どおり全 run の合計と最終配置を残す。
         lines.Add($"characterPlace.appliedFrameCount={_charaSelectCharacterPlacementCount}");
         lines.Add($"characterPlace.lastTarget={(_lastCharaSelectCharacterPlacementTarget.HasValue ? FormatVector(_lastCharaSelectCharacterPlacementTarget.Value) : "none")}");
         lines.Add($"characterPlace.lastSource={FormatNone(_lastCharaSelectCharacterPlacementSource)}");
+        lines.Add($"characterPlace.lastAnchorFrame={FormatNone(_lastCharaSelectCharacterPlacementAnchorFrame)}");
+        lines.Add($"characterPlace.lastAnchorFrameGroundProvenance={TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(_lastCharaSelectCharacterPlacementAnchorFrame)}");
+        // run-scoped 値（自動確認レポート用）。今回 run の配置回数と、その配置に対応する source/target/frame。
+        // 今回 0 回なら過去 run の位置・source を出さず none にする（run-scoped QuickCheck と整合させる）。
+        var runActive = IsRunScopedQuickCheckActive();
+        var runAppliedFrameCount = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedPlacementCount(
+            runActive,
+            _charaSelectCharacterPlacementCount,
+            _quickCheckState.CharacterPlacementCountStart);
+        var runPlacementApplied = runAppliedFrameCount > 0;
+        lines.Add($"characterPlace.runAppliedFrameCount={runAppliedFrameCount}");
+        lines.Add($"characterPlace.runTarget={(runPlacementApplied && _lastCharaSelectCharacterPlacementTarget.HasValue ? FormatVector(_lastCharaSelectCharacterPlacementTarget.Value) : "none")}");
+        lines.Add($"characterPlace.runSource={(runPlacementApplied ? FormatNone(_lastCharaSelectCharacterPlacementSource) : "none")}");
+        lines.Add($"characterPlace.runAnchorFrame={(runPlacementApplied ? FormatNone(_lastCharaSelectCharacterPlacementAnchorFrame) : "none")}");
+        lines.Add($"characterPlace.runAnchorFrameGroundProvenance={(runPlacementApplied && TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(_lastCharaSelectCharacterPlacementAnchorFrame))}");
         lines.Add($"characterPlace.anchorEnabled={_configuration.TitleBackgroundCharaSelectAnchorEnabled}");
+        lines.Add($"characterPlace.anchorFrame={FormatNone(_configuration.TitleBackgroundCharaSelectAnchorFrame)}");
+        lines.Add($"characterPlace.anchorFrameSupported={TitleBackgroundCharaSelectAnchorFrame.IsPlacementSupported(_configuration.TitleBackgroundCharaSelectAnchorFrame)}");
         lines.Add($"characterPlace.anchorCandidate={FormatNone(_configuration.TitleBackgroundCharaSelectAnchorCandidateId)}");
         lines.Add($"characterPlace.anchorTarget={(_configuration.TitleBackgroundCharaSelectAnchorEnabled ? FormatVector(new Vector3(_configuration.TitleBackgroundCharaSelectAnchorX, _configuration.TitleBackgroundCharaSelectAnchorY, _configuration.TitleBackgroundCharaSelectAnchorZ)) : "none")}");
         lines.Add($"characterPlace.lastError={FormatNone(_charaSelectCharacterPlacementLastError)}");
@@ -1820,6 +1867,15 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"fixOn.focusAnchorOverrideEnabled={_configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled}");
         lines.Add($"fixOn.focusAnchorOverrideAppliedCount={(fixOnInstalled ? _fixOnFocusOverrideAppliedCount.ToString() : "unavailable")}");
         lines.Add($"fixOn.focusAnchorOverrideLastSource={FormatNone(_lastFixOnFocusOverrideSource)}");
+
+        // view override（TitleEdit 方式: camera+focus+fov を scene-local 絶対値で一括上書き）。
+        lines.Add($"view.enabled={_configuration.TitleBackgroundCharaSelectViewEnabled}");
+        lines.Add($"view.candidate={FormatNone(_configuration.TitleBackgroundCharaSelectViewCandidateId)}");
+        lines.Add($"view.camera={(_configuration.TitleBackgroundCharaSelectViewEnabled ? FormatVector(new Vector3(_configuration.TitleBackgroundCharaSelectViewCameraX, _configuration.TitleBackgroundCharaSelectViewCameraY, _configuration.TitleBackgroundCharaSelectViewCameraZ)) : "none")}");
+        lines.Add($"view.focus={(_configuration.TitleBackgroundCharaSelectViewEnabled ? FormatVector(new Vector3(_configuration.TitleBackgroundCharaSelectViewFocusX, _configuration.TitleBackgroundCharaSelectViewFocusY, _configuration.TitleBackgroundCharaSelectViewFocusZ)) : "none")}");
+        lines.Add($"view.fovY={(_configuration.TitleBackgroundCharaSelectViewEnabled ? _configuration.TitleBackgroundCharaSelectViewFovY.ToString("0.###") : "none")}");
+        lines.Add($"view.overrideAppliedCount={(fixOnInstalled ? _fixOnViewOverrideAppliedCount.ToString() : "unavailable")}");
+        lines.Add($"view.overrideLastSource={FormatNone(_lastFixOnViewOverrideSource)}");
 
         // R0/R1/R2 比較実験ブロック（read-only）。1キャプチャで原因弁別に必要な値を出す。
         // method は Phase1 では focus-only 固定（parallel は Phase2 で実装してから R3 で測る）。

@@ -896,7 +896,8 @@ Test("title background camera profile case 1 bridge applied but visual unknown i
     return result.Level == TitleBackgroundQuickCheckLevel.WARN
         && result.Level != TitleBackgroundQuickCheckLevel.OK
         && result.Reason.Contains("visual", StringComparison.Ordinal)
-        && result.NextAction.Contains("Enable legacy shooting composition", StringComparison.Ordinal);
+        && result.NextAction.Contains("automatically copied report", StringComparison.Ordinal)
+        && !result.NextAction.Contains("legacy shooting composition", StringComparison.Ordinal);
 });
 
 Test("title background camera profile case 2 n4f4 candidate recommended requires visible profile", () =>
@@ -910,7 +911,8 @@ Test("title background camera profile case 2 n4f4 candidate recommended requires
 
     return result.Level == TitleBackgroundQuickCheckLevel.WARN
         && result.Level != TitleBackgroundQuickCheckLevel.OK
-        && result.NextAction.Contains("Enable legacy shooting composition", StringComparison.Ordinal);
+        && result.NextAction.Contains("camera framing investigation", StringComparison.Ordinal)
+        && !result.NextAction.Contains("legacy shooting composition", StringComparison.Ordinal);
 });
 
 Test("title background camera profile case 3 visible profile and visual visible is ok", () =>
@@ -1094,7 +1096,8 @@ Test("title background captured camera case 4 fallback profile without captured 
             true)));
 
     return result.Level == TitleBackgroundQuickCheckLevel.WARN
-        && result.NextAction.Contains("Enable legacy shooting composition", StringComparison.Ordinal);
+        && result.NextAction.Contains("camera framing investigation", StringComparison.Ordinal)
+        && !result.NextAction.Contains("legacy shooting composition", StringComparison.Ordinal);
 });
 
 Test("title background bridge applied camera is stored for settings ui", () =>
@@ -1369,9 +1372,14 @@ Test("title background settings simple panel hides advanced diagnostics", () =>
     var settingsText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
 
-    return simplePanel.Contains("キャラ選択背景", StringComparison.Ordinal)
-        && simplePanel.Contains("DrawTitleBackgroundSaveCharacterPositionButton", StringComparison.Ordinal)
-        && simplePanel.Contains("DrawTitleBackgroundBulkDiagnosticButton", StringComparison.Ordinal)
+    return simplePanel.Contains("自動確認を開始", StringComparison.Ordinal)
+        && simplePanel.Contains("結果をコピー", StringComparison.Ordinal)
+        && simplePanel.Contains("初期状態に戻す", StringComparison.Ordinal)
+        && !simplePanel.Contains("DrawTitleBackgroundSaveCharacterPositionButton", StringComparison.Ordinal)
+        && !simplePanel.Contains("DrawTitleBackgroundAnchorNudgeRow", StringComparison.Ordinal)
+        && !simplePanel.Contains("DrawTitleBackgroundBulkDiagnosticButton", StringComparison.Ordinal)
+        && !simplePanel.Contains("TryCaptureLoggedInPositionAsAnchor", StringComparison.Ordinal)
+        && !simplePanel.Contains("DrawTitleBackgroundLayerStepControls", StringComparison.Ordinal)
         && !simplePanel.Contains("Capture legacy visible camera", StringComparison.Ordinal)
         && !simplePanel.Contains("Save as n4f4 visible profile", StringComparison.Ordinal)
         && !simplePanel.Contains("Clear captured profile", StringComparison.Ordinal)
@@ -1382,17 +1390,60 @@ Test("title background settings simple panel hides advanced diagnostics", () =>
         && !simplePanel.Contains("Reset Check", StringComparison.Ordinal);
 });
 
-Test("title background settings simple check uses immediate bulk diagnostic entrypoint", () =>
+Test("title background settings simple check uses automatic check entrypoint", () =>
 {
     var root = FindRepositoryRoot();
     var settingsText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     var serviceText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"), "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
     var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
 
-    // Simple の主診断は login 遷移を待つ自動確認ではなく、即時の一括診断コピー。
-    return simplePanel.Contains("DrawTitleBackgroundBulkDiagnosticButton", StringComparison.Ordinal)
-        && !simplePanel.Contains("StartAutomaticQuickCheck", StringComparison.Ordinal)
-        && serviceText.Contains("public IReadOnlyList<string> RunBulkDiagnostic()", StringComparison.Ordinal);
+    return simplePanel.Contains("StartAutomaticQuickCheck", StringComparison.Ordinal)
+        && simplePanel.Contains("CancelAutomaticQuickCheck", StringComparison.Ordinal)
+        && !simplePanel.Contains("RunBulkDiagnostic", StringComparison.Ordinal)
+        && serviceText.Contains("internal IReadOnlyList<string> StartAutomaticQuickCheck()", StringComparison.Ordinal);
+});
+
+Test("title background selection does not start a hidden quickcheck", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = string.Join(
+        Environment.NewLine,
+        Directory.EnumerateFiles(
+            Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"),
+            "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
+    var setup = ExtractMethodBody(serviceText, "internal TitleBackgroundSimpleUiSummary RunSimpleAutoSetup()");
+
+    return setup.Contains("ApplySimpleAutoSetup()", StringComparison.Ordinal)
+        && !setup.Contains("StartQuickCheck()", StringComparison.Ordinal);
+});
+
+Test("simple title background reset clears hidden experimental settings", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = string.Join(
+        Environment.NewLine,
+        Directory.EnumerateFiles(
+            Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"),
+            "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
+    var settingsText = string.Join(
+        Environment.NewLine,
+        Directory.EnumerateFiles(
+            Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"),
+            "SettingsTab*.cs").Select(File.ReadAllText));
+    var reset = ExtractMethodBody(
+        serviceText,
+        "internal bool ResetSimpleTitleBackgroundSettings()");
+    var simplePanel = ExtractMethodBody(
+        settingsText,
+        "private void DrawTitleBackgroundSimplePanel()");
+
+    return simplePanel.Contains("ResetSimpleTitleBackgroundSettings()", StringComparison.Ordinal)
+        && reset.Contains("TitleBackgroundOverrideEnabled = false", StringComparison.Ordinal)
+        && reset.Contains("TitleBackgroundIntegratedCompositionEnabled = false", StringComparison.Ordinal)
+        && reset.Contains("TitleBackgroundFixOnPassiveObservationEnabled = false", StringComparison.Ordinal)
+        && reset.Contains("TitleBackgroundFixOnFocusAnchorOverrideEnabled = false", StringComparison.Ordinal)
+        && reset.Contains("TitleBackgroundCharaSelectAnchorEnabled = false", StringComparison.Ordinal)
+        && reset.Contains("ReloadNativeIntegration()", StringComparison.Ordinal);
 });
 
 Test("title background automatic check report is ready to paste", () =>
@@ -1403,11 +1454,206 @@ Test("title background automatic check report is ready to paste", () =>
         ["sceneReadySignal.acceptedCount=1", "transition.verdict.loginTransitionSafety=safe"]);
 
     return report.Contains("Title Background automatic check", StringComparison.Ordinal)
+        && report.Contains("runId=none", StringComparison.Ordinal)
         && report.Contains("completion=complete", StringComparison.Ordinal)
         && report.Contains("--- QuickCheck ---", StringComparison.Ordinal)
         && report.Contains("[XIV Mini Util] Background: applied", StringComparison.Ordinal)
         && report.Contains("--- Diagnostic ---", StringComparison.Ordinal)
         && report.Contains("[XIV Mini Util] transition.verdict.loginTransitionSafety=safe", StringComparison.Ordinal);
+});
+
+Test("title background automatic diagnostic is bounded and curated", () =>
+{
+    var selected = TitleBackgroundAutomaticCheckDiagnosticSelector.Select(
+    [
+        "runtimeMode=CharaSelectOnly",
+        "lastOverrideApplied=True",
+        "transition.verdict.loginTransitionSafety=safe",
+        "characterPlace.appliedFrameCount=42",
+        "characterPlace.runAppliedFrameCount=1",
+        "fixOn.calls=1",
+        "fixOn.exp.sceneGeneration=7",
+        "phase2C.timeline.sample[0]=raw",
+        "native.signature.address=0x1234",
+        "transition.detailDump=details.txt",
+    ]);
+
+    return selected.Count == 6
+        && selected.Contains("runtimeMode=CharaSelectOnly")
+        && selected.Contains("lastOverrideApplied=True")
+        && selected.Contains("transition.verdict.loginTransitionSafety=safe")
+        // 自動レポートは run-scoped の配置証拠を選び、累積 appliedFrameCount は選ばない。
+        && selected.Contains("characterPlace.runAppliedFrameCount=1")
+        && !selected.Contains("characterPlace.appliedFrameCount=42")
+        && selected.Contains("fixOn.calls=1")
+        && selected.Contains("fixOn.exp.sceneGeneration=7")
+        && !selected.Any(line => line.Contains("raw", StringComparison.Ordinal))
+        && !selected.Any(line => line.Contains("signature", StringComparison.Ordinal))
+        && !selected.Any(line => line.Contains("detailDump", StringComparison.Ordinal));
+});
+
+Test("automatic check settings snapshot restores every temporary setup field", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundOverrideEnabled = false,
+        TitleBackgroundCameraOverrideEnabled = false,
+        TitleBackgroundIntegratedCompositionEnabled = false,
+        CharaSelectSceneCompositionEnabled = true,
+        TitleBackgroundSelectedPresetId = "original-preset",
+        TitleBackgroundCharacterSelectOverrideCandidateId = "original-candidate",
+        TitleBackgroundTerritoryPath = "original/path",
+        TitleBackgroundTerritoryTypeId = 123,
+        TitleBackgroundLayoutTerritoryTypeId = 124,
+        TitleBackgroundLayoutLayerFilterKey = 125,
+        TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.ResolveOnly,
+        TitleBackgroundCharacterSelectBackgroundMode = TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly,
+        TitleBackgroundCharacterSelectLightingMode = TitleBackgroundCharacterSelectLightingMode.DiagnosticsOnly,
+        TitleBackgroundCharaSelectCameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.Default,
+        TitleBackgroundFixOnPassiveObservationEnabled = true,
+        TitleBackgroundFixOnFocusAnchorOverrideEnabled = false,
+        TitleBackgroundCharaSelectAnchorEnabled = true,
+        TitleBackgroundCharaSelectAnchorCandidateId = "anchor-candidate",
+        TitleBackgroundCharaSelectAnchorX = 1,
+        TitleBackgroundCharaSelectAnchorY = 2,
+        TitleBackgroundCharaSelectAnchorZ = 3,
+        TitleBackgroundCharaSelectAnchorRotation = 4,
+        TitleBackgroundCharaSelectAnchorFrame = "world",
+        TitleBackgroundCharaSelectViewEnabled = true,
+        TitleBackgroundCharaSelectViewCandidateId = "view-candidate",
+        TitleBackgroundCharaSelectViewCameraX = 5,
+        TitleBackgroundCharaSelectViewCameraY = 6,
+        TitleBackgroundCharaSelectViewCameraZ = 7,
+        TitleBackgroundCharaSelectViewFocusX = 8,
+        TitleBackgroundCharaSelectViewFocusY = 9,
+        TitleBackgroundCharaSelectViewFocusZ = 10,
+        TitleBackgroundCharaSelectViewFovY = 1.1f,
+    };
+    var snapshot = TitleBackgroundAutomaticCheckSettingsSnapshot.Capture(configuration);
+
+    TitleBackgroundQuickCheckUiPresenter.ApplySimpleAutoSetup(configuration);
+    configuration.CharaSelectSceneCompositionEnabled = false;
+    configuration.TitleBackgroundFixOnPassiveObservationEnabled = false;
+    configuration.TitleBackgroundCharaSelectAnchorEnabled = false;
+    configuration.TitleBackgroundCharaSelectViewEnabled = false;
+    configuration.TitleBackgroundCharaSelectViewCameraX = 0;
+    snapshot.ApplyTo(configuration);
+
+    return configuration.TitleBackgroundOverrideEnabled == false
+        && configuration.TitleBackgroundCameraOverrideEnabled == false
+        && configuration.TitleBackgroundIntegratedCompositionEnabled == false
+        && configuration.CharaSelectSceneCompositionEnabled
+        && configuration.TitleBackgroundSelectedPresetId == "original-preset"
+        && configuration.TitleBackgroundCharacterSelectOverrideCandidateId == "original-candidate"
+        && configuration.TitleBackgroundTerritoryPath == "original/path"
+        && configuration.TitleBackgroundTerritoryTypeId == 123
+        && configuration.TitleBackgroundLayoutTerritoryTypeId == 124
+        && configuration.TitleBackgroundLayoutLayerFilterKey == 125
+        && configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly
+        && configuration.TitleBackgroundCharacterSelectBackgroundMode == TitleBackgroundCharacterSelectBackgroundMode.SceneOverrideOnly
+        && configuration.TitleBackgroundCharacterSelectLightingMode == TitleBackgroundCharacterSelectLightingMode.DiagnosticsOnly
+        && configuration.TitleBackgroundCharaSelectCameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.Default
+        && configuration.TitleBackgroundFixOnPassiveObservationEnabled
+        && !configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled
+        && configuration.TitleBackgroundCharaSelectAnchorEnabled
+        && configuration.TitleBackgroundCharaSelectAnchorCandidateId == "anchor-candidate"
+        && configuration.TitleBackgroundCharaSelectAnchorX == 1
+        && configuration.TitleBackgroundCharaSelectAnchorY == 2
+        && configuration.TitleBackgroundCharaSelectAnchorZ == 3
+        && configuration.TitleBackgroundCharaSelectAnchorRotation == 4
+        && configuration.TitleBackgroundCharaSelectAnchorFrame == "world"
+        && configuration.TitleBackgroundCharaSelectViewEnabled
+        && configuration.TitleBackgroundCharaSelectViewCandidateId == "view-candidate"
+        && configuration.TitleBackgroundCharaSelectViewCameraX == 5
+        && configuration.TitleBackgroundCharaSelectViewCameraY == 6
+        && configuration.TitleBackgroundCharaSelectViewCameraZ == 7
+        && configuration.TitleBackgroundCharaSelectViewFocusX == 8
+        && configuration.TitleBackgroundCharaSelectViewFocusY == 9
+        && configuration.TitleBackgroundCharaSelectViewFocusZ == 10
+        && Math.Abs(configuration.TitleBackgroundCharaSelectViewFovY - 1.1f) < 0.0001f;
+});
+
+Test("automatic check recovery journal round trips original settings", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundOverrideEnabled = true,
+        TitleBackgroundCharacterSelectOverrideCandidateId = "custom:n4f4",
+        TitleBackgroundLayoutLayerFilterKey = 51,
+    };
+    var journal = TitleBackgroundAutomaticCheckRecoveryJournal.Create(
+        "run-123",
+        new DateTimeOffset(2026, 6, 27, 12, 0, 0, TimeSpan.FromHours(9)),
+        configuration);
+    var restored = TitleBackgroundAutomaticCheckRecoveryJournal.Deserialize(
+        TitleBackgroundAutomaticCheckRecoveryJournal.Serialize(journal));
+
+    return restored != null
+        && restored.SchemaVersion == TitleBackgroundAutomaticCheckRecoveryJournal.CurrentSchemaVersion
+        && restored.RunId == "run-123"
+        && restored.OriginalSettings.OverrideEnabled
+        && restored.OriginalSettings.CandidateId == "custom:n4f4"
+        && restored.OriginalSettings.LayoutLayerFilterKey == 51;
+});
+
+Test("automatic check restore reapplies chara select runtime state", () =>
+{
+    var root = FindRepositoryRoot();
+    var quickCheckSource = File.ReadAllText(Path.Combine(
+        root,
+        "projects",
+        "XIV-Mini-Util",
+        "Services",
+        "TitleBackground",
+        "TitleScreenBackgroundService.QuickCheck.cs"));
+    var charaSelectSource = File.ReadAllText(Path.Combine(
+        root,
+        "projects",
+        "XIV-Mini-Util",
+        "Services",
+        "CharaSelect",
+        "CharaSelectService.SceneComposition.cs"));
+
+    return quickCheckSource.Contains(
+            "_charaSelectService?.ReapplyCompositionRuntimeStateFromConfiguration()",
+            StringComparison.Ordinal)
+        && charaSelectSource.Contains(
+            "internal void ReapplyCompositionRuntimeStateFromConfiguration()",
+            StringComparison.Ordinal)
+        && charaSelectSource.Contains("ApplySceneCompositionRuntimeState()", StringComparison.Ordinal)
+        && charaSelectSource.Contains(
+            "ApplyTitleBackgroundCharacterCompositionBridgeRuntimeState()",
+            StringComparison.Ordinal);
+});
+
+Test("automatic check report distinguishes settings restore and runtime reload", () =>
+{
+    var root = FindRepositoryRoot();
+    var source = File.ReadAllText(Path.Combine(
+        root,
+        "projects",
+        "XIV-Mini-Util",
+        "Services",
+        "TitleBackground",
+        "TitleScreenBackgroundService.QuickCheck.cs"));
+
+    return source.Contains("settingsRestored={restoreResult.SettingsRestored}", StringComparison.Ordinal)
+        && source.Contains("runtimeReloaded={restoreResult.RuntimeReloaded}", StringComparison.Ordinal)
+        && source.Contains(
+            "new AutomaticCheckRestoreResult(true, false)",
+            StringComparison.Ordinal);
+});
+
+Test("advanced title background display mode migrates to simple", () =>
+{
+    var target = new Configuration();
+    var source = new Configuration
+    {
+        TitleBackgroundSettingsDisplayMode = TitleBackgroundSettingsDisplayMode.Advanced,
+    };
+
+    target.ApplyFrom(source);
+    return target.TitleBackgroundSettingsDisplayMode == TitleBackgroundSettingsDisplayMode.Simple;
 });
 
 Test("title background automatic check times out only after login", () =>
@@ -1521,7 +1767,7 @@ Test("title background native character source evaluation is decisive", () =>
         && postLogin.PostLoginReadAttempted;
 });
 
-Test("title background composited character flips delivery verdict to complete", () =>
+Test("title background composited character reports placement without claiming visibility", () =>
 {
     var delivery = DeliveryFromRaw(
         "stub-only",
@@ -1537,8 +1783,9 @@ Test("title background composited character flips delivery verdict to complete",
         characterCompositedApplied: true);
 
     return delivery.CharacterVisibilityObserved == "composited-experimental"
-        && delivery.CharacterVisibilityBlocker == "none"
-        && delivery.MvpStatus == "complete-character-composited";
+        && delivery.CharacterVisibilityBlocker == "visual-confirmation-required"
+        && delivery.MvpStatus == "character-placement-applied-unverified"
+        && delivery.MvpBlockingIssue == "visual-confirmation-required";
 });
 
 Test("title background quickcheck suppresses unresolved reason when character composited", () =>
@@ -1550,7 +1797,382 @@ Test("title background quickcheck suppresses unresolved reason when character co
         characterCompositedApplied: true));
 
     return resolved.Reason != "native character source is unresolved"
-        && !resolved.NextAction.Contains("native character source investigation", StringComparison.Ordinal);
+        && resolved.Reason != "captured legacy visible camera profile is missing"
+        && !resolved.Warnings.Any(warning => warning.Contains("captured legacy visible camera profile", StringComparison.Ordinal))
+        && !resolved.NextAction.Contains("native character source investigation", StringComparison.Ordinal)
+        && !resolved.NextAction.Contains("legacy shooting composition", StringComparison.Ordinal);
+});
+
+Test("camera focus fallback is not treated as ground verified", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterExpectedVisible: false,
+        characterCompositedApplied: true,
+        characterPlacedViaCameraFocusFallback: true));
+
+    return result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.CharacterStatus == "placed in frame / ground position not confirmed"
+        && result.Warnings.Any(warning => warning.Contains("camera-focus fallback", StringComparison.Ordinal)
+            && warning.Contains("visual confirmation required", StringComparison.Ordinal))
+        && result.Reason == "background works but character visibility is not visually confirmed";
+});
+
+Test("anchor verified placement is treated as ground placement success", () =>
+{
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterExpectedVisible: false,
+        characterCompositedApplied: true,
+        characterGroundPlacementVerified: true));
+
+    return result.CharacterStatus == "placement verified on ground anchor"
+        && !result.Warnings.Any(warning => warning.Contains("camera-focus fallback", StringComparison.Ordinal));
+});
+
+Test("passive observation suppresses unapplied camera profile warning", () =>
+{
+    // passive 観測中はカメラを書き換えない仕様。yaw/pitch/distance 未適用は失敗ではないので警告しない。
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        passiveCameraObservationActive: true,
+        cameraVisibleProfileResolved: true,
+        cameraYaw: "",
+        cameraPitch: "",
+        cameraDistance: ""));
+
+    return !result.Warnings.Any(warning => warning.Contains("yaw/pitch/distance was not applied", StringComparison.Ordinal));
+});
+
+Test("configured camera override still warns when profile not applied", () =>
+{
+    // passive OFF（override を適用する設定）なのに未適用なら、従来どおり警告し本当の失敗を隠さない。
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        passiveCameraObservationActive: false,
+        cameraVisibleProfileResolved: true,
+        cameraYaw: "",
+        cameraPitch: "",
+        cameraDistance: ""));
+
+    return result.Warnings.Any(warning => warning.Contains("yaw/pitch/distance was not applied", StringComparison.Ordinal));
+});
+
+Test("automatic check sceneReady verdict ignores historical cumulative count", () =>
+{
+    // 累積3回受理でも current run の開始時点が2なら run-scoped は1回 → 複数受理ではない。
+    var runScopedCount = TitleBackgroundAutomaticCheckLogic.ResolveVerdictSceneReadyAcceptedCount(
+        automaticInvocation: true,
+        runScopedActive: true,
+        cumulativeAcceptedCount: 3,
+        runStartAcceptedCount: 2);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
+    [
+        CharacterPlacementFrameFromCandidates([]),
+    ]);
+    var delivery = Delivery(
+        summary,
+        lastOverrideApplied: true,
+        transitionSafety: "safe",
+        sceneReadyAcceptedMultipleTimes: runScopedCount > 1);
+
+    return runScopedCount == 1
+        && delivery.Safety.Verdict == "safe"
+        && delivery.TransitionSafetyVerdict == "safe"
+        && delivery.NextAction != "unsafe-stop"
+        && delivery.DeliveryVerdict != "unsafe";
+});
+
+Test("automatic check sceneReady verdict keeps warning when current run accepts multiple times", () =>
+{
+    // current run 内で2回受理されたら run-scoped でも複数受理 → 安全側の警告を維持する。
+    var runScopedCount = TitleBackgroundAutomaticCheckLogic.ResolveVerdictSceneReadyAcceptedCount(
+        automaticInvocation: true,
+        runScopedActive: true,
+        cumulativeAcceptedCount: 4,
+        runStartAcceptedCount: 2);
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
+    [
+        CharacterPlacementFrameFromCandidates([]),
+    ]);
+    var delivery = Delivery(
+        summary,
+        lastOverrideApplied: true,
+        transitionSafety: "safe",
+        sceneReadyAcceptedMultipleTimes: runScopedCount > 1);
+
+    return runScopedCount == 2
+        && delivery.Safety.Verdict == "warning"
+        && delivery.Safety.Reason == "scene-ready-accepted-multiple-times"
+        && delivery.Safety.BlocksBackgroundCandidatePromotion
+        && delivery.TransitionSafetyVerdict == "warning-scene-ready-accepted-multiple-times";
+});
+
+Test("normal diagnostic sceneReady verdict preserves cumulative count", () =>
+{
+    // 通常診断（automaticInvocation=false）や run-scoped 無効時は累積値を維持して長期傾向を残す。
+    var normal = TitleBackgroundAutomaticCheckLogic.ResolveVerdictSceneReadyAcceptedCount(
+        automaticInvocation: false,
+        runScopedActive: true,
+        cumulativeAcceptedCount: 3,
+        runStartAcceptedCount: 2);
+    var notRunScoped = TitleBackgroundAutomaticCheckLogic.ResolveVerdictSceneReadyAcceptedCount(
+        automaticInvocation: true,
+        runScopedActive: false,
+        cumulativeAcceptedCount: 3,
+        runStartAcceptedCount: 2);
+
+    return normal == 3 && notRunScoped == 3;
+});
+
+// ── Review fixes: run-scoped placement / provenance / sticky post-login ──────
+
+Test("chara select fallback frame is placement-supported but lacks ground provenance", () =>
+{
+    // CharaSelectFallback は placement-supported だが、水上座標の再保存の可能性があり地面確認済みにしない。
+    return TitleBackgroundCharaSelectAnchorFrame.IsPlacementSupported(
+            TitleBackgroundCharaSelectAnchorFrame.CharaSelectFallback)
+        && !TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(
+            TitleBackgroundCharaSelectAnchorFrame.CharaSelectFallback)
+        && TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(
+            TitleBackgroundCharaSelectAnchorFrame.LobbyNative)
+        && !TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(
+            TitleBackgroundCharaSelectAnchorFrame.World)
+        && !TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(
+            TitleBackgroundCharaSelectAnchorFrame.Unknown);
+});
+
+Test("fallback anchor placement is not treated as ground verified", () =>
+{
+    // anchor 由来でも frame が CharaSelectFallback なら地面確認済みにしない。
+    var groundVerified = TitleBackgroundAutomaticCheckLogic.ResolveGroundPlacementVerified(
+        placementApplied: true,
+        placementSource: TitleBackgroundCharaSelectAnchorLogic.AnchorSource,
+        anchorFrame: TitleBackgroundCharaSelectAnchorFrame.CharaSelectFallback);
+    var lobbyNativeVerified = TitleBackgroundAutomaticCheckLogic.ResolveGroundPlacementVerified(
+        placementApplied: true,
+        placementSource: TitleBackgroundCharaSelectAnchorLogic.AnchorSource,
+        anchorFrame: TitleBackgroundCharaSelectAnchorFrame.LobbyNative);
+
+    // 評価器: provenance 不足の配置は WARN（地面位置未確認）として扱われ、false OK にならない。
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterExpectedVisible: false,
+        characterCompositedApplied: true,
+        characterPlacedViaCameraFocusFallback: false,
+        characterGroundPlacementVerified: false));
+
+    return !groundVerified
+        && lobbyNativeVerified
+        && result.Level == TitleBackgroundQuickCheckLevel.WARN
+        && result.CharacterStatus == "placement applied / ground position not confirmed"
+        && result.Warnings.Any(warning => warning.Contains("ground position is not verified", StringComparison.Ordinal));
+});
+
+Test("placement result is run-scoped: previous run success does not leak into current run", () =>
+{
+    // 前回 run で1回配置成功（累積1）、今回 run の開始 baseline も1 → 今回の配置は0回。
+    var currentRunCount = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedPlacementCount(
+        runScoped: true,
+        cumulativeCount: 1,
+        runStartCount: 1);
+    // run-scoped でないときは累積を維持する。
+    var cumulative = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedPlacementCount(
+        runScoped: false,
+        cumulativeCount: 1,
+        runStartCount: 1);
+    // 今回 run でも配置されたケース。
+    var placedThisRun = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedPlacementCount(
+        runScoped: true,
+        cumulativeCount: 2,
+        runStartCount: 1);
+
+    // 今回0回なら composited 扱いにならず、過去 run の source/frame を流用しない。
+    var result = TitleBackgroundQuickCheckEvaluator.Evaluate(QuickCheckInput(
+        characterExpectedVisible: false,
+        characterCompositedApplied: currentRunCount > 0,
+        characterGroundPlacementVerified: false));
+
+    return currentRunCount == 0
+        && cumulative == 1
+        && placedThisRun == 1
+        && !result.Warnings.Any(warning => warning.Contains("ground position is not verified", StringComparison.Ordinal))
+        && result.CharacterStatus == "not detected by diagnostics / visual confirmation required";
+});
+
+Test("post-login event anomaly is run-scoped: previous run anomaly does not fail current run", () =>
+{
+    // 前回 run で検出（lastEventSeq=5）、今回 run の開始 seq=10 → 今回の異常ではない。
+    var previousRunAnomaly = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedEventAnomaly(
+        runScoped: true,
+        detected: true,
+        lastEventSeq: 5,
+        runStartEventSeq: 10);
+    // 今回 run 内で発生（lastEventSeq=15 > 開始 seq=10）→ 今回の異常として維持する。
+    var currentRunAnomaly = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedEventAnomaly(
+        runScoped: true,
+        detected: true,
+        lastEventSeq: 15,
+        runStartEventSeq: 10);
+    // 通常の長期診断（run-scoped でない）は累積履歴を維持する。
+    var longTerm = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedEventAnomaly(
+        runScoped: false,
+        detected: true,
+        lastEventSeq: 5,
+        runStartEventSeq: 10);
+
+    return !previousRunAnomaly && currentRunAnomaly && longTerm;
+});
+
+Test("post-login state anomaly is run-scoped: stale history does not fail current run", () =>
+{
+    // 前回 run の sticky 履歴あり・今回 run は正常状態 → 今回は異常としない。
+    var staleHistoryOnly = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedStateAnomaly(
+        runScoped: true,
+        historicalDetected: true,
+        freshDetected: false);
+    // 今回 run の状態が異常 → 維持する。
+    var currentStateAnomaly = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedStateAnomaly(
+        runScoped: true,
+        historicalDetected: false,
+        freshDetected: true);
+    // 通常の長期診断は累積履歴も含める。
+    var longTerm = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedStateAnomaly(
+        runScoped: false,
+        historicalDetected: true,
+        freshDetected: false);
+
+    return !staleHistoryOnly && currentStateAnomaly && longTerm;
+});
+
+Test("delivery diagnostic is wired to run-scoped anomaly and placement values", () =>
+{
+    // 配線回帰ガード: Delivery 判定が累積/sticky をそのまま受け取っていないことをソースで検証する。
+    var root = FindRepositoryRoot();
+    var source = File.ReadAllText(Path.Combine(
+        root,
+        "projects",
+        "XIV-Mini-Util",
+        "Services",
+        "TitleBackground",
+        "TitleScreenBackgroundService.Diagnostics.cs"));
+    var callStart = source.IndexOf("TitleBackgroundDeliveryDiagnostic.BuildSummary(", StringComparison.Ordinal);
+    var callEnd = callStart >= 0 ? source.IndexOf(");", callStart, StringComparison.Ordinal) : -1;
+    var call = callStart >= 0 && callEnd > callStart ? source[callStart..callEnd] : string.Empty;
+
+    return call.Length > 0
+        // 自動確認用に run-scoped 解決した値を渡している。
+        && call.Contains("deliveryPhase2GAppliedAfterLogin", StringComparison.Ordinal)
+        && call.Contains("deliveryCharacterPlacementApplied", StringComparison.Ordinal)
+        // 背景適用も run-scoped 値を渡している。
+        && call.Contains("deliveryLastOverrideApplied", StringComparison.Ordinal)
+        && call.Contains("deliveryHistoricalOverrideApplied", StringComparison.Ordinal)
+        && call.Contains("deliveryHistoricalOverridePath", StringComparison.Ordinal)
+        // 累積 placement count / sticky Phase2G / 累積 override 履歴をそのまま渡していない。
+        && !call.Contains("_charaSelectCharacterPlacementCount > 0", StringComparison.Ordinal)
+        && !call.Contains("_transitionDiagnostics.Phase2GAppliedAfterLogin", StringComparison.Ordinal)
+        && !call.Contains("_lastOverrideApplied", StringComparison.Ordinal)
+        && !call.Contains("_lastHistoricalOverridePath", StringComparison.Ordinal)
+        // scene override leak も run-scoped state 解決を経由している。
+        && source.Contains("phase2NSceneOverrideActiveAfterLoginDetected = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedStateAnomaly", StringComparison.Ordinal)
+        && source.Contains("deliveryRunScoped", StringComparison.Ordinal);
+});
+
+Test("delivery background applied is run-scoped: previous run success does not leak", () =>
+{
+    // 前回 run で1回適用（累積1）、今回 run の開始 baseline も1 → 今回は0回適用。
+    var appliedThisRun = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedCount(
+        runScoped: true,
+        cumulativeCount: 1,
+        runStartCount: 1) > 0;
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
+    [
+        CharacterPlacementFrameFromCandidates([]),
+    ]);
+    // 今回0回なら historical flag/path も Delivery 判定へ入れない。
+    var delivery = Delivery(
+        summary,
+        lastOverrideApplied: appliedThisRun,
+        transitionSafety: "safe",
+        historicalLastOverrideApplied: appliedThisRun,
+        historicalLastOverridePath: appliedThisRun ? "ex3/01_nvt_n4/fld/n4f4/level/n4f4" : string.Empty);
+
+    return !appliedThisRun
+        && !delivery.BackgroundApplication.Observed
+        && delivery.BackgroundDeliveryVerdict == "not-observed"
+        && delivery.DeliveryVerdict != "working-background-only";
+});
+
+Test("delivery background applied is run-scoped: current run success is observed", () =>
+{
+    // 今回 run で適用（累積2 - baseline1 = 1回）→ 背景適用を観測扱いにする。
+    var appliedThisRun = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedCount(
+        runScoped: true,
+        cumulativeCount: 2,
+        runStartCount: 1) > 0;
+    var summary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(
+    [
+        CharacterPlacementFrameFromCandidates([]),
+    ]);
+    var delivery = Delivery(
+        summary,
+        lastOverrideApplied: appliedThisRun,
+        transitionSafety: "safe",
+        historicalLastOverrideApplied: appliedThisRun,
+        historicalLastOverridePath: appliedThisRun ? "ex3/01_nvt_n4/fld/n4f4/level/n4f4" : string.Empty);
+
+    return appliedThisRun
+        && delivery.BackgroundApplication.Observed
+        && delivery.BackgroundDeliveryVerdict == "working-background-only-observed";
+});
+
+Test("automatic report selects run-scoped character placement evidence", () =>
+{
+    // 配線回帰ガード: 自動確認レポートが run-scoped の配置証拠を選択し、累積 last* を出さない。
+    var root = FindRepositoryRoot();
+    var serviceSource = File.ReadAllText(Path.Combine(
+        root,
+        "projects",
+        "XIV-Mini-Util",
+        "Services",
+        "TitleBackground",
+        "TitleScreenBackgroundService.cs"));
+    var quickCheckSource = File.ReadAllText(Path.Combine(
+        root,
+        "projects",
+        "XIV-Mini-Util",
+        "Services",
+        "TitleBackground",
+        "TitleBackgroundQuickCheck.cs"));
+    var includedStart = quickCheckSource.IndexOf("IncludedKeys", StringComparison.Ordinal);
+    var includedEnd = includedStart >= 0 ? quickCheckSource.IndexOf("};", includedStart, StringComparison.Ordinal) : -1;
+    var included = includedStart >= 0 && includedEnd > includedStart ? quickCheckSource[includedStart..includedEnd] : string.Empty;
+
+    return serviceSource.Contains("characterPlace.runAppliedFrameCount=", StringComparison.Ordinal)
+        && serviceSource.Contains("characterPlace.runSource=", StringComparison.Ordinal)
+        && serviceSource.Contains("characterPlace.runAnchorFrame=", StringComparison.Ordinal)
+        && included.Length > 0
+        && included.Contains("\"characterPlace.runAppliedFrameCount\"", StringComparison.Ordinal)
+        && included.Contains("\"characterPlace.runSource\"", StringComparison.Ordinal)
+        && included.Contains("\"characterPlace.runAnchorFrame\"", StringComparison.Ordinal)
+        // 累積 last* は自動レポートに含めない。
+        && !included.Contains("\"characterPlace.lastSource\"", StringComparison.Ordinal)
+        && !included.Contains("\"characterPlace.appliedFrameCount\"", StringComparison.Ordinal);
+});
+
+Test("automatic check preserves an enabled focus override", () =>
+{
+    var root = FindRepositoryRoot();
+    var source = File.ReadAllText(Path.Combine(
+        root,
+        "projects",
+        "XIV-Mini-Util",
+        "Services",
+        "TitleBackground",
+        "TitleScreenBackgroundService.QuickCheck.cs"));
+    var prepare = ExtractMethodBody(source, "private void PrepareAutomaticQuickCheckDiagnostics()");
+
+    return prepare.Contains(
+            "TitleBackgroundFixOnFocusAnchorOverrideEnabled",
+            StringComparison.Ordinal)
+        && !prepare.Contains(
+            "TitleBackgroundFixOnFocusAnchorOverrideEnabled = false",
+            StringComparison.Ordinal);
 });
 
 Test("title background pre-login native source remains verifiable after login", () =>
@@ -5378,7 +6000,10 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
     bool cameraCapturedProfileEnabled = false,
     bool bridgeCharacterCompositionApplied = false,
     bool bridgeCameraProfileApplied = false,
-    bool characterCompositedApplied = false)
+    bool characterCompositedApplied = false,
+    bool passiveCameraObservationActive = false,
+    bool characterPlacedViaCameraFocusFallback = false,
+    bool characterGroundPlacementVerified = false)
 {
     return new TitleBackgroundQuickCheckInput(
         RunScoped: runScoped,
@@ -5463,7 +6088,10 @@ TitleBackgroundQuickCheckInput QuickCheckInput(
         CameraCurrentLookAt: "",
         BridgeCharacterCompositionApplied: bridgeCharacterCompositionApplied,
         BridgeCameraProfileApplied: bridgeCameraProfileApplied,
-        CharacterCompositedApplied: characterCompositedApplied);
+        CharacterCompositedApplied: characterCompositedApplied,
+        PassiveCameraObservationActive: passiveCameraObservationActive,
+        CharacterPlacedViaCameraFocusFallback: characterPlacedViaCameraFocusFallback,
+        CharacterGroundPlacementVerified: characterGroundPlacementVerified);
 }
 
 // ── New fix cases ──────────────────────────────────────────────────────────
@@ -5926,6 +6554,98 @@ Test("fixOn execution context blocked when logged in or bridge off or not chara 
             false, true, true, true, 3, 3, false);
 });
 
+Test("fixOn view override applies saved camera/focus/fov when candidate matches", () =>
+{
+    var view = new TitleBackgroundCharaSelectView(
+        true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
+    var r = TitleBackgroundFixOnViewOverrideLogic.Resolve(
+        true, view, "custom:n4f4", new Vector3(0f, 0f, 0f), new Vector3(0f, 14f, 0f), 60f);
+    return r.ShouldOverride
+        && r.Source == "view"
+        && r.Camera == new Vector3(1f, 14f, 3f)
+        && r.Focus == new Vector3(0f, 14.5f, 0f)
+        && Math.Abs(r.FovY - 45f) < 0.0001f;
+});
+
+Test("fixOn view override passes through when disabled / mismatch / empty / non-finite", () =>
+{
+    var view = new TitleBackgroundCharaSelectView(
+        true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
+    var observedCam = new Vector3(2f, 2f, 2f);
+    var observedFocus = new Vector3(0f, 14f, 0f);
+    var disabled = TitleBackgroundFixOnViewOverrideLogic.Resolve(false, view, "custom:n4f4", observedCam, observedFocus, 60f);
+    var mismatch = TitleBackgroundFixOnViewOverrideLogic.Resolve(true, view, "manual:slot1", observedCam, observedFocus, 60f);
+    var emptyView = new TitleBackgroundCharaSelectView(true, string.Empty, new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
+    var emptyId = TitleBackgroundFixOnViewOverrideLogic.Resolve(true, emptyView, "anything", observedCam, observedFocus, 60f);
+    var nanView = new TitleBackgroundCharaSelectView(true, "custom:n4f4", new Vector3(float.NaN, 0f, 0f), new Vector3(0f, 0f, 0f), 45f);
+    var nonFinite = TitleBackgroundFixOnViewOverrideLogic.Resolve(true, nanView, "custom:n4f4", observedCam, observedFocus, 60f);
+    return !disabled.ShouldOverride && disabled.Camera == observedCam && disabled.Focus == observedFocus
+        && !mismatch.ShouldOverride
+        && !emptyId.ShouldOverride
+        && !nonFinite.ShouldOverride;
+});
+
+Test("configuration chara select view fields persist as top-level json", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundCharaSelectViewEnabled = true,
+        TitleBackgroundCharaSelectViewCandidateId = "custom:n4f4",
+        TitleBackgroundCharaSelectViewCameraX = 1.5f,
+        TitleBackgroundCharaSelectViewFocusZ = -2.5f,
+        TitleBackgroundCharaSelectViewFovY = 0.9f,
+    };
+    var json = JsonSerializer.Serialize(configuration);
+    var restored = JsonSerializer.Deserialize<Configuration>(json);
+    return json.Contains("\"TitleBackgroundCharaSelectViewEnabled\"", StringComparison.Ordinal)
+        && restored!.TitleBackgroundCharaSelectViewEnabled
+        && restored.TitleBackgroundCharaSelectViewCandidateId == "custom:n4f4"
+        && Math.Abs(restored.TitleBackgroundCharaSelectViewCameraX - 1.5f) < 0.0001f
+        && Math.Abs(restored.TitleBackgroundCharaSelectViewFocusZ - (-2.5f)) < 0.0001f;
+});
+
+Test("fixOn detour applies view override with camera+focus+fov ahead of focus-only", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var detour = ExtractMethodBody(hooksText, "private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)");
+    var viewIndex = detour.IndexOf("TitleBackgroundFixOnViewOverrideLogic.Resolve", StringComparison.Ordinal);
+    var focusIndex = detour.IndexOf("TitleBackgroundFixOnFocusOverrideLogic.Resolve", StringComparison.Ordinal);
+
+    // view 経路は camera+focus+fov をまとめて上書きし、focus-only 経路より前に評価する。
+    return viewIndex >= 0 && focusIndex >= 0 && viewIndex < focusIndex
+        && detour.Contains("overrideFovY = viewResolution.FovY", StringComparison.Ordinal)
+        && detour.Contains("invocationMode = \"view-override\"", StringComparison.Ordinal);
+});
+
+Test("automatic check does not force passive when view override is configured", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"), "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
+    var body = ExtractMethodBody(serviceText, "private void PrepareAutomaticQuickCheckDiagnostics()");
+    return body.Contains("TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal);
+});
+
+Test("fixOn hook installs for view override", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"), "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
+    var body = ExtractMethodBody(serviceText, "private bool ShouldInstallFixOnHook()");
+    return body.Contains("TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal);
+});
+
+Test("chara select view capture tags candidate and is gated to pre-login chara select", () =>
+{
+    var root = FindRepositoryRoot();
+    var timelineText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.TimelineDiagnostics.cs"));
+    var capture = ExtractMethodBody(timelineText, "public bool TryCaptureCharaSelectViewFromCurrentCamera(out string status)");
+    return capture.Contains("skipped-post-login", StringComparison.Ordinal)
+        && capture.Contains("skipped-not-chara-select", StringComparison.Ordinal)
+        && capture.Contains("skipped-empty-candidate", StringComparison.Ordinal)
+        && capture.Contains("TryCaptureActiveCameraSnapshot", StringComparison.Ordinal)
+        && capture.Contains("ReloadNativeIntegration()", StringComparison.Ordinal);
+});
+
 Test("fixOn focus override gate reason maps feature/passive/context precedence", () =>
 {
     // feature OFF が最優先、その次に passive、最後に実行コンテキスト理由。ready は全成立時のみ。
@@ -5939,8 +6659,13 @@ Test("fixOn focus override gate reason maps feature/passive/context precedence",
 Test("anchor frame constants are distinct provenance tags", () =>
 {
     return TitleBackgroundCharaSelectAnchorFrame.World == "world"
+        && TitleBackgroundCharaSelectAnchorFrame.LobbyNative == "lobby-native"
         && TitleBackgroundCharaSelectAnchorFrame.CharaSelectFallback == "chara-select-fallback"
-        && TitleBackgroundCharaSelectAnchorFrame.Unknown == "unknown";
+        && TitleBackgroundCharaSelectAnchorFrame.Unknown == "unknown"
+        && !TitleBackgroundCharaSelectAnchorFrame.IsPlacementSupported(string.Empty)
+        && !TitleBackgroundCharaSelectAnchorFrame.IsPlacementSupported(TitleBackgroundCharaSelectAnchorFrame.World)
+        && TitleBackgroundCharaSelectAnchorFrame.IsPlacementSupported(TitleBackgroundCharaSelectAnchorFrame.LobbyNative)
+        && TitleBackgroundCharaSelectAnchorFrame.IsPlacementSupported(TitleBackgroundCharaSelectAnchorFrame.CharaSelectFallback);
 });
 
 Test("configuration anchor frame tag persists as top-level json", () =>

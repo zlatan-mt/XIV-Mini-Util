@@ -486,7 +486,7 @@ internal static class TitleBackgroundDeliveryDiagnostic
                 drawObjectNonNullCount,
                 modelLikeNonNullCount);
         var characterBlocker = characterCompositedApplied
-            ? "none"
+            ? "visual-confirmation-required"
             : actorPlacementReady
             ? "none"
             : hasPreLoginNativeCapture && nativeResolution == "not-found"
@@ -526,7 +526,7 @@ internal static class TitleBackgroundDeliveryDiagnostic
         var postLoginLeakVerdict = BuildPostLoginLeakVerdict(activeAfterLoginDetected, phase2GAppliedAfterLogin);
         var candidateHumanStatus = BuildCandidateHumanStatus(overrideCandidate);
         var userMessage = characterCompositedApplied
-            ? "Background and selected character are both composited on Character Select (experimental)."
+            ? "Character placement writes were applied, but on-screen visibility still requires confirmation."
             : backgroundApplication.Observed && !overrideCompatibility.CharacterExpectedVisible
             ? "Background was applied as background-only. Selected character model is expected to remain hidden."
             : "Background application still requires Character Select screenshot confirmation.";
@@ -539,7 +539,7 @@ internal static class TitleBackgroundDeliveryDiagnostic
                 ? "No post-login scene override leak observed."
                 : "Post-login scene override leak was observed; do not promote this candidate.";
         var (mvpStatus, mvpBlockingIssue, mvpKnownLimitation) = characterCompositedApplied
-            ? ("complete-character-composited", "none", "experimental-per-frame-character-placement")
+            ? ("character-placement-applied-unverified", "visual-confirmation-required", "experimental-per-frame-character-placement")
             : BuildMvpSummary(
                 verdict,
                 transitionSafety,

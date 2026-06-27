@@ -117,6 +117,8 @@ internal sealed class TitleBackgroundTransitionDiagnosticRecorder
     public bool StaleCurrentLobbyMapAfterLogin { get; private set; }
     public bool StaleSceneOverrideStateAfterLogin { get; private set; }
     public int EventCount => _events.Count;
+    // 現在の event sequence の高水位。run 開始時に控え、post-login 異常を run-scoped 判定する基準にする。
+    public long EventSequenceWatermark => _nextEventSeq;
     public IReadOnlyList<TitleBackgroundTransitionDiagnosticEvent> Events => _events.ToArray();
     public string AcceptedGenerations => string.Join(",", _acceptedGenerations.OrderBy(value => value));
 

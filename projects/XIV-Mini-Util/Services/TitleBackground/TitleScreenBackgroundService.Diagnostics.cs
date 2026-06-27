@@ -87,6 +87,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
     }
 
     private IReadOnlyList<string> BuildTransitionDiagnosticSummaryLines(
+        bool automaticInvocation,
         string currentCaptureStatus,
         float? currentDirH,
         float? currentDirV,
@@ -94,6 +95,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
         Vector3? currentSceneCameraPosition,
         Vector3? currentLookAtVector)
     {
+        // 自動確認時は loginTransitionSafety / sceneReadyAcceptedMultipleTimes / post-login 異常を
+        // current run 内で発生したものだけで判定する。過去の累積・sticky 履歴で current run を
+        // unsafe にしない。通常の /xmutbgdiag は累積値・累積履歴を維持して長期傾向を残す。
+        var runScopedVerdict = automaticInvocation && IsRunScopedQuickCheckActive();
+        var verdictEventSeqStart = _quickCheckState.TransitionEventSeqStart;
+        var verdictSceneReadyAcceptedCount = runScopedVerdict
+            ? GetVerdictSceneReadyAcceptedCount(automaticInvocation)
+            : _transitionDiagnostics.SceneReadyAcceptedCount;
         var counters = new TitleBackgroundTransitionCounters(
             _phase2ECalculateLookAtYCallCount,
             _phase2FSetCameraCurveMidPointCallCount,
@@ -124,6 +133,33 @@ public sealed unsafe partial class TitleScreenBackgroundService
             staleCurrentLobbyMapAfterLogin,
             staleSceneOverrideAfterLogin);
 
+        // 状態型異常（stale adapter / active scene override）: run-scoped 時は現時点の状態のみ。
+        var adapterStaleForVerdict = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedStateAnomaly(
+            runScopedVerdict,
+            _transitionDiagnostics.StaleAdapterStateAfterLogin,
+            staleAdapterAfterLogin);
+        var sceneOverrideActiveForVerdict = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedStateAnomaly(
+            runScopedVerdict,
+            _transitionDiagnostics.StaleSceneOverrideStateAfterLogin,
+            staleSceneOverrideAfterLogin);
+        // イベント型異常（post-login Phase2G / post-login sceneReady）: run-scoped 時は run 開始 seq より後のみ。
+        var phase2GAppliedAfterLoginForVerdict = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedEventAnomaly(
+            runScopedVerdict,
+            _transitionDiagnostics.Phase2GAppliedAfterLogin,
+            _transitionDiagnostics.LastPhase2GAppliedAfterLoginEventSeq,
+            verdictEventSeqStart);
+        var phase2GLastAppliedSeqForVerdict = phase2GAppliedAfterLoginForVerdict
+            ? _transitionDiagnostics.LastPhase2GAppliedAfterLoginEventSeq
+            : (runScopedVerdict ? 0L : _transitionDiagnostics.LastPhase2GAppliedAfterLoginEventSeq);
+        var postLoginSceneReadyForVerdict = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedEventAnomaly(
+            runScopedVerdict,
+            _transitionDiagnostics.PostLoginSceneReadyAccepted,
+            _transitionDiagnostics.LastSceneReadyAcceptedAfterLoginEventSeq,
+            verdictEventSeqStart);
+        var sceneReadyLastAfterLoginSeqForVerdict = postLoginSceneReadyForVerdict
+            ? _transitionDiagnostics.LastSceneReadyAcceptedAfterLoginEventSeq
+            : (runScopedVerdict ? 0L : _transitionDiagnostics.LastSceneReadyAcceptedAfterLoginEventSeq);
+
         var input = new TitleBackgroundTransitionSummaryInput(
             new TitleBackgroundTransitionContext(
                 _clientState.IsLoggedIn,
@@ -140,16 +176,16 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 currentLobbyMap,
                 _lastCurrentLobbyMapResetReason,
                 _sceneOverrideCleanupReason,
-                _transitionDiagnostics.StaleSceneOverrideStateAfterLogin || staleSceneOverrideAfterLogin),
+                sceneOverrideActiveForVerdict),
             new TitleBackgroundTransitionAdapterState(
                 _charaSelectCameraAdapter.State.ToString(),
                 _charaSelectCameraAdapter.LastEvent,
                 _charaSelectCameraAdapter.RuntimeState.SceneGeneration,
-                _transitionDiagnostics.StaleAdapterStateAfterLogin || staleAdapterAfterLogin),
+                adapterStaleForVerdict),
             new TitleBackgroundTransitionPhase2GState(
                 _transitionDiagnostics.LastPhase2GApplyContext,
-                _transitionDiagnostics.Phase2GAppliedAfterLogin,
-                _transitionDiagnostics.LastPhase2GAppliedAfterLoginEventSeq,
+                phase2GAppliedAfterLoginForVerdict,
+                phase2GLastAppliedSeqForVerdict,
                 _transitionDiagnostics.Phase2GAppliedAfterLeavingCharaSelect,
                 _transitionDiagnostics.LastPhase2GAllowedReason,
                 string.IsNullOrWhiteSpace(_transitionDiagnostics.LastPhase2GSkippedReason)
@@ -168,15 +204,15 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _transitionDiagnostics.LastEvent,
             _transitionDiagnostics.EventCount,
             _transitionDiagnostics.SceneReadyRawCallCount,
-            _transitionDiagnostics.SceneReadyAcceptedCount,
+            verdictSceneReadyAcceptedCount,
             _transitionDiagnostics.SceneReadyRejectedCount,
-            _transitionDiagnostics.SceneReadyAcceptedCount > 1,
+            verdictSceneReadyAcceptedCount > 1,
             _transitionDiagnostics.SceneReadyLastAcceptedReason,
             _transitionDiagnostics.SceneReadyLastRejectedReason,
             _transitionDiagnostics.SceneReadyLastAcceptedSceneGeneration,
             _transitionDiagnostics.AcceptedGenerations,
-            _transitionDiagnostics.PostLoginSceneReadyAccepted,
-            _transitionDiagnostics.LastSceneReadyAcceptedAfterLoginEventSeq);
+            postLoginSceneReadyForVerdict,
+            sceneReadyLastAfterLoginSeqForVerdict);
         return TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(input);
     }
 
@@ -385,6 +421,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         float? currentInterpDistance = currentCameraCaptured ? currentCamera.InterpDistance : null;
         float? currentFovY = currentCameraCaptured ? currentCamera.FovY : null;
         var transitionSummaryLines = BuildTransitionDiagnosticSummaryLines(
+            automaticInvocation,
             currentCaptureStatus,
             currentDirH,
             currentDirV,
@@ -438,8 +475,37 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var phase2NCurrentObjectTableInvalidReason = phase2NCurrentObjectTableValid
             ? "none"
             : "post-login-world-object-table-not-valid-for-chara-select";
-        var phase2NSceneOverrideActiveAfterLoginDetected = _transitionDiagnostics.StaleSceneOverrideStateAfterLogin
-            || (_clientState.IsLoggedIn && _activeSceneOverride);
+        // Delivery 判定も自動確認時は run-scoped 値を使う。過去 run の sticky な scene override leak /
+        // Phase2G 漏れや累積 placement count を今回 run の判定へ持ち込まない。通常診断は累積を維持する。
+        var deliveryRunScoped = automaticInvocation && IsRunScopedQuickCheckActive();
+        var phase2NSceneOverrideActiveAfterLoginDetected = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedStateAnomaly(
+            deliveryRunScoped,
+            _transitionDiagnostics.StaleSceneOverrideStateAfterLogin,
+            _clientState.IsLoggedIn && _activeSceneOverride);
+        var deliveryPhase2GAppliedAfterLogin = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedEventAnomaly(
+            deliveryRunScoped,
+            _transitionDiagnostics.Phase2GAppliedAfterLogin,
+            _transitionDiagnostics.LastPhase2GAppliedAfterLoginEventSeq,
+            _quickCheckState.TransitionEventSeqStart);
+        var deliveryCharacterPlacementApplied = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedPlacementCount(
+            deliveryRunScoped,
+            _charaSelectCharacterPlacementCount,
+            _quickCheckState.CharacterPlacementCountStart) > 0;
+        // 背景適用も run-scoped 化する。今回 run で override が適用されたかを差分で判定し、
+        // 0 回なら historical flag/path も Delivery 判定へ入れない（前回成功を引き継がない）。
+        var deliveryOverrideAppliedThisRun = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedCount(
+            deliveryRunScoped,
+            _quickCheckOverrideAppliedCount,
+            _quickCheckState.OverrideAppliedCountStart) > 0;
+        var deliveryLastOverrideApplied = deliveryRunScoped
+            ? deliveryOverrideAppliedThisRun
+            : _lastOverrideApplied && _lastOverrideLobbyType == GameLobbyType.CharaSelect;
+        var deliveryHistoricalOverrideApplied = deliveryRunScoped
+            ? deliveryOverrideAppliedThisRun
+            : _lastOverrideApplied;
+        var deliveryHistoricalOverridePath = deliveryRunScoped && !deliveryOverrideAppliedThisRun
+            ? string.Empty
+            : _lastHistoricalOverridePath;
         var phase2NDeliverySummary = TitleBackgroundDeliveryDiagnostic.BuildSummary(
             _configuration.TitleBackgroundCharacterSelectBackgroundMode,
             _configuration.TitleBackgroundCharacterSelectLightingMode,
@@ -448,7 +514,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             GetEffectiveOverrideTerritoryId(),
             _configuration.TitleBackgroundLayoutLayerFilterKey,
             IsSceneOverrideEnabled(),
-            _lastOverrideApplied && _lastOverrideLobbyType == GameLobbyType.CharaSelect,
+            deliveryLastOverrideApplied,
             phase2MSummary.Resolution,
             phase2MSummary.TransformValidity,
             phase2MSummary.ActorVisible,
@@ -463,13 +529,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
             phase2NCurrentObjectTableInvalidReason,
             _configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
             BuildPhase2PManualCandidateSlots(),
-            _lastOverrideApplied,
-            _lastHistoricalOverridePath,
-            _sceneReadySignalAcceptedCount > 1,
+            deliveryHistoricalOverrideApplied,
+            deliveryHistoricalOverridePath,
+            GetVerdictSceneReadyAcceptedCount(automaticInvocation) > 1,
             phase2NSceneOverrideActiveAfterLoginDetected,
-            _transitionDiagnostics.Phase2GAppliedAfterLogin,
+            deliveryPhase2GAppliedAfterLogin,
             phase2MSummary.NativeCharacterSource,
-            _charaSelectCharacterPlacementCount > 0);
+            deliveryCharacterPlacementApplied);
         var deliveryDetailPath = !includeDetailedPhase2Diagnostics
             ? SaveDeliveryDeliveryDiagnosticDump(phase2NDeliverySummary)
             : string.Empty;

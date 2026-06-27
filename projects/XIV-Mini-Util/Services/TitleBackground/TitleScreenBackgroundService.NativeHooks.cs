@@ -352,6 +352,57 @@ public sealed unsafe partial class TitleScreenBackgroundService
             // 診断（read-only）: 適用可否の総合理由を毎回記録する。"ready" のときだけ下の override が走る。
             _lastFixOnFocusOverrideGateReason = ComputeFixOnFocusOverrideGateReason();
 
+            // view override（TitleEdit 方式）: 「今の見え方を保存」した camera+focus+fov を scene-local
+            // 絶対値で「まとめて」上書きする。passive 観測 ON は最優先 passthrough、実行コンテキストは
+            // 焦点 override と同じ FixOn 専用ゲート、候補一致時のみ。焦点だけの anchor override より優先する。
+            // 同一 scene generation での再発火は _lastViewOverrideAppliedGeneration で弾き、ネイティブ FixOn
+            // への適用を generation あたり 1 回に制限する（再呼び出しの冪等性は保証されないため）。
+            if (cameraOverride == null
+                && focusOverride == null
+                && _lastViewOverrideAppliedGeneration != _activeCharaSelectSceneGeneration
+                && TitleBackgroundFixOnFocusOverrideLogic.ShouldConsiderFocusOverride(
+                    _configuration.TitleBackgroundFixOnPassiveObservationEnabled,
+                    _configuration.TitleBackgroundCharaSelectViewEnabled)
+                && IsFixOnFocusOverrideContextActive())
+            {
+                var viewResolution = TitleBackgroundFixOnViewOverrideLogic.Resolve(
+                    _configuration.TitleBackgroundCharaSelectViewEnabled,
+                    BuildCharaSelectView(),
+                    ResolveCurrentOverrideCandidate().Id,
+                    _lastObservedFixOnCamera ?? Vector3.Zero,
+                    _lastObservedFixOnFocus ?? Vector3.Zero,
+                    fovY);
+                _lastFixOnViewOverrideSource = viewResolution.Source;
+                if (viewResolution.ShouldOverride)
+                {
+                    cameraOverride =
+                    [
+                        viewResolution.Camera.X,
+                        viewResolution.Camera.Y,
+                        viewResolution.Camera.Z,
+                    ];
+                    focusOverride =
+                    [
+                        viewResolution.Focus.X,
+                        viewResolution.Focus.Y,
+                        viewResolution.Focus.Z,
+                    ];
+                    overrideFovY = viewResolution.FovY;
+                    _lastCameraOverrideApplied = true;
+                    _lastAppliedCamera = viewResolution.Camera;
+                    _lastAppliedFocus = viewResolution.Focus;
+                    _lastAppliedFovY = viewResolution.FovY;
+                    _fixOnViewOverrideAppliedCount++;
+                    _lastViewOverrideAppliedGeneration = _activeCharaSelectSceneGeneration;
+                    invocationMode = "view-override";
+                    _log.Information(
+                        "[XMU BG] FixOn view override applied. camera={Camera}, focus={Focus}, fovY={FovY}",
+                        FormatVector(viewResolution.Camera),
+                        FormatVector(viewResolution.Focus),
+                        viewResolution.FovY);
+                }
+            }
+
             // 焦点 override は次を全て満たすときだけ。passive 観測 ON は最優先で passthrough を強制し、
             // 実行コンテキストは FixOn 専用ゲート（pre-login + Ready + bridge + session active + scene
             // generation 一致 + CharaSelect セッション）を必須にする。FixOn はシーン読み込み途中に発火し

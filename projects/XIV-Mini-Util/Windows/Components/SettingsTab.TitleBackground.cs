@@ -10,19 +10,19 @@ public sealed partial class SettingsTab
 {
     private void DrawTitleBackgroundSettings()
     {
-        ImGui.Text("Title Background");
-        ImGui.TextWrapped("Character Select の背景を n4f4 recommended に設定します。");
+        ImGui.Text("背景");
+        DrawTitleBackgroundSimplePanel();
 
-        if (_configuration.TitleBackgroundSettingsDisplayMode == TitleBackgroundSettingsDisplayMode.Simple)
+        if (_configuration.TitleBackgroundSettingsDisplayMode != TitleBackgroundSettingsDisplayMode.DeveloperDiagnostics)
         {
-            DrawTitleBackgroundSimplePanel();
-            DrawTitleBackgroundAdvancedDrawer();
             return;
         }
 
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Text("背景の開発者向け設定");
         DrawTitleBackgroundStatusSummary();
         DrawTitleBackgroundQuickActions();
-        DrawTitleBackgroundDisplayModeSelector();
         DrawTitleBackgroundKnownLimitation();
 
         ImGui.Spacing();
@@ -110,8 +110,6 @@ public sealed partial class SettingsTab
             _ => new Vector4(1f, 0.75f, 0.35f, 1f),
         };
 
-        ImGui.Spacing();
-        ImGui.Text("キャラ選択背景");
         var offSelected = !_configuration.TitleBackgroundOverrideEnabled;
         if (ImGui.RadioButton("OFF##TitleBackgroundSimpleOff", offSelected))
         {
@@ -120,34 +118,72 @@ public sealed partial class SettingsTab
 
         ImGui.SameLine();
         var recommendedSelected = TitleBackgroundQuickCheckUiPresenter.IsSimpleAutoSetupConfigured(_configuration);
-        if (ImGui.RadioButton("イル・メグ 湖##TitleBackgroundSimpleN4F4", recommendedSelected))
+        if (ImGui.RadioButton("イル・メグ##TitleBackgroundSimpleN4F4", recommendedSelected))
         {
             _titleScreenBackgroundService.RunSimpleAutoSetup();
         }
 
-        ImGui.TextColored(statusColor, summary.StatusLine);
-        ImGui.TextWrapped(summary.ResultLine);
-        ImGui.TextDisabled(summary.NextActionLine);
+        ImGui.Spacing();
+        ImGui.TextColored(statusColor, $"状態: {GetSimpleTitleBackgroundStatusLabel(summary.Status)}");
+
+        var automaticStatus = _titleScreenBackgroundService.GetAutomaticQuickCheckStatus();
+        var checkActive = automaticStatus.State is TitleBackgroundAutomaticCheckState.WaitingForCharacterSelect
+            or TitleBackgroundAutomaticCheckState.Collecting;
+        if (checkActive)
+        {
+            if (ImGui.Button("自動確認を中止"))
+            {
+                _titleScreenBackgroundService.CancelAutomaticQuickCheck();
+            }
+        }
+        else if (ImGui.Button("自動確認を開始"))
+        {
+            _titleScreenBackgroundService.StartAutomaticQuickCheck();
+        }
+
+        if (automaticStatus.CanCopyLastReport)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("結果をコピー"))
+            {
+                _titleScreenBackgroundService.QueueLastAutomaticCheckReportForClipboard();
+            }
+        }
+
+        if (checkActive
+            || automaticStatus.State is TitleBackgroundAutomaticCheckState.Completed
+                or TitleBackgroundAutomaticCheckState.Failed)
+        {
+            ImGui.TextWrapped(automaticStatus.StatusLine);
+        }
 
         ImGui.Spacing();
-        DrawTitleBackgroundSaveCharacterPositionButton();
-        DrawTitleBackgroundBulkDiagnosticButton();
-        if (!string.IsNullOrWhiteSpace(_titleBackgroundAnchorMessage))
+        DrawTitleBackgroundViewControls();
+        ImGui.Spacing();
+        if (ImGui.Button("初期状態に戻す##TitleBackgroundResetSimple"))
         {
-            ImGui.TextColored(_titleBackgroundAnchorMessageColor, _titleBackgroundAnchorMessage);
+            if (_titleScreenBackgroundService.ResetSimpleTitleBackgroundSettings())
+            {
+                _titleBackgroundViewMessage = "背景の設定を初期状態に戻しました";
+                _titleBackgroundViewMessageColor = new Vector4(0.7f, 0.7f, 0.7f, 1f);
+            }
+            else
+            {
+                _titleBackgroundViewMessage = "初期状態への復元を完了できませんでした";
+                _titleBackgroundViewMessageColor = new Vector4(1f, 0.45f, 0.45f, 1f);
+            }
         }
     }
 
-    private void DrawTitleBackgroundAdvancedDrawer()
+    private static string GetSimpleTitleBackgroundStatusLabel(TitleBackgroundSimpleUiStatus status)
     {
-        ImGui.Spacing();
-        if (!ImGui.CollapsingHeader("Advanced##TitleBackgroundAdvancedDrawer"))
+        return status switch
         {
-            return;
-        }
-
-        DrawTitleBackgroundDisplayModeSelector();
-        ImGui.TextDisabled("Switch to Advanced or Developer Diagnostics to inspect raw QuickCheck and camera details.");
+            TitleBackgroundSimpleUiStatus.Working => "適用中",
+            TitleBackgroundSimpleUiStatus.Ready => "準備完了",
+            TitleBackgroundSimpleUiStatus.Failed => "確認が必要",
+            _ => "適用していません",
+        };
     }
 
     private void DrawTitleBackgroundStatusSummary()
@@ -243,31 +279,12 @@ public sealed partial class SettingsTab
         }
     }
 
-    private void DrawTitleBackgroundDisplayModeSelector()
-    {
-        var displayMode = _configuration.TitleBackgroundSettingsDisplayMode;
-        ImGui.Spacing();
-        if (ImGui.BeginCombo("Display Mode##TitleBackgroundSettingsDisplayMode", GetTitleBackgroundSettingsDisplayModeLabel(displayMode)))
-        {
-            foreach (TitleBackgroundSettingsDisplayMode mode in Enum.GetValues(typeof(TitleBackgroundSettingsDisplayMode)))
-            {
-                if (ImGui.Selectable(GetTitleBackgroundSettingsDisplayModeLabel(mode), displayMode == mode))
-                {
-                    _configuration.TitleBackgroundSettingsDisplayMode = mode;
-                    _configuration.Save();
-                }
-            }
-
-            ImGui.EndCombo();
-        }
-    }
-
     private static void DrawTitleBackgroundKnownLimitation()
     {
         ImGui.Spacing();
         ImGui.Text("既知の制限:");
-        ImGui.TextWrapped("キャラは表示できますが、背景の構図は湖中心のままで、構図を陸へ移す機能は調整中です。");
-        ImGui.TextDisabled("キャラの立ち位置は「キャラの位置を保存」で調整できます（背景の向きは変わりません）。");
+        ImGui.TextWrapped("キャラは表示できます。「調整」→「見え方（カメラ）」でキャラ選択画面のカメラ構図を自由に保存・適用できます。");
+        ImGui.TextDisabled("キャラの立ち位置は「キャラの位置を保存」、カメラ構図は「今の見え方を保存」で調整できます。");
     }
 
     private void DrawTitleBackgroundCharacterCompositionBridgeDiagnostics()
@@ -388,6 +405,77 @@ public sealed partial class SettingsTab
             }
         }
     }
+
+    // 「今の見え方を保存」: CharaSelect でカメラを合わせた状態の見え方（位置/注視点/画角）を丸ごと保存し、
+    // 次回以降その構図でキャラ選択画面を表示する。CharaSelect 中のみ有効・理由表示。
+    private void DrawTitleBackgroundViewControls()
+    {
+        ImGui.Text("カメラ構図");
+        var availability = _titleScreenBackgroundService.GetAnchorCaptureAvailability();
+        var captureEnabled = TitleBackgroundAnchorCaptureGate.IsCaptureEnabled(availability);
+        if (!captureEnabled)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        if (ImGui.Button("今の見え方を保存##TitleBackgroundSaveView"))
+        {
+            if (_titleScreenBackgroundService.TryCaptureCharaSelectViewFromCurrentCamera(out var captureStatus))
+            {
+                _titleBackgroundViewMessage = "今の見え方を保存しました";
+                _titleBackgroundViewMessageColor = new Vector4(0.3f, 0.8f, 0.45f, 1f);
+            }
+            else
+            {
+                _titleBackgroundViewMessage = DescribeTitleBackgroundViewCaptureFailure(captureStatus);
+                _titleBackgroundViewMessageColor = new Vector4(1f, 0.45f, 0.45f, 1f);
+            }
+        }
+
+        if (!captureEnabled)
+        {
+            ImGui.EndDisabled();
+            var reason = availability switch
+            {
+                TitleBackgroundAnchorCaptureAvailability.NotCharaSelect => "キャラ選択画面でカメラを合わせてから使えます",
+                TitleBackgroundAnchorCaptureAvailability.LoggedIn => "ログアウトしてキャラ選択画面で使います",
+                _ => string.Empty,
+            };
+            if (!string.IsNullOrEmpty(reason))
+            {
+                ImGui.TextDisabled(reason);
+            }
+        }
+
+        if (_configuration.TitleBackgroundCharaSelectViewEnabled)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("消す##TitleBackgroundClearView"))
+            {
+                _titleScreenBackgroundService.ClearCharaSelectView();
+                _titleBackgroundViewMessage = "保存した見え方を消しました";
+                _titleBackgroundViewMessageColor = new Vector4(0.7f, 0.7f, 0.7f, 1f);
+            }
+
+            ImGui.TextDisabled("保存済み: あり");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_titleBackgroundViewMessage))
+        {
+            ImGui.TextColored(_titleBackgroundViewMessageColor, _titleBackgroundViewMessage);
+        }
+    }
+
+    // capture 失敗 status を日本語の対処メッセージに変換する。silent failure を避け、
+    // 「候補未確定」など FixOn で適用されない原因をユーザーが解消できるようにする。
+    private static string DescribeTitleBackgroundViewCaptureFailure(string status) => status switch
+    {
+        "skipped-empty-candidate" => "背景の候補が未確定です。先に「イル・メグ」を選んでから保存してください。",
+        "skipped-post-login" => "ログアウトしてキャラ選択画面で保存してください。",
+        "skipped-not-chara-select" => "キャラ選択画面でカメラを合わせてから保存してください。",
+        "skipped-non-finite" => "カメラ値が不正なため保存できませんでした。",
+        _ => "カメラを読み取れませんでした。",
+    };
 
     // Simple/Advanced 共通: 一括診断を即時取得してクリップボードへコピー（read-only）。
     private void DrawTitleBackgroundBulkDiagnosticButton()
@@ -1124,17 +1212,6 @@ public sealed partial class SettingsTab
     private static string GetTitleBackgroundOverrideCandidateLabel(TitleBackgroundCharacterSelectOverrideCandidate candidate)
     {
         return TitleBackgroundQuickCheckUiPresenter.BuildCandidateLabel(candidate);
-    }
-
-    private static string GetTitleBackgroundSettingsDisplayModeLabel(TitleBackgroundSettingsDisplayMode mode)
-    {
-        return mode switch
-        {
-            TitleBackgroundSettingsDisplayMode.Simple => "Simple",
-            TitleBackgroundSettingsDisplayMode.Advanced => "Advanced",
-            TitleBackgroundSettingsDisplayMode.DeveloperDiagnostics => "Developer Diagnostics",
-            _ => mode.ToString(),
-        };
     }
 
     private static string GetTitleBackgroundCameraFramingModeLabel(TitleBackgroundCharaSelectCameraFramingMode mode)

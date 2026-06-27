@@ -176,6 +176,15 @@ public sealed unsafe partial class CharaSelectService
         RefreshCharaSelectDisplay();
     }
 
+    internal void ReapplyCompositionRuntimeStateFromConfiguration()
+    {
+        ApplySceneCompositionRuntimeState();
+        if (CharaSelectSceneCompositionPlanner.IsTitleBackgroundCharacterCompositionBridgeEnabled(_configuration))
+        {
+            ApplyTitleBackgroundCharacterCompositionBridgeRuntimeState();
+        }
+    }
+
     internal void ResetTitleBackgroundCharacterCompositionBridgeSnapshot()
     {
         _lastTitleBackgroundBridgeSnapshot = TitleBackgroundCharacterCompositionBridgeSnapshot.Empty;

@@ -1491,6 +1491,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 _charaSelectCharacterPlacementCount++;
                 _lastCharaSelectCharacterPlacementTarget = target;
                 _lastCharaSelectCharacterPlacementSource = resolution.Source;
+                // anchor 由来のときだけ実際に使った frame を控える。camera-focus フォールバックは Unknown。
+                _lastCharaSelectCharacterPlacementAnchorFrame = resolution.UsedAnchor
+                    ? _configuration.TitleBackgroundCharaSelectAnchorFrame
+                    : TitleBackgroundCharaSelectAnchorFrame.Unknown;
                 _charaSelectCharacterPlacementLastError = "none";
             }
             else
@@ -1510,13 +1514,115 @@ public sealed unsafe partial class TitleScreenBackgroundService
     private TitleBackgroundCharaSelectAnchor BuildCharaSelectAnchor()
     {
         return new TitleBackgroundCharaSelectAnchor(
-            _configuration.TitleBackgroundCharaSelectAnchorEnabled,
+            _configuration.TitleBackgroundCharaSelectAnchorEnabled
+                && TitleBackgroundCharaSelectAnchorFrame.IsPlacementSupported(
+                    _configuration.TitleBackgroundCharaSelectAnchorFrame),
             _configuration.TitleBackgroundCharaSelectAnchorCandidateId,
             new Vector3(
                 _configuration.TitleBackgroundCharaSelectAnchorX,
                 _configuration.TitleBackgroundCharaSelectAnchorY,
                 _configuration.TitleBackgroundCharaSelectAnchorZ),
             _configuration.TitleBackgroundCharaSelectAnchorRotation);
+    }
+
+    internal bool IsConfiguredCharaSelectAnchorPlacementSupported()
+    {
+        return !_configuration.TitleBackgroundCharaSelectAnchorEnabled
+            || TitleBackgroundCharaSelectAnchorFrame.IsPlacementSupported(
+                _configuration.TitleBackgroundCharaSelectAnchorFrame);
+    }
+
+    private TitleBackgroundCharaSelectView BuildCharaSelectView()
+    {
+        return new TitleBackgroundCharaSelectView(
+            _configuration.TitleBackgroundCharaSelectViewEnabled,
+            _configuration.TitleBackgroundCharaSelectViewCandidateId,
+            new Vector3(
+                _configuration.TitleBackgroundCharaSelectViewCameraX,
+                _configuration.TitleBackgroundCharaSelectViewCameraY,
+                _configuration.TitleBackgroundCharaSelectViewCameraZ),
+            new Vector3(
+                _configuration.TitleBackgroundCharaSelectViewFocusX,
+                _configuration.TitleBackgroundCharaSelectViewFocusY,
+                _configuration.TitleBackgroundCharaSelectViewFocusZ),
+            _configuration.TitleBackgroundCharaSelectViewFovY);
+    }
+
+    private void StoreCharaSelectView(TitleBackgroundCharaSelectView view)
+    {
+        _configuration.TitleBackgroundCharaSelectViewEnabled = view.Enabled;
+        _configuration.TitleBackgroundCharaSelectViewCandidateId = view.CandidateId;
+        _configuration.TitleBackgroundCharaSelectViewCameraX = view.Camera.X;
+        _configuration.TitleBackgroundCharaSelectViewCameraY = view.Camera.Y;
+        _configuration.TitleBackgroundCharaSelectViewCameraZ = view.Camera.Z;
+        _configuration.TitleBackgroundCharaSelectViewFocusX = view.Focus.X;
+        _configuration.TitleBackgroundCharaSelectViewFocusY = view.Focus.Y;
+        _configuration.TitleBackgroundCharaSelectViewFocusZ = view.Focus.Z;
+        _configuration.TitleBackgroundCharaSelectViewFovY = view.FovY;
+        _configuration.Save();
+    }
+
+    // ゲーム内 capture:「今の見え方を保存」。CharaSelect 中の現在 SceneCamera（位置/注視点/FovY）を
+    // scene-local 絶対値で確定する。pre-login + CharaSelect ロビー限定。カメラには書き込まない（read-only）。
+    public bool TryCaptureCharaSelectViewFromCurrentCamera(out string status)
+    {
+        if (_clientState.IsLoggedIn)
+        {
+            status = "skipped-post-login";
+            return false;
+        }
+
+        if (!TryReadCurrentLobbyMap(out var lobbyMap) || lobbyMap != GameLobbyType.CharaSelect)
+        {
+            status = "skipped-not-chara-select";
+            return false;
+        }
+
+        if (!TryCaptureActiveCameraSnapshot(out var snapshot, out var error))
+        {
+            status = string.IsNullOrWhiteSpace(error) ? "skipped-camera-unavailable" : error;
+            return false;
+        }
+
+        var fovY = snapshot.FovY ?? _configuration.TitleBackgroundCharaSelectViewFovY;
+        var view = new TitleBackgroundCharaSelectView(
+            true,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(
+                ResolveCurrentOverrideCandidate().Id),
+            snapshot.SceneCameraPosition,
+            snapshot.LookAtVector,
+            fovY);
+        // 候補 ID が未設定の場合は MatchesCandidateStrict が空 ID を拒否するため、
+        // 保存しても FixOn で適用されない。保存前に弾いて silent failure を防ぐ。
+        if (string.IsNullOrEmpty(view.CandidateId))
+        {
+            status = "skipped-empty-candidate";
+            return false;
+        }
+
+        if (!view.HasUsableView)
+        {
+            status = "skipped-non-finite";
+            return false;
+        }
+
+        // passive 観測 ON のままだと ShouldConsiderFocusOverride が抑止し view が適用されない。
+        // 「保存＝この構図を適用したい」意図なので、保存時に passive 観測を解除して整合させる。
+        _configuration.TitleBackgroundFixOnPassiveObservationEnabled = false;
+        StoreCharaSelectView(view);
+        // view を有効化したので FixOn フック装着状態を設定に合わせる（毎フレーム書きはしない）。
+        ReloadNativeIntegration();
+        status = "captured";
+        return true;
+    }
+
+    public void ClearCharaSelectView()
+    {
+        StoreCharaSelectView(TitleBackgroundCharaSelectView.None);
+        _fixOnViewOverrideAppliedCount = 0;
+        _lastFixOnViewOverrideSource = "not-run";
+        _lastViewOverrideAppliedGeneration = 0;
+        ReloadNativeIntegration();
     }
 
     private void StoreCharaSelectAnchor(TitleBackgroundCharaSelectAnchor anchor)

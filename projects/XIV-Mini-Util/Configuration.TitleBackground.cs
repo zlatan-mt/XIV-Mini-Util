@@ -54,6 +54,17 @@ public sealed partial class Configuration
     // アンカー取得元のフレーム種別（world / lobby-native / chara-select-fallback / unknown）。
     // placement/カメラ挙動には影響しない診断用 provenance タグ。R 実験で座標系を判別するために保持する。
     public string TitleBackgroundCharaSelectAnchorFrame { get; set; } = string.Empty;
+    // 「今の見え方を保存」した CharaSelect カメラ（TitleEdit 方式）。FixOn で camera+focus+fov を
+    // scene-local 絶対値で 1 回だけ上書きするための保存値。候補一致時のみ適用。既定 OFF で挙動不変。
+    public bool TitleBackgroundCharaSelectViewEnabled { get; set; } = false;
+    public string TitleBackgroundCharaSelectViewCandidateId { get; set; } = string.Empty;
+    public float TitleBackgroundCharaSelectViewCameraX { get; set; } = 0f;
+    public float TitleBackgroundCharaSelectViewCameraY { get; set; } = 0f;
+    public float TitleBackgroundCharaSelectViewCameraZ { get; set; } = 0f;
+    public float TitleBackgroundCharaSelectViewFocusX { get; set; } = 0f;
+    public float TitleBackgroundCharaSelectViewFocusY { get; set; } = 0f;
+    public float TitleBackgroundCharaSelectViewFocusZ { get; set; } = 0f;
+    public float TitleBackgroundCharaSelectViewFovY { get; set; } = TitleBackgroundPreset.DefaultFovY;
     // FixOn フックを passive 観測専用（override 無し）で装着するか。発火可否の診断用。既定 OFF で挙動不変。
     public bool TitleBackgroundFixOnPassiveObservationEnabled { get; set; } = false;
     // 保存済み陸上アンカー座標を FixOn の焦点へ「候補一致時のみ」適用するか。
@@ -135,6 +146,15 @@ public sealed partial class Configuration
         TitleBackgroundCharaSelectAnchorZ = SanitizeCoordinate(source.TitleBackgroundCharaSelectAnchorZ);
         TitleBackgroundCharaSelectAnchorRotation = SanitizeCoordinate(source.TitleBackgroundCharaSelectAnchorRotation);
         TitleBackgroundCharaSelectAnchorFrame = NormalizeShortDiagnostic(source.TitleBackgroundCharaSelectAnchorFrame);
+        TitleBackgroundCharaSelectViewEnabled = source.TitleBackgroundCharaSelectViewEnabled;
+        TitleBackgroundCharaSelectViewCandidateId = NormalizeTitleBackgroundCharacterSelectOverrideCandidateId(source.TitleBackgroundCharaSelectViewCandidateId);
+        TitleBackgroundCharaSelectViewCameraX = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewCameraX);
+        TitleBackgroundCharaSelectViewCameraY = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewCameraY);
+        TitleBackgroundCharaSelectViewCameraZ = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewCameraZ);
+        TitleBackgroundCharaSelectViewFocusX = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewFocusX);
+        TitleBackgroundCharaSelectViewFocusY = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewFocusY);
+        TitleBackgroundCharaSelectViewFocusZ = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewFocusZ);
+        TitleBackgroundCharaSelectViewFovY = SanitizeFovY(source.TitleBackgroundCharaSelectViewFovY);
         TitleBackgroundFixOnPassiveObservationEnabled = source.TitleBackgroundFixOnPassiveObservationEnabled;
         TitleBackgroundFixOnFocusAnchorOverrideEnabled = source.TitleBackgroundFixOnFocusAnchorOverrideEnabled;
         TitleBackgroundCharacterPlacementExperimentalApplyMode = NormalizeTitleBackgroundCharacterPlacementExperimentalApplyMode(source.TitleBackgroundCharacterPlacementExperimentalApplyMode);
@@ -359,6 +379,52 @@ public sealed partial class Configuration
             TitleBackgroundCapturedLookAtX = normalizedCapturedLookAtX;
             TitleBackgroundCapturedLookAtY = normalizedCapturedLookAtY;
             TitleBackgroundCapturedLookAtZ = normalizedCapturedLookAtZ;
+            changed = true;
+        }
+
+        var normalizedViewCandidateId = NormalizeTitleBackgroundCharacterSelectOverrideCandidateId(TitleBackgroundCharaSelectViewCandidateId);
+        // 不正な保存値（候補が解決不能・座標が非有限・FOV が不正）のまま enabled=true を残すと、
+        // SanitizeCoordinate が NaN を 0 に丸めた結果「原点カメラの壊れた view」が有効化され得る。
+        // 元値が usable view の条件を満たさない場合は view 自体を無効化して安全側に倒す。
+        if (TitleBackgroundCharaSelectViewEnabled
+            && (string.IsNullOrEmpty(normalizedViewCandidateId)
+                || !float.IsFinite(TitleBackgroundCharaSelectViewCameraX)
+                || !float.IsFinite(TitleBackgroundCharaSelectViewCameraY)
+                || !float.IsFinite(TitleBackgroundCharaSelectViewCameraZ)
+                || !float.IsFinite(TitleBackgroundCharaSelectViewFocusX)
+                || !float.IsFinite(TitleBackgroundCharaSelectViewFocusY)
+                || !float.IsFinite(TitleBackgroundCharaSelectViewFocusZ)
+                || !float.IsFinite(TitleBackgroundCharaSelectViewFovY)
+                || TitleBackgroundCharaSelectViewFovY <= 0f))
+        {
+            TitleBackgroundCharaSelectViewEnabled = false;
+            changed = true;
+        }
+
+        var normalizedViewCameraX = SanitizeCoordinate(TitleBackgroundCharaSelectViewCameraX);
+        var normalizedViewCameraY = SanitizeCoordinate(TitleBackgroundCharaSelectViewCameraY);
+        var normalizedViewCameraZ = SanitizeCoordinate(TitleBackgroundCharaSelectViewCameraZ);
+        var normalizedViewFocusX = SanitizeCoordinate(TitleBackgroundCharaSelectViewFocusX);
+        var normalizedViewFocusY = SanitizeCoordinate(TitleBackgroundCharaSelectViewFocusY);
+        var normalizedViewFocusZ = SanitizeCoordinate(TitleBackgroundCharaSelectViewFocusZ);
+        var normalizedViewFovY = SanitizeFovY(TitleBackgroundCharaSelectViewFovY);
+        if (TitleBackgroundCharaSelectViewCandidateId != normalizedViewCandidateId
+            || TitleBackgroundCharaSelectViewCameraX != normalizedViewCameraX
+            || TitleBackgroundCharaSelectViewCameraY != normalizedViewCameraY
+            || TitleBackgroundCharaSelectViewCameraZ != normalizedViewCameraZ
+            || TitleBackgroundCharaSelectViewFocusX != normalizedViewFocusX
+            || TitleBackgroundCharaSelectViewFocusY != normalizedViewFocusY
+            || TitleBackgroundCharaSelectViewFocusZ != normalizedViewFocusZ
+            || TitleBackgroundCharaSelectViewFovY != normalizedViewFovY)
+        {
+            TitleBackgroundCharaSelectViewCandidateId = normalizedViewCandidateId;
+            TitleBackgroundCharaSelectViewCameraX = normalizedViewCameraX;
+            TitleBackgroundCharaSelectViewCameraY = normalizedViewCameraY;
+            TitleBackgroundCharaSelectViewCameraZ = normalizedViewCameraZ;
+            TitleBackgroundCharaSelectViewFocusX = normalizedViewFocusX;
+            TitleBackgroundCharaSelectViewFocusY = normalizedViewFocusY;
+            TitleBackgroundCharaSelectViewFocusZ = normalizedViewFocusZ;
+            TitleBackgroundCharaSelectViewFovY = normalizedViewFovY;
             changed = true;
         }
 

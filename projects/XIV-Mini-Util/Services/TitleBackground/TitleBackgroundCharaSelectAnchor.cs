@@ -100,9 +100,104 @@ internal static class TitleBackgroundCharaSelectAnchorFrame
 {
     // ログイン中の LocalPlayer.Position（ワールド座標）。lobby 空間とは別フレームの可能性がある。
     public const string World = "world";
+    // CharaSelect のロビー空間から直接取得した座標。
+    public const string LobbyNative = "lobby-native";
     // CharaSelect 中に native draw 位置を読んだ値。placement 強制配置中は fallback の再保存になる。
     public const string CharaSelectFallback = "chara-select-fallback";
     public const string Unknown = "unknown";
+
+    public static bool IsPlacementSupported(string? frame)
+    {
+        return string.Equals(frame, LobbyNative, StringComparison.Ordinal)
+            || string.Equals(frame, CharaSelectFallback, StringComparison.Ordinal);
+    }
+
+    // 地面 provenance が明確な frame か。placement-supported より厳しい。
+    // CharaSelectFallback は camera-focus で水上へ強制配置された座標の再保存の可能性があり、
+    // World（実験経路）/ Unknown も出所が確定していないため、地面確認済みとしては扱わない。
+    // 現状、明確な地面 provenance を持つのは lobby 空間から直接取得した LobbyNative のみ。
+    public static bool HasGroundProvenance(string? frame)
+    {
+        return string.Equals(frame, LobbyNative, StringComparison.Ordinal);
+    }
+}
+
+// 「今の見え方を保存」した CharaSelect カメラ（scene-local 絶対値）。TitleEdit の CameraPos/FixOnPos/FovY 相当。
+internal readonly record struct TitleBackgroundCharaSelectView(
+    bool Enabled,
+    string CandidateId,
+    Vector3 Camera,
+    Vector3 Focus,
+    float FovY)
+{
+    public static TitleBackgroundCharaSelectView None { get; } =
+        new(false, string.Empty, Vector3.Zero, Vector3.Zero, TitleBackgroundPreset.DefaultFovY);
+
+    public bool HasUsableView =>
+        Enabled
+        && TitleBackgroundCameraMath.IsFiniteVector(Camera)
+        && TitleBackgroundCameraMath.IsFiniteVector(Focus)
+        && float.IsFinite(FovY)
+        && FovY > 0f;
+}
+
+internal readonly record struct TitleBackgroundFixOnViewResolution(
+    bool ShouldOverride,
+    Vector3 Camera,
+    Vector3 Focus,
+    float FovY,
+    string Source);
+
+// FixOn detour から呼ぶ「見え方」上書きの純粋判定。TitleEdit と同様に camera/focus/fov を
+// まとめて絶対値で差し替える（観測値からの相対ではない）。候補は非空・完全一致のみ。
+internal static class TitleBackgroundFixOnViewOverrideLogic
+{
+    public const string ViewSource = "view";
+    public const string PassthroughSource = "passthrough";
+
+    public static TitleBackgroundFixOnViewResolution Resolve(
+        bool featureEnabled,
+        TitleBackgroundCharaSelectView view,
+        string? activeCandidateId,
+        Vector3 observedCamera,
+        Vector3 observedFocus,
+        float observedFovY)
+    {
+        if (featureEnabled
+            && view.HasUsableView
+            && MatchesCandidateStrict(view.CandidateId, activeCandidateId))
+        {
+            return new TitleBackgroundFixOnViewResolution(
+                true,
+                view.Camera,
+                view.Focus,
+                view.FovY,
+                ViewSource);
+        }
+
+        return new TitleBackgroundFixOnViewResolution(
+            false,
+            observedCamera,
+            observedFocus,
+            observedFovY,
+            PassthroughSource);
+    }
+
+    // 安全側に倒し、空 CandidateId のワイルドカード一致は許さない（別背景に適用させない）。
+    private static bool MatchesCandidateStrict(string viewCandidateId, string? activeCandidateId)
+    {
+        var normalized =
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(viewCandidateId);
+        if (string.IsNullOrEmpty(normalized))
+        {
+            return false;
+        }
+
+        return string.Equals(
+            normalized,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(activeCandidateId),
+            StringComparison.Ordinal);
+    }
 }
 
 internal static class TitleBackgroundFixOnFocusOverrideLogic

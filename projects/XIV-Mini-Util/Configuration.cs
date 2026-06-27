@@ -226,8 +226,8 @@ public sealed partial class Configuration : IPluginConfiguration
 
     private static TitleBackgroundSettingsDisplayMode NormalizeTitleBackgroundSettingsDisplayMode(TitleBackgroundSettingsDisplayMode mode)
     {
-        return Enum.IsDefined(typeof(TitleBackgroundSettingsDisplayMode), mode)
-            ? mode
+        return mode == TitleBackgroundSettingsDisplayMode.DeveloperDiagnostics
+            ? TitleBackgroundSettingsDisplayMode.DeveloperDiagnostics
             : TitleBackgroundSettingsDisplayMode.Simple;
     }
 

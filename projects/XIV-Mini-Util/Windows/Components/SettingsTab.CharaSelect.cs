@@ -3,6 +3,7 @@
 using System.Numerics;
 using ImGui = Dalamud.Bindings.ImGui.ImGui;
 using XivMiniUtil.Services.CharaSelect;
+using XivMiniUtil.Services.TitleBackground;
 
 namespace XivMiniUtil.Windows.Components;
 
@@ -10,31 +11,56 @@ public sealed partial class SettingsTab
 {
     private void DrawCharaSelectSettings()
     {
-        ImGui.Text("ログイン / タイトル背景");
+        ImGui.Text("キャラ選択画面");
         ImGui.Separator();
 
-        DrawCharaSelectSceneCompositionSettings();
+        DrawTitleBackgroundSettings();
 
         ImGui.Spacing();
         ImGui.Separator();
-
+        ImGui.Text("エモート");
         var emoteEnabled = _configuration.CharaSelectEmoteEnabled;
-        if (ImGui.Checkbox("キャラ選択画面で保存したエモートを再生する", ref emoteEnabled))
+        if (ImGui.Checkbox("保存したエモートを再生する", ref emoteEnabled))
         {
             _charaSelectService.SetEmoteEnabled(emoteEnabled);
         }
 
-        ImGui.TextDisabled("ログイン中に記録したエモートを、次回以降のキャラ選択画面で再生します。");
+        ImGui.TextDisabled($"現在: {_charaSelectService.GetCurrentSelectedEmoteDisplayName()}");
 
+        if (ImGui.CollapsingHeader("エモートを調整##CharaSelectEmoteAdjust"))
+        {
+            DrawCharaSelectEmoteAdjustment(emoteEnabled);
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        var developerVisible =
+            _configuration.TitleBackgroundSettingsDisplayMode == TitleBackgroundSettingsDisplayMode.DeveloperDiagnostics;
+        if (ImGui.Checkbox("開発者向け設定を表示", ref developerVisible))
+        {
+            _configuration.TitleBackgroundSettingsDisplayMode = developerVisible
+                ? TitleBackgroundSettingsDisplayMode.DeveloperDiagnostics
+                : TitleBackgroundSettingsDisplayMode.Simple;
+            _configuration.Save();
+        }
+
+        if (developerVisible)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Text("撮影構成（開発者向け）");
+            DrawCharaSelectSceneCompositionSettings();
+        }
+    }
+
+    private void DrawCharaSelectEmoteAdjustment(bool emoteEnabled)
+    {
         if (!emoteEnabled)
         {
             ImGui.BeginDisabled();
         }
 
-        ImGui.Spacing();
-        ImGui.Text($"現在の保存エモート: {_charaSelectService.GetCurrentSelectedEmoteDisplayName()}");
-        ImGui.Text($"最後に記録したエモート: {_charaSelectService.GetLastRecordedEmoteDisplayName()}");
-
+        ImGui.Text($"最後に記録: {_charaSelectService.GetLastRecordedEmoteDisplayName()}");
         if (ImGui.Button("前へ"))
         {
             _charaSelectService.SelectPreviousEmote();
@@ -94,10 +120,6 @@ public sealed partial class SettingsTab
         {
             ImGui.EndDisabled();
         }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        DrawTitleBackgroundSettings();
     }
 
     private void DrawCharaSelectSceneCompositionSettings()
