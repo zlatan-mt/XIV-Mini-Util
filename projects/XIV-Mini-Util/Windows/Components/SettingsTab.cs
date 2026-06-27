@@ -50,6 +50,8 @@ public sealed partial class SettingsTab : ITabComponent
     private Vector4 _titleBackgroundSceneCopyMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
     private string _titleBackgroundCameraProfileMessage = string.Empty;
     private Vector4 _titleBackgroundCameraProfileMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
+    private string _titleBackgroundAnchorMessage = string.Empty;
+    private Vector4 _titleBackgroundAnchorMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
 
     // Submarine Settings State
 

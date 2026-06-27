@@ -599,12 +599,11 @@ Test("chara select scene ui explains unchanged default background", () =>
         && settings.Contains("場所=変わらない", StringComparison.Ordinal);
 });
 
-Test("title background camera framing note is independent of shooting composition", () =>
+Test("title background camera framing note warns lake center is unchanged", () =>
 {
     var root = FindRepositoryRoot();
     var settings = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
-    return settings.Contains("Camera framing is handled by Title Background.", StringComparison.Ordinal)
-        && settings.Contains("integrated character composition", StringComparison.Ordinal);
+    return settings.Contains("カメラ構図（湖中心は変わりません）", StringComparison.Ordinal);
 });
 
 Test("title background set enabled auto-enables camera override", () =>
@@ -1370,9 +1369,9 @@ Test("title background settings simple panel hides advanced diagnostics", () =>
     var settingsText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
 
-    return simplePanel.Contains("Character Select Background", StringComparison.Ordinal)
-        && simplePanel.Contains("StartAutomaticQuickCheck", StringComparison.Ordinal)
-        && simplePanel.Contains("QueueLastAutomaticCheckReportForClipboard", StringComparison.Ordinal)
+    return simplePanel.Contains("キャラ選択背景", StringComparison.Ordinal)
+        && simplePanel.Contains("DrawTitleBackgroundSaveCharacterPositionButton", StringComparison.Ordinal)
+        && simplePanel.Contains("DrawTitleBackgroundBulkDiagnosticButton", StringComparison.Ordinal)
         && !simplePanel.Contains("Capture legacy visible camera", StringComparison.Ordinal)
         && !simplePanel.Contains("Save as n4f4 visible profile", StringComparison.Ordinal)
         && !simplePanel.Contains("Clear captured profile", StringComparison.Ordinal)
@@ -1383,18 +1382,17 @@ Test("title background settings simple panel hides advanced diagnostics", () =>
         && !simplePanel.Contains("Reset Check", StringComparison.Ordinal);
 });
 
-Test("title background settings simple check uses automatic quickcheck entrypoint", () =>
+Test("title background settings simple check uses immediate bulk diagnostic entrypoint", () =>
 {
     var root = FindRepositoryRoot();
     var settingsText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText));
     var serviceText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"), "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
     var simplePanel = ExtractMethodBody(settingsText, "private void DrawTitleBackgroundSimplePanel()");
-    var automaticCheck = ExtractMethodBody(serviceText, "internal IReadOnlyList<string> StartAutomaticQuickCheck()");
 
-    return simplePanel.Contains("StartAutomaticQuickCheck()", StringComparison.Ordinal)
-        && !simplePanel.Contains("RunQuickCheck()", StringComparison.Ordinal)
-        && automaticCheck.Contains("WaitingForCharacterSelect", StringComparison.Ordinal)
-        && automaticCheck.Contains("ArmAutomaticQuickCheck()", StringComparison.Ordinal);
+    // Simple の主診断は login 遷移を待つ自動確認ではなく、即時の一括診断コピー。
+    return simplePanel.Contains("DrawTitleBackgroundBulkDiagnosticButton", StringComparison.Ordinal)
+        && !simplePanel.Contains("StartAutomaticQuickCheck", StringComparison.Ordinal)
+        && serviceText.Contains("public IReadOnlyList<string> RunBulkDiagnostic()", StringComparison.Ordinal);
 });
 
 Test("title background automatic check report is ready to paste", () =>
@@ -5706,6 +5704,435 @@ Test("plugin commands are registered through a command table", () =>
         && pluginText.Contains("_commandManager.RemoveHandler(registration.Name", StringComparison.Ordinal)
         && CountOccurrences(pluginText, "_commandManager.AddHandler(") == 1
         && CountOccurrences(pluginText, "_commandManager.RemoveHandler(") == 1;
+});
+
+Test("chara select anchor capture produces usable anchor", () =>
+{
+    var anchor = TitleBackgroundCharaSelectAnchorLogic.CaptureFromDrawPosition(
+        "custom:n4f4", new Vector3(10f, 13.2f, -4f), 1.5f);
+    return anchor.Enabled
+        && anchor.HasUsableAnchor
+        && anchor.CandidateId == "custom:n4f4"
+        && anchor.Position == new Vector3(10f, 13.2f, -4f);
+});
+
+Test("chara select anchor capture rejects non-finite position", () =>
+{
+    var anchor = TitleBackgroundCharaSelectAnchorLogic.CaptureFromDrawPosition(
+        "custom:n4f4", new Vector3(float.NaN, 0f, 0f), 0f);
+    return !anchor.Enabled && !anchor.HasUsableAnchor;
+});
+
+Test("chara select placement uses anchor when enabled and candidate matches", () =>
+{
+    var anchor = TitleBackgroundCharaSelectAnchorLogic.CaptureFromDrawPosition(
+        "custom:n4f4", new Vector3(5f, 2f, 7f), 0f);
+    var resolution = TitleBackgroundCharaSelectAnchorLogic.ResolvePlacementTarget(
+        anchor, "custom:n4f4", new Vector3(0f, 13f, 0f), 0.9f);
+    return resolution.UsedAnchor
+        && resolution.Source == "anchor"
+        && resolution.Target == new Vector3(5f, 2f, 7f);
+});
+
+Test("chara select placement falls back to camera focus when anchor disabled", () =>
+{
+    var resolution = TitleBackgroundCharaSelectAnchorLogic.ResolvePlacementTarget(
+        TitleBackgroundCharaSelectAnchor.None, "custom:n4f4", new Vector3(0f, 13f, 0f), 0.9f);
+    return !resolution.UsedAnchor
+        && resolution.Source == "camera-focus"
+        && resolution.Target == new Vector3(0f, 13f - 0.9f, 0f);
+});
+
+Test("chara select placement falls back when anchor candidate mismatches", () =>
+{
+    var anchor = TitleBackgroundCharaSelectAnchorLogic.CaptureFromDrawPosition(
+        "custom:n4f4", new Vector3(5f, 2f, 7f), 0f);
+    var resolution = TitleBackgroundCharaSelectAnchorLogic.ResolvePlacementTarget(
+        anchor, "manual:slot1", new Vector3(0f, 13f, 0f), 0.9f);
+    return !resolution.UsedAnchor && resolution.Source == "camera-focus";
+});
+
+Test("chara select anchor with empty candidate id applies to any candidate", () =>
+{
+    var anchor = new TitleBackgroundCharaSelectAnchor(true, string.Empty, new Vector3(1f, 2f, 3f), 0f);
+    var resolution = TitleBackgroundCharaSelectAnchorLogic.ResolvePlacementTarget(
+        anchor, "anything", new Vector3(0f, 13f, 0f), 0.9f);
+    return resolution.UsedAnchor && resolution.Target == new Vector3(1f, 2f, 3f);
+});
+
+Test("chara select anchor nudge adjusts requested axis only", () =>
+{
+    var anchor = TitleBackgroundCharaSelectAnchorLogic.CaptureFromDrawPosition(
+        "custom:n4f4", new Vector3(5f, 2f, 7f), 0f);
+    var nudged = TitleBackgroundCharaSelectAnchorLogic.ApplyNudge(
+        anchor, TitleBackgroundCharaSelectAnchorAxis.Y, 0.5f);
+    return nudged.Enabled
+        && nudged.Position == new Vector3(5f, 2.5f, 7f);
+});
+
+Test("chara select anchor nudge ignores non-finite delta", () =>
+{
+    var anchor = TitleBackgroundCharaSelectAnchorLogic.CaptureFromDrawPosition(
+        "custom:n4f4", new Vector3(5f, 2f, 7f), 0f);
+    var nudged = TitleBackgroundCharaSelectAnchorLogic.ApplyNudge(
+        anchor, TitleBackgroundCharaSelectAnchorAxis.X, float.NaN);
+    return nudged.Position == new Vector3(5f, 2f, 7f);
+});
+
+Test("configuration chara select anchor fields persist as top-level json", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundCharaSelectAnchorEnabled = true,
+        TitleBackgroundCharaSelectAnchorCandidateId = "custom:n4f4",
+        TitleBackgroundCharaSelectAnchorX = 5.5f,
+        TitleBackgroundCharaSelectAnchorY = 2.25f,
+        TitleBackgroundCharaSelectAnchorZ = -7.75f,
+        TitleBackgroundCharaSelectAnchorRotation = 1.5f,
+    };
+
+    var json = JsonSerializer.Serialize(configuration);
+    var restored = JsonSerializer.Deserialize<Configuration>(json);
+
+    return json.Contains("\"TitleBackgroundCharaSelectAnchorEnabled\"", StringComparison.Ordinal)
+        && json.Contains("\"TitleBackgroundCharaSelectAnchorCandidateId\"", StringComparison.Ordinal)
+        && restored!.TitleBackgroundCharaSelectAnchorEnabled
+        && restored.TitleBackgroundCharaSelectAnchorCandidateId == "custom:n4f4"
+        && restored.TitleBackgroundCharaSelectAnchorX == 5.5f
+        && restored.TitleBackgroundCharaSelectAnchorY == 2.25f
+        && restored.TitleBackgroundCharaSelectAnchorZ == -7.75f;
+});
+
+Test("fixOn focus override raises focus to anchor body height when candidate matches", () =>
+{
+    var anchor = new TitleBackgroundCharaSelectAnchor(true, "custom:n4f4", new Vector3(1f, 14f, 3f), 0f);
+    var resolution = TitleBackgroundFixOnFocusOverrideLogic.Resolve(
+        true, anchor, "custom:n4f4", new Vector3(0f, 14.092f, 0f), 0.9f);
+    // 足元(Y=14)を見下ろさないよう、焦点 Y は anchor.Y + bodyDrop(0.9)=14.9。X/Z はアンカーへ。
+    return resolution.ShouldOverride
+        && resolution.Source == "anchor"
+        && resolution.Focus == new Vector3(1f, 14.9f, 3f);
+});
+
+Test("fixOn focus override passes through when feature disabled", () =>
+{
+    var anchor = new TitleBackgroundCharaSelectAnchor(true, "custom:n4f4", new Vector3(1f, 14f, 3f), 0f);
+    var observed = new Vector3(0f, 14.092f, 0f);
+    var resolution = TitleBackgroundFixOnFocusOverrideLogic.Resolve(
+        false, anchor, "custom:n4f4", observed, 0.9f);
+    return !resolution.ShouldOverride
+        && resolution.Source == "passthrough"
+        && resolution.Focus == observed;
+});
+
+Test("fixOn focus override passes through when candidate mismatches", () =>
+{
+    var anchor = new TitleBackgroundCharaSelectAnchor(true, "custom:n4f4", new Vector3(1f, 14f, 3f), 0f);
+    var observed = new Vector3(0f, 14.092f, 0f);
+    var resolution = TitleBackgroundFixOnFocusOverrideLogic.Resolve(
+        true, anchor, "manual:slot1", observed, 0.9f);
+    return !resolution.ShouldOverride && resolution.Focus == observed;
+});
+
+Test("fixOn focus override passes through when anchor unusable", () =>
+{
+    var observed = new Vector3(0f, 14.092f, 0f);
+    var resolution = TitleBackgroundFixOnFocusOverrideLogic.Resolve(
+        true, TitleBackgroundCharaSelectAnchor.None, "custom:n4f4", observed, 0.9f);
+    return !resolution.ShouldOverride && resolution.Source == "passthrough";
+});
+
+Test("fixOn focus override rejects empty candidate id wildcard", () =>
+{
+    // カメラ焦点 override は安全側に倒し、空 CandidateId を全候補一致として扱わない。
+    var anchor = new TitleBackgroundCharaSelectAnchor(true, string.Empty, new Vector3(1f, 14f, 3f), 0f);
+    var observed = new Vector3(0f, 14.092f, 0f);
+    var resolution = TitleBackgroundFixOnFocusOverrideLogic.Resolve(
+        true, anchor, "anything", observed, 0.9f);
+    return !resolution.ShouldOverride
+        && resolution.Source == "passthrough"
+        && resolution.Focus == observed;
+});
+
+Test("fixOn focus override passes through when active candidate is empty", () =>
+{
+    var anchor = new TitleBackgroundCharaSelectAnchor(true, "custom:n4f4", new Vector3(1f, 14f, 3f), 0f);
+    var observed = new Vector3(0f, 14.092f, 0f);
+    var resolution = TitleBackgroundFixOnFocusOverrideLogic.Resolve(
+        true, anchor, string.Empty, observed, 0.9f);
+    return !resolution.ShouldOverride && resolution.Focus == observed;
+});
+
+Test("fixOn focus override passive observation takes precedence over focus flag", () =>
+{
+    // passive ON は最優先 passthrough。passive と focus override の全 4 組合せを固定。
+    return !TitleBackgroundFixOnFocusOverrideLogic.ShouldConsiderFocusOverride(true, true)
+        && !TitleBackgroundFixOnFocusOverrideLogic.ShouldConsiderFocusOverride(true, false)
+        && !TitleBackgroundFixOnFocusOverrideLogic.ShouldConsiderFocusOverride(false, false)
+        && TitleBackgroundFixOnFocusOverrideLogic.ShouldConsiderFocusOverride(false, true);
+});
+
+Test("fixOn detour gates focus override on passive precedence and fixOn-specific context", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var detour = ExtractMethodBody(hooksText, "private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)");
+
+    // 焦点 override 経路は passive 最優先判定と FixOn 専用の実行コンテキストゲートの双方を通す。
+    // CurrentLobbyMap に依存する IsCharaSelectCharacterCompositionActive は使わない（読み込み中に弾かれるため）。
+    return detour.Contains("ShouldConsiderFocusOverride(", StringComparison.Ordinal)
+        && detour.Contains("IsFixOnFocusOverrideContextActive()", StringComparison.Ordinal)
+        && !detour.Contains("IsCharaSelectCharacterCompositionActive()", StringComparison.Ordinal)
+        && detour.Contains("CharaSelectCharacterFocusBodyDrop", StringComparison.Ordinal);
+});
+
+Test("fixOn execution context ready during scene load without current lobby map", () =>
+{
+    // FixOn 発火時に CurrentLobbyMap が None でも、session active かつ scene generation 一致 +
+    // CharaSelect セッションなら実行コンテキストは ready（タイミング問題の核心）。
+    return TitleBackgroundFixOnFocusOverrideLogic.IsExecutionContextReady(
+        isLoggedIn: false,
+        serviceReady: true,
+        bridgeActive: true,
+        sessionActive: true,
+        activeSceneGeneration: 3,
+        currentSceneGeneration: 3,
+        charaSelectSessionLobby: true);
+});
+
+Test("fixOn execution context blocked when session inactive", () =>
+{
+    return !TitleBackgroundFixOnFocusOverrideLogic.IsExecutionContextReady(
+        false, true, true, false, 3, 3, true);
+});
+
+Test("fixOn execution context blocked when scene generation mismatches", () =>
+{
+    return !TitleBackgroundFixOnFocusOverrideLogic.IsExecutionContextReady(
+        false, true, true, true, 3, 4, true)
+        && !TitleBackgroundFixOnFocusOverrideLogic.IsExecutionContextReady(
+            false, true, true, true, 0, 0, true);
+});
+
+Test("fixOn execution context blocked when logged in or bridge off or not chara select", () =>
+{
+    return !TitleBackgroundFixOnFocusOverrideLogic.IsExecutionContextReady(
+            true, true, true, true, 3, 3, true)
+        && !TitleBackgroundFixOnFocusOverrideLogic.IsExecutionContextReady(
+            false, false, true, true, 3, 3, true)
+        && !TitleBackgroundFixOnFocusOverrideLogic.IsExecutionContextReady(
+            false, true, false, true, 3, 3, true)
+        && !TitleBackgroundFixOnFocusOverrideLogic.IsExecutionContextReady(
+            false, true, true, true, 3, 3, false);
+});
+
+Test("fixOn focus override gate reason maps feature/passive/context precedence", () =>
+{
+    // feature OFF が最優先、その次に passive、最後に実行コンテキスト理由。ready は全成立時のみ。
+    return TitleBackgroundFixOnFocusOverrideLogic.DescribeGateReason(false, false, true, "ready") == "feature-off"
+        && TitleBackgroundFixOnFocusOverrideLogic.DescribeGateReason(true, false, true, "ready") == "feature-off"
+        && TitleBackgroundFixOnFocusOverrideLogic.DescribeGateReason(true, true, true, "ready") == "passive-precedence"
+        && TitleBackgroundFixOnFocusOverrideLogic.DescribeGateReason(false, true, false, "bridge-off") == "bridge-off"
+        && TitleBackgroundFixOnFocusOverrideLogic.DescribeGateReason(false, true, true, "ready") == "ready";
+});
+
+Test("anchor frame constants are distinct provenance tags", () =>
+{
+    return TitleBackgroundCharaSelectAnchorFrame.World == "world"
+        && TitleBackgroundCharaSelectAnchorFrame.CharaSelectFallback == "chara-select-fallback"
+        && TitleBackgroundCharaSelectAnchorFrame.Unknown == "unknown";
+});
+
+Test("configuration anchor frame tag persists as top-level json", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundCharaSelectAnchorFrame = "world",
+    };
+
+    var json = JsonSerializer.Serialize(configuration);
+    var restored = JsonSerializer.Deserialize<Configuration>(json);
+
+    return json.Contains("\"TitleBackgroundCharaSelectAnchorFrame\"", StringComparison.Ordinal)
+        && restored!.TitleBackgroundCharaSelectAnchorFrame == "world";
+});
+
+Test("logged-in capture tags anchor frame as world, chara-select capture as fallback", () =>
+{
+    var root = FindRepositoryRoot();
+    var timelineText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.TimelineDiagnostics.cs"));
+    var loggedIn = ExtractMethodBody(timelineText, "public bool TryCaptureLoggedInPositionAsAnchor(out string status)");
+    var charaSelect = ExtractMethodBody(timelineText, "public bool TryCaptureCharaSelectAnchorFromCurrentCharacter(out string status)");
+
+    return loggedIn.Contains("TitleBackgroundCharaSelectAnchorFrame.World", StringComparison.Ordinal)
+        && charaSelect.Contains("TitleBackgroundCharaSelectAnchorFrame.CharaSelectFallback", StringComparison.Ordinal);
+});
+
+Test("fixOn experiment block surfaces observed/override/pre-login diagnostics in summary", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"), "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
+    var body = ExtractMethodBody(serviceText, "private void AddCharacterPlacementPreLoginCaptureLines(List<string> lines)");
+
+    // R0/R1/R2 で必要な比較値が要約に出ること。pre-login カメラ・observed・post-FixOn・generation 整合フラグ。
+    return body.Contains("fixOn.exp.gateReason=", StringComparison.Ordinal)
+        && body.Contains("fixOn.exp.observedCamera=", StringComparison.Ordinal)
+        && body.Contains("fixOn.exp.observedFocus=", StringComparison.Ordinal)
+        && body.Contains("fixOn.exp.observedCameraToFocus=", StringComparison.Ordinal)
+        && body.Contains("fixOn.exp.anchorFrame=", StringComparison.Ordinal)
+        && body.Contains("fixOn.exp.postFixOnCamera=", StringComparison.Ordinal)
+        && body.Contains("fixOn.exp.preLoginCamera=", StringComparison.Ordinal)
+        && body.Contains("fixOn.exp.preLoginCameraFrame=", StringComparison.Ordinal)
+        && body.Contains("fixOn.exp.preLoginCameraGenerationMatchesFixOn=", StringComparison.Ordinal)
+        && body.Contains("fixOn.exp.preLoginVsPostFixOnLookAt=", StringComparison.Ordinal);
+});
+
+Test("fixOn experiment generation and context are held at capture time, not report time", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"), "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
+    var summary = ExtractMethodBody(serviceText, "private void AddCharacterPlacementPreLoginCaptureLines(List<string> lines)");
+
+    // sceneGeneration / captureContext / charaSelectSession は発火時保持フィールド由来。
+    // 報告時の active generation / IsLoggedIn / live session は charaSelectSession には使わない。
+    return summary.Contains("fixOn.exp.sceneGeneration={_fixOnExperimentSceneGeneration}", StringComparison.Ordinal)
+        && summary.Contains("fixOn.exp.captureContext={FormatNone(_fixOnExperimentCaptureContext)}", StringComparison.Ordinal)
+        && summary.Contains("fixOn.exp.charaSelectSession={_fixOnExperimentCharaSelectSession}", StringComparison.Ordinal)
+        && !summary.Contains("fixOn.exp.charaSelectSession={_charaSelectTitleBackgroundSessionActive}", StringComparison.Ordinal)
+        && !summary.Contains("fixOn.exp.sceneGeneration={_activeCharaSelectSceneGeneration}", StringComparison.Ordinal);
+});
+
+Test("pre-login camera captured per frame; load resets experiment snapshot; detour holds gen/context", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var update = ExtractMethodBody(hooksText, "private void OnFrameworkUpdate(IFramework _)");
+    var loadLobby = ExtractMethodBody(hooksText, "private void LoadLobbySceneDetour(GameLobbyType mapId)");
+    var detour = ExtractMethodBody(hooksText, "private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)");
+
+    return update.Contains("CapturePreLoginCameraOnFrameworkUpdate()", StringComparison.Ordinal)
+        && loadLobby.Contains("ResetFixOnExperimentSnapshot()", StringComparison.Ordinal)
+        && detour.Contains("ComputeFixOnFocusOverrideGateReason()", StringComparison.Ordinal)
+        && detour.Contains("_fixOnExperimentSceneGeneration = _activeCharaSelectSceneGeneration", StringComparison.Ordinal);
+});
+
+Test("pre-login camera capture gates on matching scene generation", () =>
+{
+    var root = FindRepositoryRoot();
+    var timelineText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.TimelineDiagnostics.cs"));
+    var capture = ExtractMethodBody(timelineText, "private void CapturePreLoginCameraOnFrameworkUpdate()");
+
+    // active generation 正値 + adapter generation 一致のフレームのみ採用（別ロード値の混入防止）。
+    return capture.Contains("_activeCharaSelectSceneGeneration <= 0", StringComparison.Ordinal)
+        && capture.Contains("_charaSelectCameraAdapter.RuntimeState.SceneGeneration != _activeCharaSelectSceneGeneration", StringComparison.Ordinal);
+});
+
+Test("configuration fixOn focus anchor override flag persists as top-level json", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundFixOnFocusAnchorOverrideEnabled = true,
+    };
+
+    var json = JsonSerializer.Serialize(configuration);
+    var restored = JsonSerializer.Deserialize<Configuration>(json);
+
+    return json.Contains("\"TitleBackgroundFixOnFocusAnchorOverrideEnabled\"", StringComparison.Ordinal)
+        && restored!.TitleBackgroundFixOnFocusAnchorOverrideEnabled;
+});
+
+Test("run bulk diagnostic uses summary entrypoint", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"), "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
+    var body = ExtractMethodBody(serviceText, "public IReadOnlyList<string> RunBulkDiagnostic()");
+
+    // 一括診断は要約分岐（false）を使い、詳細(true)で 17,000 行超に膨張させない。
+    return body.Contains("GetDiagnosticLines(includeDetailedPhase2Diagnostics: false)", StringComparison.Ordinal)
+        && !body.Contains("includeDetailedPhase2Diagnostics: true", StringComparison.Ordinal);
+});
+
+Test("brightness exploration classifies daylight time as daylight", () =>
+{
+    var snapshot = new TitleBackgroundEnvironmentSnapshot(true, "read", 12f * 3600f, 1, 0f);
+    var result = TitleBackgroundBrightnessExplorationLogic.Evaluate(snapshot);
+    return result.Daylight == TitleBackgroundEnvironmentDaylight.Daylight
+        && result.BrightnessHint == "daylight"
+        && !result.Rainy;
+});
+
+Test("brightness exploration flags rainy daytime", () =>
+{
+    var snapshot = new TitleBackgroundEnvironmentSnapshot(true, "read", 12f * 3600f, 2, 0.5f);
+    var result = TitleBackgroundBrightnessExplorationLogic.Evaluate(snapshot);
+    return result.Daylight == TitleBackgroundEnvironmentDaylight.Daylight
+        && result.Rainy
+        && result.BrightnessHint == "daylight-but-rainy";
+});
+
+Test("brightness exploration classifies midnight as night", () =>
+{
+    var snapshot = new TitleBackgroundEnvironmentSnapshot(true, "read", 0f, 0, 0f);
+    var result = TitleBackgroundBrightnessExplorationLogic.Evaluate(snapshot);
+    return result.Daylight == TitleBackgroundEnvironmentDaylight.Night
+        && result.BrightnessHint == "night-dark"
+        && result.ExplorationHint.Contains("layerFilterKey", StringComparison.Ordinal);
+});
+
+Test("brightness exploration classifies dusk as twilight", () =>
+{
+    var snapshot = new TitleBackgroundEnvironmentSnapshot(true, "read", 18f * 3600f, 0, 0f);
+    var result = TitleBackgroundBrightnessExplorationLogic.Evaluate(snapshot);
+    return result.Daylight == TitleBackgroundEnvironmentDaylight.Twilight
+        && result.BrightnessHint == "twilight-dim";
+});
+
+Test("brightness exploration reports unavailable environment", () =>
+{
+    var result = TitleBackgroundBrightnessExplorationLogic.Evaluate(
+        TitleBackgroundEnvironmentSnapshot.Unavailable("env-manager-null"));
+    return result.Daylight == TitleBackgroundEnvironmentDaylight.Unknown
+        && result.BrightnessHint == "unknown"
+        && result.ExplorationHint.Contains("unavailable", StringComparison.Ordinal);
+});
+
+Test("anchor capture gate is available only pre-login in chara select", () =>
+{
+    return TitleBackgroundAnchorCaptureGate.Evaluate(isLoggedIn: false, isCharaSelect: true)
+            == TitleBackgroundAnchorCaptureAvailability.Available
+        && TitleBackgroundAnchorCaptureGate.Evaluate(isLoggedIn: true, isCharaSelect: true)
+            == TitleBackgroundAnchorCaptureAvailability.LoggedIn
+        && TitleBackgroundAnchorCaptureGate.Evaluate(isLoggedIn: false, isCharaSelect: false)
+            == TitleBackgroundAnchorCaptureAvailability.NotCharaSelect;
+});
+
+Test("anchor capture gate enables only the available state", () =>
+{
+    return TitleBackgroundAnchorCaptureGate.IsCaptureEnabled(TitleBackgroundAnchorCaptureAvailability.Available)
+        && !TitleBackgroundAnchorCaptureGate.IsCaptureEnabled(TitleBackgroundAnchorCaptureAvailability.LoggedIn)
+        && !TitleBackgroundAnchorCaptureGate.IsCaptureEnabled(TitleBackgroundAnchorCaptureAvailability.NotCharaSelect);
+});
+
+Test("layer step increments and decrements with zero floor", () =>
+{
+    return TitleBackgroundLayerStepLogic.Step(51, 1) == 52
+        && TitleBackgroundLayerStepLogic.Step(51, -1) == 50
+        && TitleBackgroundLayerStepLogic.Step(0, -1) == 0
+        && TitleBackgroundLayerStepLogic.Step(7, 0) == 7;
+});
+
+Test("configuration fixOn passive observation flag persists as top-level json", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundFixOnPassiveObservationEnabled = true,
+    };
+
+    var json = JsonSerializer.Serialize(configuration);
+    var restored = JsonSerializer.Deserialize<Configuration>(json);
+
+    return json.Contains("\"TitleBackgroundFixOnPassiveObservationEnabled\"", StringComparison.Ordinal)
+        && restored!.TitleBackgroundFixOnPassiveObservationEnabled;
 });
 
 if (failures.Count > 0)

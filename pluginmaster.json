@@ -5,8 +5,8 @@
     "Punchline": "Materia精製と分解を手早く支援します。",
     "Description": "マテリア精製とアイテム分解、NPC販売場所検索を支援するミニユーティリティです。",
     "InternalName": "XivMiniUtil",
-    "AssemblyVersion": "0.3.8.0",
-    "TestingAssemblyVersion": "0.3.8.0",
+    "AssemblyVersion": "0.3.7.0",
+    "TestingAssemblyVersion": "0.3.7.0",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
     "TestingDalamudApiLevel": 15,
@@ -22,11 +22,11 @@
     "RepoUrl": "https://github.com/zlatan-mt/XIV-Mini-Util",
     "IconUrl": "https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/images/icon.png",
     "ImageUrls": [],
-    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.8/XivMiniUtil.zip",
-    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.8/XivMiniUtil.zip",
-    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.8/XivMiniUtil.zip",
-    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.8/XivMiniUtil.zip",
-    "Changelog": "TitleBackground / CharaSelect / Settings / Configuration を機能別に整理し、旧 phase2M/phase2N 診断キーを維持しながら characterPlacement/delivery alias を追加。",
-    "LastUpdate": 1781185401
+    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.7/XivMiniUtil.zip",
+    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.7/XivMiniUtil.zip",
+    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.7/XivMiniUtil.zip",
+    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.3.7/XivMiniUtil.zip",
+    "Changelog": "Universalis検索で安値3位まで表示する場合、順位ごとに改行して読みやすく表示するよう改善。",
+    "LastUpdate": 1777880140
   }
 ]

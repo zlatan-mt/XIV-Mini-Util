@@ -44,6 +44,21 @@ public sealed partial class Configuration
     public string TitleBackgroundLastQuickCheckNextAction { get; set; } = string.Empty;
     public string TitleBackgroundLastQuickCheckTime { get; set; } = string.Empty;
     public string TitleBackgroundLastQuickCheckDetailFileName { get; set; } = string.Empty;
+    // Character Select 陸上アンカー（湖上ではなく陸上の固定立ち位置）。capture+nudge でゲーム内確定する。
+    public bool TitleBackgroundCharaSelectAnchorEnabled { get; set; } = false;
+    public string TitleBackgroundCharaSelectAnchorCandidateId { get; set; } = string.Empty;
+    public float TitleBackgroundCharaSelectAnchorX { get; set; } = 0f;
+    public float TitleBackgroundCharaSelectAnchorY { get; set; } = 0f;
+    public float TitleBackgroundCharaSelectAnchorZ { get; set; } = 0f;
+    public float TitleBackgroundCharaSelectAnchorRotation { get; set; } = 0f;
+    // アンカー取得元のフレーム種別（world / lobby-native / chara-select-fallback / unknown）。
+    // placement/カメラ挙動には影響しない診断用 provenance タグ。R 実験で座標系を判別するために保持する。
+    public string TitleBackgroundCharaSelectAnchorFrame { get; set; } = string.Empty;
+    // FixOn フックを passive 観測専用（override 無し）で装着するか。発火可否の診断用。既定 OFF で挙動不変。
+    public bool TitleBackgroundFixOnPassiveObservationEnabled { get; set; } = false;
+    // 保存済み陸上アンカー座標を FixOn の焦点へ「候補一致時のみ」適用するか。
+    // passive 観測（上書きしない）とは独立した専用ゲート。既定 OFF で挙動不変。
+    public bool TitleBackgroundFixOnFocusAnchorOverrideEnabled { get; set; } = false;
     // SavePluginConfig (Dalamud) は Newtonsoft.Json、ExportToBase64 は System.Text.Json を使うため両方の互換属性が必要
     [Newtonsoft.Json.JsonProperty("TitleBackgroundPhase2MExperimentalApplyMode")]
     [JsonPropertyName("TitleBackgroundPhase2MExperimentalApplyMode")]
@@ -113,6 +128,15 @@ public sealed partial class Configuration
         TitleBackgroundLastQuickCheckNextAction = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckNextAction);
         TitleBackgroundLastQuickCheckTime = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckTime);
         TitleBackgroundLastQuickCheckDetailFileName = NormalizeShortDiagnostic(source.TitleBackgroundLastQuickCheckDetailFileName);
+        TitleBackgroundCharaSelectAnchorEnabled = source.TitleBackgroundCharaSelectAnchorEnabled;
+        TitleBackgroundCharaSelectAnchorCandidateId = NormalizeTitleBackgroundCharacterSelectOverrideCandidateId(source.TitleBackgroundCharaSelectAnchorCandidateId);
+        TitleBackgroundCharaSelectAnchorX = SanitizeCoordinate(source.TitleBackgroundCharaSelectAnchorX);
+        TitleBackgroundCharaSelectAnchorY = SanitizeCoordinate(source.TitleBackgroundCharaSelectAnchorY);
+        TitleBackgroundCharaSelectAnchorZ = SanitizeCoordinate(source.TitleBackgroundCharaSelectAnchorZ);
+        TitleBackgroundCharaSelectAnchorRotation = SanitizeCoordinate(source.TitleBackgroundCharaSelectAnchorRotation);
+        TitleBackgroundCharaSelectAnchorFrame = NormalizeShortDiagnostic(source.TitleBackgroundCharaSelectAnchorFrame);
+        TitleBackgroundFixOnPassiveObservationEnabled = source.TitleBackgroundFixOnPassiveObservationEnabled;
+        TitleBackgroundFixOnFocusAnchorOverrideEnabled = source.TitleBackgroundFixOnFocusAnchorOverrideEnabled;
         TitleBackgroundCharacterPlacementExperimentalApplyMode = NormalizeTitleBackgroundCharacterPlacementExperimentalApplyMode(source.TitleBackgroundCharacterPlacementExperimentalApplyMode);
         TitleBackgroundCreateSceneResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundCreateSceneResolverMode);
         TitleBackgroundLobbyUpdateResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundLobbyUpdateResolverMode);

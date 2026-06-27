@@ -180,6 +180,31 @@ public sealed unsafe partial class TitleScreenBackgroundService
         return TitleBackgroundTransitionDiagnosticRecorder.BuildSummaryLines(input);
     }
 
+    public const string BulkDiagnosticFileName = "title-background-bulk-diag.txt";
+
+    // 一括診断: 1回のボタン操作で診断束を取得し、ファイル保存＋呼び出し側で clipboard。
+    // GetDiagnosticLines は保持済み snapshot を整形するだけで、post-login に CharaSelect の
+    // native read（TryReadCurrentCharacterAim）を新たに行わないため、安全境界を踏み越えない。
+    public IReadOnlyList<string> RunBulkDiagnostic()
+    {
+        // 一括診断は要約のみを返す。per-frame タイムラインや .objectCandidate[ などの大量行は
+        // includeDetailedPhase2Diagnostics:false 経路が transition/placement/delivery の別 dump
+        // ファイルへ退避するため、本体（17,000 行超）は数百行の要約へ縮小される。
+        var lines = GetDiagnosticLines(includeDetailedPhase2Diagnostics: false);
+        try
+        {
+            Directory.CreateDirectory(_configDirectory);
+            var path = Path.Combine(_configDirectory, BulkDiagnosticFileName);
+            File.WriteAllText(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "TitleBackground bulk diagnostic save failed.");
+        }
+
+        return lines;
+    }
+
     private string SaveTransitionDiagnosticDump(IReadOnlyList<string> transitionSummaryLines)
     {
         try

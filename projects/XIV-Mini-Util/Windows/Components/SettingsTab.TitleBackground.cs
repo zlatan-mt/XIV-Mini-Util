@@ -50,11 +50,19 @@ public sealed partial class SettingsTab
         }
         ImGui.TextDisabled("Title + CharaSelect は未実装のため、実機確認までは選択肢から外しています。");
 
-        DrawTitleBackgroundCharacterSelectDeliveryModes();
+        ImGui.Spacing();
+        DrawTitleBackgroundCharaSelectAnchorControls();
+        ImGui.Spacing();
+        DrawTitleBackgroundManualCandidateSlot1(BuildTitleBackgroundManualCandidateSlots()[0]);
+        DrawTitleBackgroundLayerStepControls();
         ImGui.Spacing();
         DrawTitleBackgroundEffectiveCandidateDetails();
         ImGui.Spacing();
-        DrawTitleBackgroundCharacterCompositionBridgeDiagnostics();
+        DrawTitleBackgroundBulkDiagnosticButton();
+        if (!string.IsNullOrWhiteSpace(_titleBackgroundAnchorMessage))
+        {
+            ImGui.TextColored(_titleBackgroundAnchorMessageColor, _titleBackgroundAnchorMessage);
+        }
 
         if (ImGui.Button("解除"))
         {
@@ -79,7 +87,11 @@ public sealed partial class SettingsTab
 
         ImGui.Spacing();
         ImGui.Separator();
-        ImGui.Text("Developer Diagnostics");
+        ImGui.Text("開発者向け診断 (Developer Diagnostics)");
+        DrawTitleBackgroundCharacterSelectDeliveryModes();
+        ImGui.Spacing();
+        DrawTitleBackgroundCharacterCompositionBridgeDiagnostics();
+        ImGui.Spacing();
         DrawTitleBackgroundPresetSettings();
         ImGui.Spacing();
         DrawTitleBackgroundPhase2Settings();
@@ -99,7 +111,7 @@ public sealed partial class SettingsTab
         };
 
         ImGui.Spacing();
-        ImGui.Text("Character Select Background");
+        ImGui.Text("キャラ選択背景");
         var offSelected = !_configuration.TitleBackgroundOverrideEnabled;
         if (ImGui.RadioButton("OFF##TitleBackgroundSimpleOff", offSelected))
         {
@@ -108,7 +120,7 @@ public sealed partial class SettingsTab
 
         ImGui.SameLine();
         var recommendedSelected = TitleBackgroundQuickCheckUiPresenter.IsSimpleAutoSetupConfigured(_configuration);
-        if (ImGui.RadioButton("n4f4 recommended##TitleBackgroundSimpleN4F4", recommendedSelected))
+        if (ImGui.RadioButton("イル・メグ 湖##TitleBackgroundSimpleN4F4", recommendedSelected))
         {
             _titleScreenBackgroundService.RunSimpleAutoSetup();
         }
@@ -117,23 +129,13 @@ public sealed partial class SettingsTab
         ImGui.TextWrapped(summary.ResultLine);
         ImGui.TextDisabled(summary.NextActionLine);
 
-        var automaticStatus = _titleScreenBackgroundService.GetAutomaticQuickCheckStatus();
-        if (ImGui.Button("自動確認を開始##TitleBackgroundSimpleAutomaticCheck"))
+        ImGui.Spacing();
+        DrawTitleBackgroundSaveCharacterPositionButton();
+        DrawTitleBackgroundBulkDiagnosticButton();
+        if (!string.IsNullOrWhiteSpace(_titleBackgroundAnchorMessage))
         {
-            _titleScreenBackgroundService.StartAutomaticQuickCheck();
+            ImGui.TextColored(_titleBackgroundAnchorMessageColor, _titleBackgroundAnchorMessage);
         }
-
-        if (automaticStatus.CanCopyLastReport)
-        {
-            ImGui.SameLine();
-            if (ImGui.Button("前回ログを再コピー##TitleBackgroundSimpleCopyLastCheck"))
-            {
-                _titleScreenBackgroundService.QueueLastAutomaticCheckReportForClipboard();
-            }
-        }
-
-        ImGui.TextWrapped(automaticStatus.StatusLine);
-        ImGui.TextDisabled(automaticStatus.NextActionLine);
     }
 
     private void DrawTitleBackgroundAdvancedDrawer()
@@ -196,8 +198,6 @@ public sealed partial class SettingsTab
 
         DrawTitleBackgroundOverrideCandidateSelector(showManualSlot: false);
         DrawTitleBackgroundCameraFramingSelector();
-        ImGui.TextDisabled("Camera framing is handled by Title Background.");
-        ImGui.TextDisabled("Title Background uses integrated character composition.");
         DrawTitleBackgroundCharacterVisualStatusSelector();
 
         if (ImGui.Button("Start QuickCheck"))
@@ -265,9 +265,9 @@ public sealed partial class SettingsTab
     private static void DrawTitleBackgroundKnownLimitation()
     {
         ImGui.Spacing();
-        ImGui.Text("Known limitation:");
-        ImGui.TextWrapped("Character source is not resolved by diagnostics; visual confirmation is required.");
-        ImGui.TextDisabled("Character may appear off-center or too small depending on camera framing.");
+        ImGui.Text("既知の制限:");
+        ImGui.TextWrapped("キャラは表示できますが、背景の構図は湖中心のままで、構図を陸へ移す機能は調整中です。");
+        ImGui.TextDisabled("キャラの立ち位置は「キャラの位置を保存」で調整できます（背景の向きは変わりません）。");
     }
 
     private void DrawTitleBackgroundCharacterCompositionBridgeDiagnostics()
@@ -282,23 +282,8 @@ public sealed partial class SettingsTab
         ImGui.TextDisabled($"Applied stage/character/camera: {bridge.AppliedStage}/{bridge.AppliedCharacter}/{bridge.AppliedCamera}");
         ImGui.TextDisabled($"Legacy shooting composition: {_configuration.CharaSelectSceneCompositionEnabled}");
         ImGui.Spacing();
-        ImGui.Text("Camera Profile Compare");
+        ImGui.Text("Camera Profile Compare（開発者向け / 湖中心は変わりません）");
         if (ImGui.Button("Capture legacy visible camera##TitleBackgroundCaptureLegacyCamera"))
-        {
-            if (_titleScreenBackgroundService.CaptureLegacyVisibleCameraProfile(out var message))
-            {
-                _titleBackgroundCameraProfileMessage = message;
-                _titleBackgroundCameraProfileMessageColor = new Vector4(0.3f, 0.8f, 0.45f, 1f);
-            }
-            else
-            {
-                _titleBackgroundCameraProfileMessage = message;
-                _titleBackgroundCameraProfileMessageColor = new Vector4(1f, 0.45f, 0.45f, 1f);
-            }
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Save as n4f4 visible profile##TitleBackgroundSaveN4F4VisibleProfile"))
         {
             if (_titleScreenBackgroundService.CaptureLegacyVisibleCameraProfile(out var message))
             {
@@ -329,6 +314,180 @@ public sealed partial class SettingsTab
         {
             ImGui.TextDisabled(line);
         }
+
+        ImGui.Spacing();
+        DrawTitleBackgroundFixOnPassiveObservationToggle();
+        ImGui.Spacing();
+        DrawTitleBackgroundFixOnFocusAnchorOverrideToggle();
+    }
+
+    // Developer: passive FixOn 観測フックの ON/OFF（override なし・発火可否の診断用）。
+    private void DrawTitleBackgroundFixOnPassiveObservationToggle()
+    {
+        ImGui.Text("FixOn passive 観測（開発者向け）");
+        var enabled = _configuration.TitleBackgroundFixOnPassiveObservationEnabled;
+        if (ImGui.Checkbox("FixOn 発火を観測する（override なし）##TitleBackgroundFixOnPassive", ref enabled))
+        {
+            _titleScreenBackgroundService.SetFixOnPassiveObservationEnabled(enabled);
+        }
+
+        ImGui.TextDisabled("ON にすると FixOn フックを装着し、発火回数・引数を一括診断に出します。カメラは書き換えません。");
+    }
+
+    // Developer: 保存済み陸上アンカーを FixOn の焦点へ「候補一致時のみ」適用する ON/OFF。
+    // camera 位置と fovY は触らず focus（注視点）だけを差し替えるため、毎フレーム競合しない。
+    private void DrawTitleBackgroundFixOnFocusAnchorOverrideToggle()
+    {
+        ImGui.Text("FixOn 焦点を陸上アンカーへ（開発者向け）");
+        var enabled = _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled;
+        if (ImGui.Checkbox("保存した立ち位置へ構図を寄せる（焦点のみ）##TitleBackgroundFixOnFocusAnchor", ref enabled))
+        {
+            _titleScreenBackgroundService.SetFixOnFocusAnchorOverrideEnabled(enabled);
+        }
+
+        ImGui.TextDisabled("ON にすると FixOn フックを装着し、候補が一致する保存済み立ち位置へ焦点だけを差し替えます。カメラ位置・FOV は変更しません。");
+    }
+
+    // Simple/Advanced 共通: キャラの立ち位置を保存するボタン（CharaSelect 中のみ有効・理由表示）。
+    // キャラの DrawObject 座標のみに作用し、カメラ・背景には一切書き込まない。
+    private void DrawTitleBackgroundSaveCharacterPositionButton()
+    {
+        var availability = _titleScreenBackgroundService.GetAnchorCaptureAvailability();
+        var enabled = TitleBackgroundAnchorCaptureGate.IsCaptureEnabled(availability);
+        if (!enabled)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        if (ImGui.Button("キャラの位置を保存##TitleBackgroundSaveCharaPosition"))
+        {
+            if (_titleScreenBackgroundService.TryCaptureCharaSelectAnchorFromCurrentCharacter(out _))
+            {
+                _titleBackgroundAnchorMessage = "立ち位置を保存しました（背景の向きは変わりません）";
+                _titleBackgroundAnchorMessageColor = new Vector4(0.3f, 0.8f, 0.45f, 1f);
+            }
+            else
+            {
+                _titleBackgroundAnchorMessage = "キャラを読み取れませんでした";
+                _titleBackgroundAnchorMessageColor = new Vector4(1f, 0.45f, 0.45f, 1f);
+            }
+        }
+
+        if (!enabled)
+        {
+            ImGui.EndDisabled();
+            var reason = availability switch
+            {
+                TitleBackgroundAnchorCaptureAvailability.NotCharaSelect => "キャラ選択画面で使えます",
+                TitleBackgroundAnchorCaptureAvailability.LoggedIn => "ログアウトしてキャラ選択画面で使います",
+                _ => string.Empty,
+            };
+            if (!string.IsNullOrEmpty(reason))
+            {
+                ImGui.TextDisabled(reason);
+            }
+        }
+    }
+
+    // Simple/Advanced 共通: 一括診断を即時取得してクリップボードへコピー（read-only）。
+    private void DrawTitleBackgroundBulkDiagnosticButton()
+    {
+        if (ImGui.Button("一括診断をコピー##TitleBackgroundBulkDiagnostic"))
+        {
+            var lines = _titleScreenBackgroundService.RunBulkDiagnostic();
+            ImGui.SetClipboardText(string.Join("\n", lines));
+            _titleBackgroundAnchorMessage = $"一括診断をコピーしました（{lines.Count}行）";
+            _titleBackgroundAnchorMessageColor = new Vector4(0.7f, 0.7f, 0.7f, 1f);
+        }
+    }
+
+    // 詳細調整: キャラの立ち位置の微調整（capture + nudge + クリア + ログイン中取得 + レイヤー順送り）。
+    // すべてキャラの DrawObject 座標 / 背景レイヤーのみに作用し、カメラには一切書き込まない。
+    private void DrawTitleBackgroundCharaSelectAnchorControls()
+    {
+        ImGui.Text("キャラの立ち位置");
+        var enabled = _configuration.TitleBackgroundCharaSelectAnchorEnabled;
+        ImGui.TextDisabled($"保存済み: {(enabled ? "あり" : "なし")} / 候補: {(string.IsNullOrWhiteSpace(_configuration.TitleBackgroundCharaSelectAnchorCandidateId) ? "any" : _configuration.TitleBackgroundCharaSelectAnchorCandidateId)}");
+        ImGui.TextDisabled($"座標: ({_configuration.TitleBackgroundCharaSelectAnchorX:0.###}, {_configuration.TitleBackgroundCharaSelectAnchorY:0.###}, {_configuration.TitleBackgroundCharaSelectAnchorZ:0.###})");
+        ImGui.TextDisabled($"座標系: {(string.IsNullOrWhiteSpace(_configuration.TitleBackgroundCharaSelectAnchorFrame) ? "unknown" : _configuration.TitleBackgroundCharaSelectAnchorFrame)}");
+
+        DrawTitleBackgroundSaveCharacterPositionButton();
+        ImGui.SameLine();
+        if (ImGui.Button("クリア##TitleBackgroundClearAnchor"))
+        {
+            _titleScreenBackgroundService.ClearCharaSelectAnchor();
+            _titleBackgroundAnchorMessage = "立ち位置をクリアしました";
+            _titleBackgroundAnchorMessageColor = new Vector4(0.7f, 0.7f, 0.7f, 1f);
+        }
+
+        if (enabled)
+        {
+            var step = TitleBackgroundCharaSelectAnchorLogic.DefaultPositionNudgeStep;
+            DrawTitleBackgroundAnchorNudgeRow("左右 (X)", TitleBackgroundCharaSelectAnchorAxis.X, step);
+            DrawTitleBackgroundAnchorNudgeRow("上下 (Y)", TitleBackgroundCharaSelectAnchorAxis.Y, step);
+            DrawTitleBackgroundAnchorNudgeRow("前後 (Z)", TitleBackgroundCharaSelectAnchorAxis.Z, step);
+        }
+        else
+        {
+            ImGui.TextDisabled("キャラ選択画面で「キャラの位置を保存」すると微調整できます。");
+        }
+
+        ImGui.Spacing();
+        ImGui.TextDisabled("【実験/world座標】ログイン中の現在地を取得（ワールド座標。ロビーとは別座標系の可能性があり、そのままでは構図が崩れることがある。R1 比較用）:");
+        if (ImGui.Button("ログイン中の現在地を立ち位置にする（実験）##TitleBackgroundCaptureLoggedIn"))
+        {
+            if (_titleScreenBackgroundService.TryCaptureLoggedInPositionAsAnchor(out var status))
+            {
+                _titleBackgroundAnchorMessage = "ログイン中の現在地を立ち位置に保存しました";
+                _titleBackgroundAnchorMessageColor = new Vector4(0.3f, 0.8f, 0.45f, 1f);
+            }
+            else
+            {
+                _titleBackgroundAnchorMessage = $"保存できません: {status}";
+                _titleBackgroundAnchorMessageColor = new Vector4(1f, 0.75f, 0.35f, 1f);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_titleBackgroundAnchorMessage))
+        {
+            ImGui.TextColored(_titleBackgroundAnchorMessageColor, _titleBackgroundAnchorMessage);
+        }
+    }
+
+    private void DrawTitleBackgroundAnchorNudgeRow(string label, TitleBackgroundCharaSelectAnchorAxis axis, float step)
+    {
+        if (ImGui.Button($"-##TitleBackgroundAnchorMinus{axis}"))
+        {
+            _titleScreenBackgroundService.NudgeCharaSelectAnchor(axis, -step);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button($"+##TitleBackgroundAnchorPlus{axis}"))
+        {
+            _titleScreenBackgroundService.NudgeCharaSelectAnchor(axis, step);
+        }
+
+        ImGui.SameLine();
+        ImGui.Text($"{label} (±{step:0.##})");
+    }
+
+    // レイヤー順送り（layer 一覧が取れない環境のフォールバック）。手動候補の layerFilterKey を ±1。
+    private void DrawTitleBackgroundLayerStepControls()
+    {
+        ImGui.Text("背景レイヤー探索");
+        ImGui.TextDisabled($"現在のレイヤー番号: {_configuration.TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey}");
+        if (ImGui.Button("前のレイヤーを試す##TitleBackgroundLayerPrev"))
+        {
+            _titleScreenBackgroundService.StepManualCandidateLayerFilterKey(-1);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("次のレイヤーを試す##TitleBackgroundLayerNext"))
+        {
+            _titleScreenBackgroundService.StepManualCandidateLayerFilterKey(1);
+        }
+
+        ImGui.TextDisabled("試した結果は「一括診断をコピー」に含まれます。");
     }
 
     private void DrawTitleBackgroundPresetSettings()
@@ -409,11 +568,6 @@ public sealed partial class SettingsTab
 
         ImGui.TextDisabled("手入力と現在値保存は debug 補助です。通常は built-in preset を選んで適用します。");
         ImGui.TextDisabled("CharacterPosition は将来のキャラクター配置用で、Camera Focus とは別の値です。");
-
-        DrawTitleBackgroundCharacterSelectDeliveryModes();
-        ImGui.Spacing();
-        DrawTitleBackgroundEffectiveCandidateDetails();
-        DrawTitleBackgroundManualCandidateSlot1(BuildTitleBackgroundManualCandidateSlots()[0]);
         ImGui.Spacing();
 
         var territoryPath = _configuration.TitleBackgroundTerritoryPath;
@@ -1014,7 +1168,7 @@ public sealed partial class SettingsTab
     private void DrawTitleBackgroundCameraFramingSelector()
     {
         var framingMode = _configuration.TitleBackgroundCharaSelectCameraFramingMode;
-        if (ImGui.BeginCombo("Camera framing##TitleBackgroundCameraFraming", GetTitleBackgroundCameraFramingModeLabel(framingMode)))
+        if (ImGui.BeginCombo("カメラ構図（湖中心は変わりません）##TitleBackgroundCameraFraming", GetTitleBackgroundCameraFramingModeLabel(framingMode)))
         {
             foreach (TitleBackgroundCharaSelectCameraFramingMode mode in Enum.GetValues(typeof(TitleBackgroundCharaSelectCameraFramingMode)))
             {

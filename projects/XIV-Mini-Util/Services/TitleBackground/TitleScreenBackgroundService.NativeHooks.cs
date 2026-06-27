@@ -4,6 +4,7 @@
 using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.LayoutEngine;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -60,6 +61,16 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     CalculateCameraCurveLowAndHighPointDetour);
             }
 
+            // FixOn は既定では装着しない（dead code 整理済み）。passive 観測フラグ、または
+            // focus-anchor override フラグが ON の時だけ装着する。passive は診断専用（上書き無し）、
+            // focus override は候補一致時のみ焦点だけを陸上アンカーへ差し替える。
+            if (ShouldInstallFixOnHook())
+            {
+                _cameraFixOnHook = _gameInteropProvider.HookFromAddress<LobbyCameraFixOnDelegate>(
+                    _addressResolver.FixOn,
+                    LobbyCameraFixOnDetour);
+            }
+
             _createSceneHook.Enable();
             _lobbyUpdateHook.Enable();
             _loadLobbySceneHook.Enable();
@@ -67,6 +78,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _calculateLobbyCameraLookAtYHook?.Enable();
             _setCameraCurveMidPointHook?.Enable();
             _calculateCameraCurveLowAndHighPointHook?.Enable();
+            _cameraFixOnHook?.Enable();
             RecordTransitionEvent("hooks enabled", "InitializeHooks");
 
             _state = TitleBackgroundServiceState.Disabled;
@@ -99,6 +111,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _activeCharaSelectSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
             _sceneOverrideCleanupReason = "none";
             _loggedInWorldTransitionRecorded = false;
+            // R 実験の値は必ずロード単位にする。FixOn は本ロード中（下の Original 内）で再発火し再populate される。
+            ResetFixOnExperimentSnapshot();
         }
 
         RecordTransitionEvent("scene generation incremented", $"generation={_charaSelectCameraAdapter.RuntimeState.SceneGeneration}");
@@ -288,6 +302,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)
     {
+        _fixOnPassiveCallCount++;
+        // FixOn 発火「時点」の generation / context を保持する（報告は post-login で行われ active
+        // generation は終了処理で 0、context は post-login になるため、その時の値では取り違える）。
+        _fixOnExperimentSceneGeneration = _activeCharaSelectSceneGeneration;
+        _fixOnExperimentCaptureContext = _clientState.IsLoggedIn ? "post-login" : "pre-login";
+        _fixOnExperimentCharaSelectSession = _charaSelectTitleBackgroundSessionActive;
         RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.FixOn);
         float[]? cameraOverride = null;
         float[]? focusOverride = null;
@@ -298,7 +318,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _lastObservedFixOnCamera = TryReadVector(cameraPos);
             _lastObservedFixOnFocus = TryReadVector(focusPos);
             _lastObservedFixOnFovY = fovY;
-            if (ShouldOverrideCamera())
+            // passive 観測モードでは、将来 ShouldOverrideCamera() が復活しても絶対に
+            // override せず passthrough を強制する（観測専用フックの不変条件）。
+            if (!_configuration.TitleBackgroundFixOnPassiveObservationEnabled && ShouldOverrideCamera())
             {
                 _cameraApplyPending = false;
                 var plan = TitleBackgroundCameraOverridePlan.FromConfiguration(_configuration);
@@ -326,6 +348,46 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     FormatVector(plan.Focus),
                     plan.FovY);
             }
+
+            // 診断（read-only）: 適用可否の総合理由を毎回記録する。"ready" のときだけ下の override が走る。
+            _lastFixOnFocusOverrideGateReason = ComputeFixOnFocusOverrideGateReason();
+
+            // 焦点 override は次を全て満たすときだけ。passive 観測 ON は最優先で passthrough を強制し、
+            // 実行コンテキストは FixOn 専用ゲート（pre-login + Ready + bridge + session active + scene
+            // generation 一致 + CharaSelect セッション）を必須にする。FixOn はシーン読み込み途中に発火し
+            // CurrentLobbyMap が None に戻り得るため CurrentLobbyMap には依存しない。legacy override が
+            // 発火していない場合に限り焦点だけを置き換える（camera/fovY は不変）。
+            if (cameraOverride == null
+                && focusOverride == null
+                && TitleBackgroundFixOnFocusOverrideLogic.ShouldConsiderFocusOverride(
+                    _configuration.TitleBackgroundFixOnPassiveObservationEnabled,
+                    _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled)
+                && IsFixOnFocusOverrideContextActive())
+            {
+                var focusResolution = TitleBackgroundFixOnFocusOverrideLogic.Resolve(
+                    _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled,
+                    BuildCharaSelectAnchor(),
+                    ResolveCurrentOverrideCandidate().Id,
+                    _lastObservedFixOnFocus ?? Vector3.Zero,
+                    CharaSelectCharacterFocusBodyDrop);
+                _lastFixOnFocusOverrideSource = focusResolution.Source;
+                if (focusResolution.ShouldOverride)
+                {
+                    focusOverride =
+                    [
+                        focusResolution.Focus.X,
+                        focusResolution.Focus.Y,
+                        focusResolution.Focus.Z,
+                    ];
+                    _lastCameraOverrideApplied = true;
+                    _lastAppliedFocus = focusResolution.Focus;
+                    _fixOnFocusOverrideAppliedCount++;
+                    invocationMode = "anchor-focus-override";
+                    _log.Information(
+                        "[XMU BG] FixOn focus anchor override applied. focus={Focus}",
+                        FormatVector(focusResolution.Focus));
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -338,11 +400,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
         _lastFixOnInvocationMode = invocationMode;
         nint result;
-        if (cameraOverride != null && focusOverride != null)
+        if (cameraOverride != null || focusOverride != null)
         {
-            fixed (float* cameraPointer = cameraOverride)
-            fixed (float* focusPointer = focusOverride)
+            // 上書きしない側はゲームの元ポインタをそのまま渡す（focus のみ差し替えにも対応）。
+            fixed (float* cameraOverridePointer = cameraOverride)
+            fixed (float* focusOverridePointer = focusOverride)
             {
+                var cameraPointer = cameraOverride != null ? cameraOverridePointer : cameraPos;
+                var focusPointer = focusOverride != null ? focusOverridePointer : focusPos;
                 result = _cameraFixOnHook?.Original(self, cameraPointer, focusPointer, overrideFovY) ?? nint.Zero;
             }
         }
@@ -352,7 +417,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
 
         CapturePostFixOnCameraState();
-        ScheduleCameraProbeTimelineCapture(cameraOverride != null && focusOverride != null);
+        ScheduleCameraProbeTimelineCapture(cameraOverride != null || focusOverride != null);
         return result;
     }
 
@@ -713,6 +778,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
         CapturePhase2CTimelineOnFrameworkUpdate();
         CaptureCameraProbeTimelineOnFrameworkUpdate();
+        CapturePreLoginCameraOnFrameworkUpdate();
         MaintainCharaSelectCharacterPlacement();
         UpdateSelfTestOnFrameworkUpdate();
         UpdateAutomaticQuickCheck();

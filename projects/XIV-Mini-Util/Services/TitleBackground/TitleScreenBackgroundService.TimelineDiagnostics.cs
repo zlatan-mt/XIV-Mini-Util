@@ -1401,6 +1401,36 @@ public sealed unsafe partial class TitleScreenBackgroundService
             : null;
     }
 
+    // R 実験用の「最後の pre-login CharaSelect カメラ」を read-only で保持する（カメラには書き込まない）。
+    // pre-login + session active かつ active generation 正値・adapter generation 一致のフレームのみ採用し、
+    // 古い/遷移中の値や別ロードの値を混ぜない。診断は post-login で呼ばれるが、この保持値は最後の整合
+    // pre-login フレームを指す。「安定後」は名乗らず generation と captured frame を併記して判断材料を出す。
+    private void CapturePreLoginCameraOnFrameworkUpdate()
+    {
+        if (_clientState.IsLoggedIn || !_charaSelectTitleBackgroundSessionActive)
+        {
+            return;
+        }
+
+        if (_activeCharaSelectSceneGeneration <= 0
+            || _charaSelectCameraAdapter.RuntimeState.SceneGeneration != _activeCharaSelectSceneGeneration)
+        {
+            return;
+        }
+
+        if (!TryCaptureActiveCameraSnapshot(out var snapshot, out _))
+        {
+            return;
+        }
+
+        _lastPreLoginSceneCameraPosition = snapshot.SceneCameraPosition;
+        _lastPreLoginSceneCameraLookAt = snapshot.LookAtVector;
+        _lastPreLoginSceneCameraDistance = snapshot.Distance;
+        _lastPreLoginSceneCameraFovY = snapshot.FovY;
+        _lastPreLoginSceneCameraGeneration = _activeCharaSelectSceneGeneration;
+        _lastPreLoginSceneCameraFrame = GetCurrentPhase2CFrame();
+    }
+
     private void CapturePostFixOnCameraState()
     {
         ClearPostFixOnCameraObservation();
@@ -1439,18 +1469,28 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
 
             var lookAt = camera.LookAtVector;
-            if (!TitleBackgroundCameraMath.IsFiniteVector(lookAt))
+            var anchor = BuildCharaSelectAnchor();
+            // アンカーが無い場合は camera focus フォールバックを使うので lookAt の有限性が必要。
+            if (!anchor.HasUsableAnchor && !TitleBackgroundCameraMath.IsFiniteVector(lookAt))
             {
                 _charaSelectCharacterPlacementLastError = "lookat-non-finite";
                 return;
             }
 
-            // Drop the body so the character's torso (not feet) sits on the camera focus.
-            var target = new Vector3(lookAt.X, lookAt.Y - CharaSelectCharacterFocusBodyDrop, lookAt.Z);
+            // アンカーが有効かつ現在の候補に一致すれば陸上固定座標、なければ従来どおり
+            // カメラ注視点ベース（torso がフォーカスに来るよう body drop ぶん下げる）。
+            // いずれの場合もカメラには一切書き込まない。
+            var resolution = TitleBackgroundCharaSelectAnchorLogic.ResolvePlacementTarget(
+                anchor,
+                ResolveCurrentOverrideCandidate().Id,
+                lookAt,
+                CharaSelectCharacterFocusBodyDrop);
+            var target = resolution.Target;
             if (TitleBackgroundCharacterSourceProbe.TrySetCurrentCharacterDrawPosition(target))
             {
                 _charaSelectCharacterPlacementCount++;
                 _lastCharaSelectCharacterPlacementTarget = target;
+                _lastCharaSelectCharacterPlacementSource = resolution.Source;
                 _charaSelectCharacterPlacementLastError = "none";
             }
             else
@@ -1466,6 +1506,165 @@ public sealed unsafe partial class TitleScreenBackgroundService
     }
 
     private const float CharaSelectCharacterFocusBodyDrop = 0.9f;
+
+    private TitleBackgroundCharaSelectAnchor BuildCharaSelectAnchor()
+    {
+        return new TitleBackgroundCharaSelectAnchor(
+            _configuration.TitleBackgroundCharaSelectAnchorEnabled,
+            _configuration.TitleBackgroundCharaSelectAnchorCandidateId,
+            new Vector3(
+                _configuration.TitleBackgroundCharaSelectAnchorX,
+                _configuration.TitleBackgroundCharaSelectAnchorY,
+                _configuration.TitleBackgroundCharaSelectAnchorZ),
+            _configuration.TitleBackgroundCharaSelectAnchorRotation);
+    }
+
+    private void StoreCharaSelectAnchor(TitleBackgroundCharaSelectAnchor anchor)
+    {
+        _configuration.TitleBackgroundCharaSelectAnchorEnabled = anchor.Enabled;
+        _configuration.TitleBackgroundCharaSelectAnchorCandidateId = anchor.CandidateId;
+        _configuration.TitleBackgroundCharaSelectAnchorX = anchor.Position.X;
+        _configuration.TitleBackgroundCharaSelectAnchorY = anchor.Position.Y;
+        _configuration.TitleBackgroundCharaSelectAnchorZ = anchor.Position.Z;
+        _configuration.TitleBackgroundCharaSelectAnchorRotation = anchor.Rotation;
+        _configuration.Save();
+    }
+
+    // ゲーム内 capture: CharaSelect 中の現在キャラの draw 座標をアンカーとして確定する。
+    // pre-login + CharaSelect ロビーに限定し、いずれの場合もカメラには書き込まない。
+    public bool TryCaptureCharaSelectAnchorFromCurrentCharacter(out string status)
+    {
+        if (_clientState.IsLoggedIn)
+        {
+            status = "skipped-post-login";
+            return false;
+        }
+
+        if (!TryReadCurrentLobbyMap(out var lobbyMap) || lobbyMap != GameLobbyType.CharaSelect)
+        {
+            status = "skipped-not-chara-select";
+            return false;
+        }
+
+        if (!TitleBackgroundCharacterSourceProbe.TryReadCurrentCharacterAim(out var position, out var rotation))
+        {
+            status = "skipped-character-unavailable";
+            return false;
+        }
+
+        var anchor = TitleBackgroundCharaSelectAnchorLogic.CaptureFromDrawPosition(
+            ResolveCurrentOverrideCandidate().Id,
+            position,
+            rotation);
+        if (!anchor.HasUsableAnchor)
+        {
+            status = "skipped-non-finite";
+            return false;
+        }
+
+        // placement が毎フレーム DrawObject を fallback/anchor へ強制配置しているため、ここで読む値は
+        // native の自然立ち位置ではなく合成 fallback（camera focus - bodyDrop）になり得る。別種として記録する。
+        _configuration.TitleBackgroundCharaSelectAnchorFrame = TitleBackgroundCharaSelectAnchorFrame.CharaSelectFallback;
+        StoreCharaSelectAnchor(anchor);
+        status = "captured";
+        return true;
+    }
+
+    // 微調整。設定値のみを書き換えるので、いつ呼んでもカメラ・キャラには触れない
+    // （次の placement フレームで反映される）。capture 前は何もしない。
+    public void NudgeCharaSelectAnchor(TitleBackgroundCharaSelectAnchorAxis axis, float delta)
+    {
+        var anchor = BuildCharaSelectAnchor();
+        if (!anchor.Enabled)
+        {
+            return;
+        }
+
+        StoreCharaSelectAnchor(TitleBackgroundCharaSelectAnchorLogic.ApplyNudge(anchor, axis, delta));
+    }
+
+    public void ClearCharaSelectAnchor()
+    {
+        _configuration.TitleBackgroundCharaSelectAnchorFrame = string.Empty;
+        StoreCharaSelectAnchor(TitleBackgroundCharaSelectAnchor.None);
+    }
+
+    // ログイン中の現在地（プレイヤー座標）を候補の立ち位置アンカーとして保存する。
+    // CharaSelect の native read ではなく managed API（IClientState.LocalPlayer）を使う別経路。
+    // territory が候補と一致する時のみ許可（座標系一致は実機検証が前提）。
+    public bool TryCaptureLoggedInPositionAsAnchor(out string status)
+    {
+        if (!_clientState.IsLoggedIn)
+        {
+            status = "skipped-not-logged-in";
+            return false;
+        }
+
+        var player = _objectTable.LocalPlayer;
+        if (player == null)
+        {
+            status = "skipped-no-local-player";
+            return false;
+        }
+
+        var candidate = ResolveCurrentOverrideCandidate();
+        if (candidate.TerritoryId != 0 && _clientState.TerritoryType != candidate.TerritoryId)
+        {
+            status = $"skipped-territory-mismatch:{_clientState.TerritoryType}!={candidate.TerritoryId}";
+            return false;
+        }
+
+        var anchor = TitleBackgroundCharaSelectAnchorLogic.CaptureFromDrawPosition(
+            candidate.Id,
+            player.Position,
+            player.Rotation);
+        if (!anchor.HasUsableAnchor)
+        {
+            status = "skipped-non-finite";
+            return false;
+        }
+
+        _configuration.TitleBackgroundCharaSelectAnchorFrame = TitleBackgroundCharaSelectAnchorFrame.World;
+        StoreCharaSelectAnchor(anchor);
+        status = "captured-logged-in";
+        return true;
+    }
+
+    // capture ボタンの押下可否（UI が enable/無効理由に使う）。
+    internal TitleBackgroundAnchorCaptureAvailability GetAnchorCaptureAvailability()
+    {
+        var isCharaSelect = !_clientState.IsLoggedIn
+            && TryReadCurrentLobbyMap(out var lobbyMap)
+            && lobbyMap == GameLobbyType.CharaSelect;
+        return TitleBackgroundAnchorCaptureGate.Evaluate(_clientState.IsLoggedIn, isCharaSelect);
+    }
+
+    // 手動候補の layerFilterKey を ±1 順送りし、その候補が有効なら即時再適用する。
+    // layer 一覧が取得できない環境向けの探索フォールバック。書き込みは config と背景差し替えのみ。
+    public uint StepManualCandidateLayerFilterKey(int direction)
+    {
+        var stepped = TitleBackgroundLayerStepLogic.Step(
+            _configuration.TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey,
+            direction);
+        if (stepped == _configuration.TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey)
+        {
+            return stepped;
+        }
+
+        _configuration.TitleBackgroundCharacterSelectManualCandidate1LayerFilterKey = stepped;
+        // 現在の有効候補が手動候補なら、layer 変更を背景へ反映する。
+        if (string.Equals(
+                _configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
+                TitleBackgroundCharacterSelectOverrideCandidateRegistry.ManualSlot1CandidateId,
+                StringComparison.Ordinal))
+        {
+            _configuration.TitleBackgroundLayoutLayerFilterKey = stepped;
+        }
+
+        _configuration.Save();
+        ApplyFromConfiguration();
+        return stepped;
+    }
 
     private bool TryCaptureActiveCameraSnapshot(out TitleBackgroundActiveCameraSnapshot snapshot, out string errorMessage)
     {
