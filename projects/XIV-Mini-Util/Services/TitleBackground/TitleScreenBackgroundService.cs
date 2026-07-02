@@ -40,6 +40,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundCameraObservationRuntimeState _cameraObservation = new();
     // pre-loginキャラDrawObject観測とCharaSelectキャラ配置記録のセッション限定状態（プラグイン再起動で消える）。
     private readonly TitleBackgroundCharacterPlacementRuntimeState _characterPlacement = new();
+    // probe session / camera probe timeline / phase2C timelineのセッション限定診断状態（プラグイン再起動で消える）。
+    private readonly TitleBackgroundProbeTimelineRuntimeState _probeTimeline = new();
 
     private Hook<CreateSceneDelegate>? _createSceneHook;
     private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
@@ -106,21 +108,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private string _curveApplyActiveCameraBeforeStatus = "not-run";
     private string _curveApplyActiveCameraAfterStatus = "not-run";
     private int? _runtimeRestoreAppliedFrame;
-    private TitleBackgroundProbeSession? _activeProbeSession;
-    private TitleBackgroundProbeSession? _lastProbeSession;
-    private TitleBackgroundProbeCounters _automaticProbeCounters = new();
-    private bool _automaticProbeCountersEnabled;
-    private TitleBackgroundCameraProbeSession? _cameraProbeSession;
-    private int _cameraProbeTimelineFrameCounter = -1;
-    private string _cameraProbeTimelineStatus = "not-run";
-    private string _cameraProbeTimelineError = string.Empty;
-    private readonly Dictionary<int, TitleBackgroundCameraProbeTimelineSnapshot> _cameraProbeTimelineSnapshots = [];
-    private readonly Dictionary<int, TitleBackgroundCameraProbeTimelineEventCounts> _cameraProbeTimelineEventCounts = [];
-    private readonly Dictionary<int, TitleBackgroundCameraProbeLobbyUpdateSnapshot> _cameraProbeLobbyUpdateSnapshots = [];
-    private int _phase2CTimelineFrameCounter = -1;
-    private string _phase2CTimelineStatus = "not-run";
-    private string _phase2CTimelineError = string.Empty;
-    private readonly Dictionary<int, TitleBackgroundPhase2CTimelineSnapshot> _phase2CTimelineSnapshots = [];
     private readonly Dictionary<int, TitleBackgroundCharacterPlacementFrame> _phase2MPlacementFrames = [];
     private int _phase2MPlacementCaptureSceneGeneration;
     private string _phase2MPlacementCaptureReason = "not-run";
@@ -334,7 +321,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     internal bool TryCopyLastObservedCreateSceneToOverrideConfiguration(out string errorMessage)
     {
-        var lastPath = _automaticProbeCounters.LastCreateScenePath;
+        var lastPath = _probeTimeline.AutomaticProbeCounters.LastCreateScenePath;
         if (string.IsNullOrWhiteSpace(lastPath))
         {
             errorMessage = "HookProbe で観測した CreateScene path がありません。";
@@ -365,9 +352,9 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _configuration.TitleBackgroundCharacterSelectOverrideCandidateId = string.Empty;
         _configuration.TitleBackgroundCameraOverrideEnabled = false;
         _configuration.TitleBackgroundTerritoryPath = normalizedPath;
-        _configuration.TitleBackgroundTerritoryTypeId = _automaticProbeCounters.LastCreateSceneTerritoryId;
-        _configuration.TitleBackgroundLayoutTerritoryTypeId = _automaticProbeCounters.LastCreateSceneTerritoryId;
-        _configuration.TitleBackgroundLayoutLayerFilterKey = _automaticProbeCounters.LastCreateSceneLayerFilterKey;
+        _configuration.TitleBackgroundTerritoryTypeId = _probeTimeline.AutomaticProbeCounters.LastCreateSceneTerritoryId;
+        _configuration.TitleBackgroundLayoutTerritoryTypeId = _probeTimeline.AutomaticProbeCounters.LastCreateSceneTerritoryId;
+        _configuration.TitleBackgroundLayoutLayerFilterKey = _probeTimeline.AutomaticProbeCounters.LastCreateSceneLayerFilterKey;
         _configuration.Save();
         ApplyFromConfiguration();
         _log.Information(
@@ -599,10 +586,10 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _lastLobbyUpdateMapId = GameLobbyType.None;
         _currentMapWriteAttempted = false;
         _lastCurrentMapWriteSucceeded = false;
-        if (_activeProbeSession != null)
+        if (_probeTimeline.ActiveProbeSession != null)
         {
-            _activeProbeSession.OriginalSettings.ApplyTo(_configuration);
-            _activeProbeSession = null;
+            _probeTimeline.ActiveProbeSession.OriginalSettings.ApplyTo(_configuration);
+            _probeTimeline.ActiveProbeSession = null;
         }
 
         DisposeHooks();
@@ -1308,10 +1295,10 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _state = TitleBackgroundServiceState.RuntimeError;
         _stateReason = $"{hookName}: {ex.Message}";
         _cameraApplyPending = false;
-        if (_activeProbeSession != null)
+        if (_probeTimeline.ActiveProbeSession != null)
         {
-            _activeProbeSession.RuntimeErrorOccurred = true;
-            _activeProbeSession.LastError = _stateReason;
+            _probeTimeline.ActiveProbeSession.RuntimeErrorOccurred = true;
+            _probeTimeline.ActiveProbeSession.LastError = _stateReason;
         }
 
         _log.Warning(ex, "TitleBackground runtime error in {HookName}.", hookName);
@@ -1355,10 +1342,10 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _curveApplyActiveCameraAfter = null;
         _curveApplyActiveCameraBeforeStatus = "not-run";
         _curveApplyActiveCameraAfterStatus = "not-run";
-        _phase2CTimelineFrameCounter = -1;
-        _phase2CTimelineStatus = "not-run";
-        _phase2CTimelineError = string.Empty;
-        _phase2CTimelineSnapshots.Clear();
+        _probeTimeline.Phase2CTimelineFrameCounter = -1;
+        _probeTimeline.Phase2CTimelineStatus = "not-run";
+        _probeTimeline.Phase2CTimelineError = string.Empty;
+        _probeTimeline.Phase2CTimelineSnapshots.Clear();
         _phase2MPlacementFrames.Clear();
         ResetPhase2ECalculateLookAtYObservation();
         ClearPostFixOnCameraObservation();
@@ -1437,12 +1424,12 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             _configuration.TitleBackgroundOverrideEnabled,
             _configuration.TitleBackgroundCreateSceneResolverMode,
             _configuration.TitleBackgroundLobbyUpdateResolverMode);
-        if (shouldEnable && !_automaticProbeCountersEnabled)
+        if (shouldEnable && !_probeTimeline.AutomaticProbeCountersEnabled)
         {
-            _automaticProbeCounters = new TitleBackgroundProbeCounters();
+            _probeTimeline.AutomaticProbeCounters = new TitleBackgroundProbeCounters();
         }
 
-        _automaticProbeCountersEnabled = shouldEnable;
+        _probeTimeline.AutomaticProbeCountersEnabled = shouldEnable;
     }
 
     private void DisposeHooks()
@@ -1586,7 +1573,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             return "observable-immediate-change";
         }
 
-        if (!_phase2CTimelineSnapshots.TryGetValue(0, out var frame0)
+        if (!_probeTimeline.Phase2CTimelineSnapshots.TryGetValue(0, out var frame0)
             || !frame0.ActiveCameraCaptured
             || !stableSample.ActiveCameraCaptured)
         {

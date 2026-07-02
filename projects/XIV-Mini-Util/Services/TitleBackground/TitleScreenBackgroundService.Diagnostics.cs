@@ -9,13 +9,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
 {
     private bool TryGetLatestPhase2CTimelineSnapshot(out TitleBackgroundPhase2CTimelineSnapshot snapshot)
     {
-        if (_phase2CTimelineSnapshots.Count == 0)
+        if (_probeTimeline.Phase2CTimelineSnapshots.Count == 0)
         {
             snapshot = default;
             return false;
         }
 
-        snapshot = _phase2CTimelineSnapshots.Values
+        snapshot = _probeTimeline.Phase2CTimelineSnapshots.Values
             .OrderByDescending(sample => sample.Frame)
             .First();
         return true;
@@ -636,16 +636,16 @@ public sealed unsafe partial class TitleScreenBackgroundService
             $"probeMutatesScene=False",
             $"probeWritesCurrentMap=False",
             $"probeEnablesCameraHook=False",
-            $"automaticProbeCountersEnabled={_automaticProbeCountersEnabled}",
-            $"CreateSceneProbe.callCount={_automaticProbeCounters.CreateSceneCallCount}",
-            $"CreateSceneProbe.lastPath={FormatNone(_automaticProbeCounters.LastCreateScenePath)}",
-            $"CreateSceneProbe.lastTerritoryId={_automaticProbeCounters.LastCreateSceneTerritoryId}",
-            $"CreateSceneProbe.lastLayerFilterKey={_automaticProbeCounters.LastCreateSceneLayerFilterKey}",
-            $"LobbyUpdateProbe.callCount={_automaticProbeCounters.LobbyUpdateCallCount}",
-            $"LobbyUpdateProbe.lastMapId={_automaticProbeCounters.LastLobbyUpdateMapId}",
-            $"LobbyUpdateProbe.lastTime={_automaticProbeCounters.LastLobbyUpdateTime}",
-            $"LoadLobbySceneProbe.callCount={_automaticProbeCounters.LoadLobbySceneCallCount}",
-            $"LoadLobbySceneProbe.lastMapId={_automaticProbeCounters.LastLoadLobbySceneMapId}",
+            $"automaticProbeCountersEnabled={_probeTimeline.AutomaticProbeCountersEnabled}",
+            $"CreateSceneProbe.callCount={_probeTimeline.AutomaticProbeCounters.CreateSceneCallCount}",
+            $"CreateSceneProbe.lastPath={FormatNone(_probeTimeline.AutomaticProbeCounters.LastCreateScenePath)}",
+            $"CreateSceneProbe.lastTerritoryId={_probeTimeline.AutomaticProbeCounters.LastCreateSceneTerritoryId}",
+            $"CreateSceneProbe.lastLayerFilterKey={_probeTimeline.AutomaticProbeCounters.LastCreateSceneLayerFilterKey}",
+            $"LobbyUpdateProbe.callCount={_probeTimeline.AutomaticProbeCounters.LobbyUpdateCallCount}",
+            $"LobbyUpdateProbe.lastMapId={_probeTimeline.AutomaticProbeCounters.LastLobbyUpdateMapId}",
+            $"LobbyUpdateProbe.lastTime={_probeTimeline.AutomaticProbeCounters.LastLobbyUpdateTime}",
+            $"LoadLobbySceneProbe.callCount={_probeTimeline.AutomaticProbeCounters.LoadLobbySceneCallCount}",
+            $"LoadLobbySceneProbe.lastMapId={_probeTimeline.AutomaticProbeCounters.LastLoadLobbySceneMapId}",
             $"sceneOverrideEnabled={IsSceneOverrideEnabled()}",
             $"overrideMutationBranchArmed={IsOverrideMutationBranchArmed()}",
             $"overrideTerritoryPath={FormatNone(_configuration.TitleBackgroundTerritoryPath)}",
@@ -751,10 +751,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
             $"curveApply.activeCameraAfter.SceneCamera.LookAtVector={FormatVector(_curveApplyActiveCameraAfter?.LookAtVector)}",
             $"curveApply.activeCameraImmediateDelta.DirV={FormatFloatDelta(_curveApplyActiveCameraAfter?.DirV, _curveApplyActiveCameraBefore?.DirV)}",
             $"curveApply.activeCameraImmediateDelta.LookAtVector={FormatVectorDelta(_curveApplyActiveCameraAfter?.LookAtVector, _curveApplyActiveCameraBefore?.LookAtVector)}",
-            $"phase2C.timelineStatus={_phase2CTimelineStatus}",
-            $"phase2C.timelineError={FormatNone(_phase2CTimelineError)}",
-            $"phase2D.timelineStatus={_phase2CTimelineStatus}",
-            $"phase2D.timelineError={FormatNone(_phase2CTimelineError)}",
+            $"phase2C.timelineStatus={_probeTimeline.Phase2CTimelineStatus}",
+            $"phase2C.timelineError={FormatNone(_probeTimeline.Phase2CTimelineError)}",
+            $"phase2D.timelineStatus={_probeTimeline.Phase2CTimelineStatus}",
+            $"phase2D.timelineError={FormatNone(_probeTimeline.Phase2CTimelineError)}",
             $"phase2D.timelineLatestFrame={FormatFrame(phase2DLatestSample.ActiveCameraCaptured ? phase2DLatestSample.Frame : null)}",
             $"verdict.distancePostRestoreStability={phase2CVerdicts.DistancePostRestoreStability}",
             $"verdict.tiltOffsetPostApplyObservableEffect={phase2CVerdicts.TiltOffsetPostApplyObservableEffect}",

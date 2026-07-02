@@ -12,10 +12,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
 {
     private void StartPhase2CTimelineObservation()
     {
-        _phase2CTimelineFrameCounter = 0;
-        _phase2CTimelineStatus = "collecting";
-        _phase2CTimelineError = string.Empty;
-        _phase2CTimelineSnapshots.Clear();
+        _probeTimeline.Phase2CTimelineFrameCounter = 0;
+        _probeTimeline.Phase2CTimelineStatus = "collecting";
+        _probeTimeline.Phase2CTimelineError = string.Empty;
+        _probeTimeline.Phase2CTimelineSnapshots.Clear();
         _phase2MPlacementFrames.Clear();
         _phase2MPlacementCaptureSceneGeneration = 0;
         _phase2MPlacementCaptureReason = "reset";
@@ -37,27 +37,27 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void CapturePhase2CTimelineOnFrameworkUpdate()
     {
-        if (_phase2CTimelineFrameCounter < 0)
+        if (_probeTimeline.Phase2CTimelineFrameCounter < 0)
         {
             return;
         }
 
-        _phase2CTimelineFrameCounter++;
-        if (Array.IndexOf(CameraProbeTimelineFrames, _phase2CTimelineFrameCounter) >= 0)
+        _probeTimeline.Phase2CTimelineFrameCounter++;
+        if (Array.IndexOf(CameraProbeTimelineFrames, _probeTimeline.Phase2CTimelineFrameCounter) >= 0)
         {
-            CapturePhase2CTimelineFrame(_phase2CTimelineFrameCounter);
+            CapturePhase2CTimelineFrame(_probeTimeline.Phase2CTimelineFrameCounter);
         }
 
-        if (_phase2CTimelineFrameCounter >= CameraProbeTimelineFrames[^1])
+        if (_probeTimeline.Phase2CTimelineFrameCounter >= CameraProbeTimelineFrames[^1])
         {
-            _phase2CTimelineFrameCounter = -1;
-            _phase2CTimelineStatus = "complete";
+            _probeTimeline.Phase2CTimelineFrameCounter = -1;
+            _probeTimeline.Phase2CTimelineStatus = "complete";
         }
     }
 
     private void CapturePhase2CTimelineFrame(int frame)
     {
-        if (_phase2CTimelineSnapshots.ContainsKey(frame))
+        if (_probeTimeline.Phase2CTimelineSnapshots.ContainsKey(frame))
         {
             return;
         }
@@ -65,7 +65,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var activeCaptured = TryCaptureActiveCameraSnapshot(out var activeCamera, out var activeError);
         var lobbyCaptured = TryCaptureLobbyCameraSnapshot(out var lobbyCamera, out var lobbyError);
         var expandedCaptured = TryCaptureExpandedLobbyCameraSnapshot(out var expandedLobbyCamera, out var expandedError);
-        _phase2CTimelineSnapshots[frame] = new TitleBackgroundPhase2CTimelineSnapshot(
+        _probeTimeline.Phase2CTimelineSnapshots[frame] = new TitleBackgroundPhase2CTimelineSnapshot(
             frame,
             activeCaptured,
             activeCaptured ? string.Empty : activeError,
@@ -89,10 +89,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
             expandedCaptured ? expandedLobbyCamera.MidPoint : null,
             expandedCaptured ? expandedLobbyCamera.HighPoint : null);
 
-        _phase2CTimelineStatus = frame >= CameraProbeTimelineFrames[^1]
+        _probeTimeline.Phase2CTimelineStatus = frame >= CameraProbeTimelineFrames[^1]
             ? "complete"
             : "collecting";
-        _phase2CTimelineError = activeCaptured || lobbyCaptured || expandedCaptured
+        _probeTimeline.Phase2CTimelineError = activeCaptured || lobbyCaptured || expandedCaptured
             ? string.Empty
             : $"frame {frame}: active={activeError}; lobby={lobbyError}; expandedLobby={expandedError}";
 
@@ -899,7 +899,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var samples = new List<TitleBackgroundPhase2CTimelineSnapshot>(CameraProbeTimelineFrames.Length);
         foreach (var frame in CameraProbeTimelineFrames)
         {
-            samples.Add(_phase2CTimelineSnapshots.TryGetValue(frame, out var snapshot)
+            samples.Add(_probeTimeline.Phase2CTimelineSnapshots.TryGetValue(frame, out var snapshot)
                 ? snapshot
                 : TitleBackgroundPhase2CTimelineSnapshot.Missing(frame));
         }
@@ -1396,8 +1396,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private int? GetCurrentPhase2CFrame()
     {
-        return _phase2CTimelineFrameCounter >= 0
-            ? _phase2CTimelineFrameCounter
+        return _probeTimeline.Phase2CTimelineFrameCounter >= 0
+            ? _probeTimeline.Phase2CTimelineFrameCounter
             : null;
     }
 

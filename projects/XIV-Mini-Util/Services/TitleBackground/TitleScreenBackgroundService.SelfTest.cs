@@ -251,10 +251,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         ResetSceneOverrideObservation();
         ResetCameraOverrideObservation();
         ResetPhase2ECalculateLookAtYObservation();
-        _phase2CTimelineFrameCounter = -1;
-        _phase2CTimelineStatus = "not-run";
-        _phase2CTimelineError = string.Empty;
-        _phase2CTimelineSnapshots.Clear();
+        _probeTimeline.Phase2CTimelineFrameCounter = -1;
+        _probeTimeline.Phase2CTimelineStatus = "not-run";
+        _probeTimeline.Phase2CTimelineError = string.Empty;
+        _probeTimeline.Phase2CTimelineSnapshots.Clear();
     }
 
     private string SaveSelfTestFailureDiagnostic()

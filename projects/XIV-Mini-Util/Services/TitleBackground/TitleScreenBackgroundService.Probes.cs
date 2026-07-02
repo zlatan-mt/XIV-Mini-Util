@@ -9,19 +9,19 @@ public sealed unsafe partial class TitleScreenBackgroundService
 {
     public IReadOnlyList<string> StartProbe()
     {
-        if (_cameraProbeSession != null)
+        if (_probeTimeline.CameraProbeSession != null)
         {
             return ["[Probe] camera probe is armed; run /xmutbgcamprobe restore before starting hook probe."];
         }
 
-        if (_activeProbeSession != null)
+        if (_probeTimeline.ActiveProbeSession != null)
         {
             return ["[Probe] already active; existing session was left unchanged."];
         }
 
         var session = new TitleBackgroundProbeSession(TitleBackgroundProbeSettingsSnapshot.Capture(_configuration));
-        _activeProbeSession = session;
-        _lastProbeSession = session;
+        _probeTimeline.ActiveProbeSession = session;
+        _probeTimeline.LastProbeSession = session;
 
         try
         {
@@ -46,7 +46,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             session.RuntimeErrorOccurred = true;
             session.LastError = ex.Message;
             var rollbackMessage = TryRestoreProbeSettings(session.OriginalSettings);
-            _activeProbeSession = null;
+            _probeTimeline.ActiveProbeSession = null;
             return
             [
                 "[Probe] failed to start.",
@@ -58,13 +58,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     public IReadOnlyList<string> StopProbe()
     {
-        if (_activeProbeSession == null)
+        if (_probeTimeline.ActiveProbeSession == null)
         {
             return ["[Probe] no active session; nothing to stop."];
         }
 
-        var session = _activeProbeSession;
-        _activeProbeSession = null;
+        var session = _probeTimeline.ActiveProbeSession;
+        _probeTimeline.ActiveProbeSession = null;
         session.HookEnabledAtEnd = AreAnyHooksEnabled();
         var restoreMessage = TryRestoreProbeSettings(session.OriginalSettings);
 
@@ -77,30 +77,30 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     public IReadOnlyList<string> GetProbeReportLines()
     {
-        var activeSession = _activeProbeSession;
-        var lastSession = activeSession ?? _lastProbeSession;
+        var activeSession = _probeTimeline.ActiveProbeSession;
+        var lastSession = activeSession ?? _probeTimeline.LastProbeSession;
         var reportInput = BuildProbeReportInput(lastSession, activeSession != null);
         var summaryLines = BuildProbeReportSummaryLines(reportInput);
 
-        if (_activeProbeSession != null)
+        if (_probeTimeline.ActiveProbeSession != null)
         {
             return
             [
                 ..summaryLines,
                 "",
                 "[Probe] Raw session",
-                ..GetProbeReportLines(_activeProbeSession, isActive: true),
+                ..GetProbeReportLines(_probeTimeline.ActiveProbeSession, isActive: true),
             ];
         }
 
-        if (_lastProbeSession != null)
+        if (_probeTimeline.LastProbeSession != null)
         {
             return
             [
                 ..summaryLines,
                 "",
                 "[Probe] Raw session",
-                ..GetProbeReportLines(_lastProbeSession, isActive: false),
+                ..GetProbeReportLines(_probeTimeline.LastProbeSession, isActive: false),
             ];
         }
 
@@ -109,12 +109,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     public IReadOnlyList<string> ArmCameraYProbe()
     {
-        if (_activeProbeSession != null)
+        if (_probeTimeline.ActiveProbeSession != null)
         {
             return ["[CameraProbe] hook probe is active; run /xmutbgprobe off before arming camera probe."];
         }
 
-        if (_cameraProbeSession != null)
+        if (_probeTimeline.CameraProbeSession != null)
         {
             return ["[CameraProbe] already armed; run /xmutbgcamprobe restore before arming again."];
         }
@@ -142,7 +142,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             probeCamera,
             probeFocus);
 
-        _cameraProbeSession = session;
+        _probeTimeline.CameraProbeSession = session;
         try
         {
             _configuration.TitleBackgroundSelectedPresetId = string.Empty;
@@ -172,7 +172,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
         catch (Exception ex)
         {
-            _cameraProbeSession = null;
+            _probeTimeline.CameraProbeSession = null;
             session.OriginalSettings.ApplyTo(_configuration);
             _configuration.Save();
             ApplyFromConfiguration();
@@ -205,7 +205,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var stabilitySampleSource = hasTimelineStabilitySample
             ? $"timeline[{latestTimelineSample.Frame}]"
             : "report-time-current";
-        var session = _cameraProbeSession;
+        var session = _probeTimeline.CameraProbeSession;
         var input = new TitleBackgroundCameraProbeReportInput(
             session != null,
             session?.BaselineCamera ?? default,
@@ -256,8 +256,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
             $"[CameraProbe] postFixOnLookAtVector={FormatVector(_cameraObservation.LastPostFixOnLookAtVector)}",
             $"[CameraProbe] currentLookAtVector={FormatVector(reportTimeLookAtVector)}",
             $"[CameraProbe] stabilitySampleSource={stabilitySampleSource}",
-            $"[CameraProbe] timelineStatus={_cameraProbeTimelineStatus}",
-            $"[CameraProbe] timelineError={FormatNone(_cameraProbeTimelineError)}",
+            $"[CameraProbe] timelineStatus={_probeTimeline.CameraProbeTimelineStatus}",
+            $"[CameraProbe] timelineError={FormatNone(_probeTimeline.CameraProbeTimelineError)}",
             $"[CameraProbe] currentCameraCaptureStatus={(currentCameraCaptured ? "success" : "failed")}",
             $"[CameraProbe] currentCameraCaptureError={FormatNone(currentCaptureError)}",
             $"[CameraProbe] cameraY.appliedToPostFixOn.delta={FormatVectorAxisDelta(_cameraObservation.LastPostFixOnSceneCameraPosition, _cameraObservation.LastAppliedCamera, 1)}",
@@ -269,7 +269,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
         foreach (var sample in timelineSamples)
         {
-            var snapshotFound = _cameraProbeTimelineSnapshots.TryGetValue(sample.Frame, out var snapshot);
+            var snapshotFound = _probeTimeline.CameraProbeTimelineSnapshots.TryGetValue(sample.Frame, out var snapshot);
             var events = GetCameraProbeTimelineEventCounts(sample.Frame);
             var lobbyUpdate = GetCameraProbeLobbyUpdateSnapshot(sample.Frame);
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].sceneCamera={FormatVector(sample.SceneCameraPosition)}");
@@ -330,13 +330,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     public IReadOnlyList<string> RestoreCameraProbe()
     {
-        if (_cameraProbeSession == null)
+        if (_probeTimeline.CameraProbeSession == null)
         {
             return ["[CameraProbe] no armed session; nothing to restore."];
         }
 
-        var session = _cameraProbeSession;
-        _cameraProbeSession = null;
+        var session = _probeTimeline.CameraProbeSession;
+        _probeTimeline.CameraProbeSession = null;
         session.OriginalSettings.ApplyTo(_configuration);
         _configuration.Save();
         ApplyFromConfiguration();
@@ -362,10 +362,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
         catch (Exception ex)
         {
-            if (_lastProbeSession != null)
+            if (_probeTimeline.LastProbeSession != null)
             {
-                _lastProbeSession.RuntimeErrorOccurred = true;
-                _lastProbeSession.LastError = $"restore failed: {ex.Message}";
+                _probeTimeline.LastProbeSession.RuntimeErrorOccurred = true;
+                _probeTimeline.LastProbeSession.LastError = $"restore failed: {ex.Message}";
             }
 
             _log.Warning(ex, "TitleBackground probe failed to restore original settings.");
@@ -375,7 +375,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private TitleBackgroundProbeReportInput BuildProbeReportInput(TitleBackgroundProbeSession? session, bool isActive)
     {
-        var useAutomaticCounters = _automaticProbeCountersEnabled;
+        var useAutomaticCounters = _probeTimeline.AutomaticProbeCountersEnabled;
         var hooksEnabled = isActive || session == null ? AreAnyHooksEnabled() : session.HookEnabledAtEnd;
         var runtimeError = (isActive || session == null) && _state == TitleBackgroundServiceState.RuntimeError;
         if (session != null)
@@ -384,15 +384,15 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
 
         var lastError = session?.LastError ?? string.Empty;
-        var createSceneCallCount = useAutomaticCounters ? _automaticProbeCounters.CreateSceneCallCount : session?.CreateSceneCallCount ?? 0;
-        var lobbyUpdateCallCount = useAutomaticCounters ? _automaticProbeCounters.LobbyUpdateCallCount : session?.LobbyUpdateCallCount ?? 0;
-        var loadLobbySceneCallCount = useAutomaticCounters ? _automaticProbeCounters.LoadLobbySceneCallCount : session?.LoadLobbySceneCallCount ?? 0;
-        var lastCreateScenePath = useAutomaticCounters ? _automaticProbeCounters.LastCreateScenePath : session?.LastCreateScenePath ?? string.Empty;
-        var lastCreateSceneTerritoryId = useAutomaticCounters ? _automaticProbeCounters.LastCreateSceneTerritoryId : session?.LastCreateSceneTerritoryId ?? 0;
-        var lastCreateSceneLayerFilterKey = useAutomaticCounters ? _automaticProbeCounters.LastCreateSceneLayerFilterKey : session?.LastCreateSceneLayerFilterKey ?? 0;
-        var lastLobbyUpdateMapId = useAutomaticCounters ? _automaticProbeCounters.LastLobbyUpdateMapId : session?.LastLobbyUpdateMapId ?? GameLobbyType.None;
-        var lastLobbyUpdateTime = useAutomaticCounters ? _automaticProbeCounters.LastLobbyUpdateTime : session?.LastLobbyUpdateTime ?? 0;
-        var lastLoadLobbySceneMapId = useAutomaticCounters ? _automaticProbeCounters.LastLoadLobbySceneMapId : session?.LastLoadLobbySceneMapId ?? GameLobbyType.None;
+        var createSceneCallCount = useAutomaticCounters ? _probeTimeline.AutomaticProbeCounters.CreateSceneCallCount : session?.CreateSceneCallCount ?? 0;
+        var lobbyUpdateCallCount = useAutomaticCounters ? _probeTimeline.AutomaticProbeCounters.LobbyUpdateCallCount : session?.LobbyUpdateCallCount ?? 0;
+        var loadLobbySceneCallCount = useAutomaticCounters ? _probeTimeline.AutomaticProbeCounters.LoadLobbySceneCallCount : session?.LoadLobbySceneCallCount ?? 0;
+        var lastCreateScenePath = useAutomaticCounters ? _probeTimeline.AutomaticProbeCounters.LastCreateScenePath : session?.LastCreateScenePath ?? string.Empty;
+        var lastCreateSceneTerritoryId = useAutomaticCounters ? _probeTimeline.AutomaticProbeCounters.LastCreateSceneTerritoryId : session?.LastCreateSceneTerritoryId ?? 0;
+        var lastCreateSceneLayerFilterKey = useAutomaticCounters ? _probeTimeline.AutomaticProbeCounters.LastCreateSceneLayerFilterKey : session?.LastCreateSceneLayerFilterKey ?? 0;
+        var lastLobbyUpdateMapId = useAutomaticCounters ? _probeTimeline.AutomaticProbeCounters.LastLobbyUpdateMapId : session?.LastLobbyUpdateMapId ?? GameLobbyType.None;
+        var lastLobbyUpdateTime = useAutomaticCounters ? _probeTimeline.AutomaticProbeCounters.LastLobbyUpdateTime : session?.LastLobbyUpdateTime ?? 0;
+        var lastLoadLobbySceneMapId = useAutomaticCounters ? _probeTimeline.AutomaticProbeCounters.LastLoadLobbySceneMapId : session?.LastLoadLobbySceneMapId ?? GameLobbyType.None;
 
         return new TitleBackgroundProbeReportInput(
             ProbeActive: isActive,
@@ -400,7 +400,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             RuntimeMode: _configuration.TitleBackgroundRuntimeMode,
             CreateSceneResolverMode: _configuration.TitleBackgroundCreateSceneResolverMode,
             LobbyUpdateResolverMode: _configuration.TitleBackgroundLobbyUpdateResolverMode,
-            AutomaticCountersEnabled: _automaticProbeCountersEnabled,
+            AutomaticCountersEnabled: _probeTimeline.AutomaticProbeCountersEnabled,
             HooksEnabled: hooksEnabled,
             RuntimeError: runtimeError,
             ResolverError: _addressResolver.LastError,
@@ -503,34 +503,34 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void RecordProbeCreateScene(GameLobbyType lobbyType, string path, uint territoryId, uint layerFilterKey)
     {
-        if (_automaticProbeCountersEnabled)
+        if (_probeTimeline.AutomaticProbeCountersEnabled)
         {
-            _automaticProbeCounters.CreateSceneCallCount++;
-            _automaticProbeCounters.LastCreateScenePath = path;
-            _automaticProbeCounters.LastCreateSceneTerritoryId = territoryId;
-            _automaticProbeCounters.LastCreateSceneLayerFilterKey = layerFilterKey;
+            _probeTimeline.AutomaticProbeCounters.CreateSceneCallCount++;
+            _probeTimeline.AutomaticProbeCounters.LastCreateScenePath = path;
+            _probeTimeline.AutomaticProbeCounters.LastCreateSceneTerritoryId = territoryId;
+            _probeTimeline.AutomaticProbeCounters.LastCreateSceneLayerFilterKey = layerFilterKey;
         }
 
-        if (_activeProbeSession == null)
+        if (_probeTimeline.ActiveProbeSession == null)
         {
             return;
         }
 
-        _activeProbeSession.CreateSceneCallCount++;
+        _probeTimeline.ActiveProbeSession.CreateSceneCallCount++;
         if (lobbyType == GameLobbyType.CharaSelect)
         {
-            _activeProbeSession.CreateSceneCharaSelectCallCount++;
+            _probeTimeline.ActiveProbeSession.CreateSceneCharaSelectCallCount++;
         }
 
-        _activeProbeSession.LastCreateSceneLobbyType = lobbyType;
-        _activeProbeSession.LastCreateScenePath = path;
-        _activeProbeSession.LastCreateSceneTerritoryId = territoryId;
-        _activeProbeSession.LastCreateSceneLayerFilterKey = layerFilterKey;
-        _activeProbeSession.CreateSceneHistory.Add(
+        _probeTimeline.ActiveProbeSession.LastCreateSceneLobbyType = lobbyType;
+        _probeTimeline.ActiveProbeSession.LastCreateScenePath = path;
+        _probeTimeline.ActiveProbeSession.LastCreateSceneTerritoryId = territoryId;
+        _probeTimeline.ActiveProbeSession.LastCreateSceneLayerFilterKey = layerFilterKey;
+        _probeTimeline.ActiveProbeSession.CreateSceneHistory.Add(
             $"lobbyType={lobbyType},path={(string.IsNullOrWhiteSpace(path) ? "none" : path)},territoryId={territoryId},layerFilterKey={layerFilterKey}");
-        if (_activeProbeSession.CreateSceneHistory.Count > 5)
+        if (_probeTimeline.ActiveProbeSession.CreateSceneHistory.Count > 5)
         {
-            _activeProbeSession.CreateSceneHistory.RemoveAt(0);
+            _probeTimeline.ActiveProbeSession.CreateSceneHistory.RemoveAt(0);
         }
     }
 
@@ -541,38 +541,38 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void RecordProbeLobbyUpdate(GameLobbyType mapId, int time)
     {
-        if (_automaticProbeCountersEnabled)
+        if (_probeTimeline.AutomaticProbeCountersEnabled)
         {
-            _automaticProbeCounters.LobbyUpdateCallCount++;
-            _automaticProbeCounters.LastLobbyUpdateMapId = mapId;
-            _automaticProbeCounters.LastLobbyUpdateTime = time;
+            _probeTimeline.AutomaticProbeCounters.LobbyUpdateCallCount++;
+            _probeTimeline.AutomaticProbeCounters.LastLobbyUpdateMapId = mapId;
+            _probeTimeline.AutomaticProbeCounters.LastLobbyUpdateTime = time;
         }
 
-        if (_activeProbeSession == null)
+        if (_probeTimeline.ActiveProbeSession == null)
         {
             return;
         }
 
-        _activeProbeSession.LobbyUpdateCallCount++;
-        _activeProbeSession.LastLobbyUpdateMapId = mapId;
-        _activeProbeSession.LastLobbyUpdateTime = time;
+        _probeTimeline.ActiveProbeSession.LobbyUpdateCallCount++;
+        _probeTimeline.ActiveProbeSession.LastLobbyUpdateMapId = mapId;
+        _probeTimeline.ActiveProbeSession.LastLobbyUpdateTime = time;
     }
 
     private void RecordProbeLoadLobbyScene(GameLobbyType mapId)
     {
-        if (_automaticProbeCountersEnabled)
+        if (_probeTimeline.AutomaticProbeCountersEnabled)
         {
-            _automaticProbeCounters.LoadLobbySceneCallCount++;
-            _automaticProbeCounters.LastLoadLobbySceneMapId = mapId;
+            _probeTimeline.AutomaticProbeCounters.LoadLobbySceneCallCount++;
+            _probeTimeline.AutomaticProbeCounters.LastLoadLobbySceneMapId = mapId;
         }
 
-        if (_activeProbeSession == null)
+        if (_probeTimeline.ActiveProbeSession == null)
         {
             return;
         }
 
-        _activeProbeSession.LoadLobbySceneCallCount++;
-        _activeProbeSession.LastLoadLobbySceneMapId = mapId;
+        _probeTimeline.ActiveProbeSession.LoadLobbySceneCallCount++;
+        _probeTimeline.ActiveProbeSession.LastLoadLobbySceneMapId = mapId;
     }
 
     private bool AreAnyHooksEnabled()
@@ -589,63 +589,63 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void CaptureCameraProbeTimelineOnFrameworkUpdate()
     {
-        if (_cameraProbeTimelineFrameCounter < 0)
+        if (_probeTimeline.CameraProbeTimelineFrameCounter < 0)
         {
             return;
         }
 
-        _cameraProbeTimelineFrameCounter++;
-        if (Array.IndexOf(CameraProbeTimelineFrames, _cameraProbeTimelineFrameCounter) < 0)
+        _probeTimeline.CameraProbeTimelineFrameCounter++;
+        if (Array.IndexOf(CameraProbeTimelineFrames, _probeTimeline.CameraProbeTimelineFrameCounter) < 0)
         {
             return;
         }
 
-        if (_cameraProbeTimelineSnapshots.ContainsKey(_cameraProbeTimelineFrameCounter))
+        if (_probeTimeline.CameraProbeTimelineSnapshots.ContainsKey(_probeTimeline.CameraProbeTimelineFrameCounter))
         {
             return;
         }
 
         if (TryCaptureActiveCameraSnapshot(out var snapshot, out var errorMessage))
         {
-            _cameraProbeTimelineSnapshots[_cameraProbeTimelineFrameCounter] = new TitleBackgroundCameraProbeTimelineSnapshot(
+            _probeTimeline.CameraProbeTimelineSnapshots[_probeTimeline.CameraProbeTimelineFrameCounter] = new TitleBackgroundCameraProbeTimelineSnapshot(
                 snapshot.SceneCameraPosition,
                 snapshot.LookAtVector,
                 "success",
                 string.Empty);
-            _cameraProbeTimelineStatus = _cameraProbeTimelineFrameCounter >= CameraProbeTimelineFrames[^1]
+            _probeTimeline.CameraProbeTimelineStatus = _probeTimeline.CameraProbeTimelineFrameCounter >= CameraProbeTimelineFrames[^1]
                 ? "complete"
                 : "collecting";
-            _cameraProbeTimelineError = string.Empty;
+            _probeTimeline.CameraProbeTimelineError = string.Empty;
         }
         else
         {
-            _cameraProbeTimelineSnapshots[_cameraProbeTimelineFrameCounter] = new TitleBackgroundCameraProbeTimelineSnapshot(
+            _probeTimeline.CameraProbeTimelineSnapshots[_probeTimeline.CameraProbeTimelineFrameCounter] = new TitleBackgroundCameraProbeTimelineSnapshot(
                 null,
                 null,
                 "failed",
                 string.IsNullOrWhiteSpace(errorMessage) ? "unknown" : errorMessage);
-            _cameraProbeTimelineStatus = "partial";
-            _cameraProbeTimelineError = $"frame {_cameraProbeTimelineFrameCounter}: {_cameraProbeTimelineSnapshots[_cameraProbeTimelineFrameCounter].Error}";
+            _probeTimeline.CameraProbeTimelineStatus = "partial";
+            _probeTimeline.CameraProbeTimelineError = $"frame {_probeTimeline.CameraProbeTimelineFrameCounter}: {_probeTimeline.CameraProbeTimelineSnapshots[_probeTimeline.CameraProbeTimelineFrameCounter].Error}";
         }
 
-        if (_cameraProbeTimelineFrameCounter >= CameraProbeTimelineFrames[^1])
+        if (_probeTimeline.CameraProbeTimelineFrameCounter >= CameraProbeTimelineFrames[^1])
         {
-            _cameraProbeTimelineFrameCounter = -1;
+            _probeTimeline.CameraProbeTimelineFrameCounter = -1;
         }
     }
 
     private void ScheduleCameraProbeTimelineCapture(bool overrideAppliedInThisInvocation)
     {
-        if (_cameraProbeSession == null || !overrideAppliedInThisInvocation)
+        if (_probeTimeline.CameraProbeSession == null || !overrideAppliedInThisInvocation)
         {
             return;
         }
 
-        _cameraProbeTimelineFrameCounter = 0;
-        _cameraProbeTimelineStatus = "collecting";
-        _cameraProbeTimelineError = string.Empty;
-        _cameraProbeTimelineSnapshots.Clear();
-        _cameraProbeTimelineSnapshots[0] = new TitleBackgroundCameraProbeTimelineSnapshot(
+        _probeTimeline.CameraProbeTimelineFrameCounter = 0;
+        _probeTimeline.CameraProbeTimelineStatus = "collecting";
+        _probeTimeline.CameraProbeTimelineError = string.Empty;
+        _probeTimeline.CameraProbeTimelineSnapshots.Clear();
+        _probeTimeline.CameraProbeTimelineSnapshots[0] = new TitleBackgroundCameraProbeTimelineSnapshot(
             _cameraObservation.LastPostFixOnSceneCameraPosition,
             _cameraObservation.LastPostFixOnLookAtVector,
             _cameraObservation.LastPostFixOnCameraCaptureStatus,
@@ -654,17 +654,17 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void ResetCameraProbeTimelineObservation()
     {
-        _cameraProbeTimelineFrameCounter = -1;
-        _cameraProbeTimelineStatus = "not-run";
-        _cameraProbeTimelineError = string.Empty;
-        _cameraProbeTimelineSnapshots.Clear();
-        _cameraProbeTimelineEventCounts.Clear();
-        _cameraProbeLobbyUpdateSnapshots.Clear();
+        _probeTimeline.CameraProbeTimelineFrameCounter = -1;
+        _probeTimeline.CameraProbeTimelineStatus = "not-run";
+        _probeTimeline.CameraProbeTimelineError = string.Empty;
+        _probeTimeline.CameraProbeTimelineSnapshots.Clear();
+        _probeTimeline.CameraProbeTimelineEventCounts.Clear();
+        _probeTimeline.CameraProbeLobbyUpdateSnapshots.Clear();
     }
 
     private int? RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind kind)
     {
-        if (_cameraProbeSession == null)
+        if (_probeTimeline.CameraProbeSession == null)
         {
             return null;
         }
@@ -684,23 +684,23 @@ public sealed unsafe partial class TitleScreenBackgroundService
             TitleBackgroundCameraProbeTimelineEventKind.CreateScene => counts with { CreateSceneCalls = counts.CreateSceneCalls + 1 },
             _ => counts,
         };
-        _cameraProbeTimelineEventCounts[frame.Value] = counts;
+        _probeTimeline.CameraProbeTimelineEventCounts[frame.Value] = counts;
         return frame;
     }
 
     private int? GetCurrentCameraProbeTimelineEventFrame()
     {
-        if (_cameraProbeTimelineFrameCounter < 0)
+        if (_probeTimeline.CameraProbeTimelineFrameCounter < 0)
         {
-            return _cameraProbeTimelineStatus == "not-run" ? 0 : null;
+            return _probeTimeline.CameraProbeTimelineStatus == "not-run" ? 0 : null;
         }
 
-        return _cameraProbeTimelineFrameCounter;
+        return _probeTimeline.CameraProbeTimelineFrameCounter;
     }
 
     private TitleBackgroundCameraProbeTimelineEventCounts GetCameraProbeTimelineEventCounts(int? frame)
     {
-        return frame.HasValue && _cameraProbeTimelineEventCounts.TryGetValue(frame.Value, out var counts)
+        return frame.HasValue && _probeTimeline.CameraProbeTimelineEventCounts.TryGetValue(frame.Value, out var counts)
             ? counts
             : default;
     }
@@ -708,7 +708,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
     private TitleBackgroundCameraProbeTimelineEventCounts GetCameraProbeTimelineEventCountsInRange(int startFrame, int endFrame)
     {
         var totals = new TitleBackgroundCameraProbeTimelineEventCounts();
-        foreach (var (frame, events) in _cameraProbeTimelineEventCounts)
+        foreach (var (frame, events) in _probeTimeline.CameraProbeTimelineEventCounts)
         {
             if (frame < startFrame || frame > endFrame)
             {
@@ -727,7 +727,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void CaptureCameraProbeLobbyUpdateState(int? frame, bool beforeOriginal)
     {
-        if (!frame.HasValue || _cameraProbeSession == null)
+        if (!frame.HasValue || _probeTimeline.CameraProbeSession == null)
         {
             return;
         }
@@ -766,12 +766,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 };
         }
 
-        _cameraProbeLobbyUpdateSnapshots[frame.Value] = current;
+        _probeTimeline.CameraProbeLobbyUpdateSnapshots[frame.Value] = current;
     }
 
     private TitleBackgroundCameraProbeLobbyUpdateSnapshot GetCameraProbeLobbyUpdateSnapshot(int frame)
     {
-        return _cameraProbeLobbyUpdateSnapshots.TryGetValue(frame, out var snapshot)
+        return _probeTimeline.CameraProbeLobbyUpdateSnapshots.TryGetValue(frame, out var snapshot)
             ? snapshot
             : default;
     }
@@ -792,14 +792,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void RestoreCameraProbeSettingsOnDispose()
     {
-        if (_cameraProbeSession == null)
+        if (_probeTimeline.CameraProbeSession == null)
         {
             return;
         }
 
         try
         {
-            _cameraProbeSession.OriginalSettings.ApplyTo(_configuration);
+            _probeTimeline.CameraProbeSession.OriginalSettings.ApplyTo(_configuration);
             _configuration.Save();
         }
         catch (Exception ex)
@@ -808,7 +808,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
         finally
         {
-            _cameraProbeSession = null;
+            _probeTimeline.CameraProbeSession = null;
             ResetCameraProbeTimelineObservation();
         }
     }
@@ -818,7 +818,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var samples = new List<TitleBackgroundCameraProbeTimelineSample>(CameraProbeTimelineFrames.Length);
         foreach (var frame in CameraProbeTimelineFrames)
         {
-            if (_cameraProbeTimelineSnapshots.TryGetValue(frame, out var snapshot))
+            if (_probeTimeline.CameraProbeTimelineSnapshots.TryGetValue(frame, out var snapshot))
             {
                 samples.Add(new TitleBackgroundCameraProbeTimelineSample(
                     frame,
