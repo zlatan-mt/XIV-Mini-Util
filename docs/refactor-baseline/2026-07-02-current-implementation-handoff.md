@@ -1,11 +1,11 @@
 # XIV Mini Util 現在実装・引き継ぎ資料
 
-更新日時: 2026-07-02 13:39 +09:00  
-対象作業ツリー: `C:\Project\apps\XIV-Mini-Util`  
-対象ブランチ: `main`  
-現在HEAD: `5d0fd53` (`Fix run-scoped Title Background diagnostics`)  
-Git状態: `origin/main` より ahead 7、未コミット差分あり  
-用途: 別AIが過去の完了報告を信用せず、現在のコードと実機結果から安全に作業を継続するための引き継ぎ
+- 更新日時: 2026-07-02 19:04 +09:00
+- 対象作業ツリー: `C:\Project\apps\XIV-Mini-Util`
+- 対象ブランチ: `main`
+- 現在HEAD: `5b2f9f6` (`Split Plugin, LogicTests, Shop, and Title Background responsibilities`)
+- Git状態: `origin/main` より ahead 8、作業ツリーclean（pushはユーザー判断で保留中）
+- 用途: 別AIが過去の完了報告を信用せず、現在のコードと実機結果から安全に作業を継続するための引き継ぎ
 
 ## 1. この資料の読み方
 
@@ -48,16 +48,17 @@ Git状態: `origin/main` より ahead 7、未コミット差分あり
 
 ```text
 branch: main
-HEAD: 5d0fd53
+HEAD: 5b2f9f6
 upstream: origin/main
-ahead: 7
+ahead: 8
 behind: 0
-working tree: dirty
+working tree: clean
 ```
 
-HEADから見た直近7件は次のとおり。
+HEADから見た直近8件は次のとおり。
 
 ```text
+5b2f9f6 Split Plugin, LogicTests, Shop, and Title Background responsibilities
 5d0fd53 Fix run-scoped Title Background diagnostics
 4966042 Merge remote-tracking branch 'origin/main'
 c517221 Add CharaSelect anchor and FixOn diagnostics
@@ -69,16 +70,16 @@ b11a0e9 Clean up CharaSelect camera-aim dead code; report recognizes composited 
 
 ### 3.2 現在の規模
 
-計測方法は `rg --files` とPowerShellの `Get-Content(...).Count`。以下はこの引き継ぎ文書を追加する直前の値。
+計測方法は `git ls-files`（作業ツリーがcleanのため `rg --files` と同等）とPowerShellの `Get-Content(...).Count`。以下は2026-07-02 19:04（commit `5b2f9f6` 後）の再計測値。
 
 | 領域 | 現在値 |
 |---|---:|
-| リポジトリ内ファイル | 226 |
-| C# | 170ファイル |
-| TitleBackground | 53ファイル / 18,365行 |
+| リポジトリ内ファイル | 229 |
+| C# | 171ファイル |
+| TitleBackground | 54ファイル / 18,384行 |
 | Shop | 29ファイル / 5,277行 |
 | CharaSelect | 17ファイル / 3,642行 |
-| `TitleScreenBackgroundService` partial群 | 9ファイル / 8,836行 |
+| `TitleScreenBackgroundService` partial群 | 9ファイル / 8,829行 |
 | `tools/CharaSelectLogicTests/Program.cs` | 5行 |
 | LogicTests | 439件 |
 
@@ -86,13 +87,15 @@ b11a0e9 Clean up CharaSelect camera-aim dead code; report recognizes composited 
 
 ### 3.3 `TitleScreenBackgroundService` の残存状態
 
-`TitleScreenBackgroundService.cs` のコンストラクタ前を行ベースで数えると、private field宣言は191、うちreadonly/const/static readonlyを除く可変field宣言は153。
+`TitleScreenBackgroundService.cs` のコンストラクタ前を行ベースで数えると、private field宣言は186、うちreadonly/const/static readonlyを除く可変field宣言は148（2026-07-02 19:04再計測）。
 
-automatic check関連の12状態は `TitleBackgroundAutomaticCheckRuntimeState` に移動済みだが、camera、probe、placement、timeline、hook lifecycle状態は依然として巨大service本体に多く残る。
+automatic check関連の12状態は `TitleBackgroundAutomaticCheckRuntimeState` に、world probe / 座標サンプルの7状態は `TitleBackgroundWorldProbeRuntimeState` に移動済みだが、保存view/camera、placement、timeline、hook lifecycle状態は依然として巨大service本体に多く残る。
 
 partial分割だけで責務分離完了とは扱わないこと。
 
 ## 4. 未コミット差分の分類
+
+（2026-07-02 19:04 追記）本節に列挙した差分は、この文書自身を含めてすべて単一commit `5b2f9f6` へ確定済み。作業ツリーは現在clean。以下は当時の分類記録として残す。
 
 ### 4.1 変更済みファイル
 
@@ -198,7 +201,7 @@ tools/CharaSelectLogicTests/
 
 ### 軽微な文書上の不整合
 
-`TestRunner.cs` のリスト容量は439で現在件数と一致するが、ファイル先頭コメントは「434 test names」と古い。動作影響なし。次回文書整理時に修正候補。
+`TestRunner.cs` の先頭コメントの「434 test names」は2026-07-02に修正済み。件数の直書き自体をやめたため、今後件数が変わっても陳腐化しない。
 
 ## 5.3 R2: `Plugin` ライフサイクル分割
 
@@ -254,11 +257,14 @@ tools/CharaSelectLogicTests/
 
 `TitleScreenBackgroundService.OneClickVerification.cs` と `TitleScreenBackgroundService.QuickCheck.cs` が同じholderを利用。
 
+### 実装済み（2026-07-02、commit `5b2f9f6`）
+
+`TitleBackgroundWorldProbeRuntimeState` に、セッション限定world probeの5状態（Enabled / HasValue / CandidateId / Position / TerritoryTypeId）と座標対応サンプルの2状態（Samples / SampleIndex）を集約。capture / clear / サンプル採取のロジック（判定順序・例外処理）はservice側に残した。旧フィールド名をロックしていたソース文字列検査は契約意図を維持して更新（Test 385は非永続契約を新名称で維持、Test 384は `_worldProbeState` 全体を診断メソッドから排除する形で強化）。
+
 ### 未実施
 
-- world probe / coordinate sample state holder
+- 保存view / camera observation state holder
 - character placement state holder
-- camera observation state holder
 - timeline / probe diagnostic state holder
 - hook lifecycle state holder
 - report builderのservice private stateからの完全分離
@@ -435,14 +441,14 @@ schema: 1
 
 ### セッション限定probe
 
-1クリック経路が使うworld座標は、次のservice fieldにのみ保持される。
+1クリック経路が使うworld座標は、`TitleBackgroundWorldProbeRuntimeState`（serviceの `_worldProbeState`、セッション限定・config非保存）にのみ保持される。
 
 ```text
-_probeWorldAnchorEnabled
-_probeWorldAnchorHasValue
-_probeWorldAnchorCandidateId
-_probeWorldAnchorPosition
-_probeWorldAnchorTerritoryTypeId
+_worldProbeState.Enabled
+_worldProbeState.HasValue
+_worldProbeState.CandidateId
+_worldProbeState.Position
+_worldProbeState.TerritoryTypeId
 ```
 
 `CaptureWorldProbeAnchorInMemory()` はConfigurationへ保存しない。
@@ -779,7 +785,7 @@ fixOn.exp.applied=False
 
 ## 10. 現在の検証結果
 
-実行日時: 2026-07-02 13:39 +09:00
+実行日時: 2026-07-02 13:39 +09:00（初回）。R3の1責務目実装後、commit `5b2f9f6` 直前の2026-07-02 15:12にも同ゲートを再実行し全て緑（`latest.zip` は545,573 bytesへ更新。LogicTests 439件はレビュー時にさらに2回再確認済み）。以下の表は初回の値。
 
 実行:
 
@@ -831,11 +837,32 @@ DownloadLink=v0.3.7/XivMiniUtil.zip
 
 ## 12. 次に行うべき作業
 
-優先順位順。
+優先順位順。（2026-07-02 19:04 改訂: ユーザーが実機確認を「大体見た」としてコード作業優先を指示したため、R3継続を最優先に変更。実機系タスクは実機作業を行うタイミングで実施する。体制: 計画・レビューはメインエージェント、実装はSonnet 5 subagent。commit / push / branch操作は従来どおり都度ユーザーの明示指示。）
 
-### 12.1 保存view round-tripを1回だけ実機確認
+### 12.1 R3を続ける（コード作業・最優先）
 
-自動確認とは別に行う。
+1回につき1責務だけ。
+
+推奨順:
+
+1. ~~world probe / coordinate sample state~~ 実装済み（`TitleBackgroundWorldProbeRuntimeState`、commit `5b2f9f6`）
+2. 保存view / camera observation state
+3. character placement state
+4. timeline diagnostic state
+5. hook lifecycle state
+
+native hook本体、pointer、detour、framework updateを先に動かさない。
+
+state holder分割の実務手順（1責務目で確立した型）:
+
+1. 既存holder（`TitleBackgroundAutomaticCheckRuntimeState` / `TitleBackgroundWorldProbeRuntimeState`）と同じ「プロパティのみ・ロジックはserviceに残す」パターンを踏襲する。
+2. 着手前に `rg` で対象フィールドの全利用箇所を洗い出し、LogicTestsのソース文字列検査が旧フィールド名をロックしていないか確認する。
+3. テストは削除・緩和せず、契約意図を維持して新名称へ更新する。可能なら強化する（例: Test 384は特定フィールド名の排除からholder名全体の排除へ変更）。
+4. 置換後、旧名称の残存参照ゼロを `rg` で確認してから検証ゲートを回す。
+
+### 12.2 保存view round-tripの診断値確認（実機作業時）
+
+目視の実機確認はユーザーが実施済み（2026-07-02「大体見た」）。ただし次の手順による診断値の確認は未実施のため、完了扱いにしない。自動確認とは別に行う。
 
 1. キャラ選択画面でマウス調整。
 2. `Settings` → `ログイン背景` → `現在の構図を保存`。
@@ -855,27 +882,13 @@ view.overrideLastSource=view
 
 ただしユーザーへ診断キー手動検索を要求しない。必要なら自動レポート経路へ含める。
 
-### 12.2 world/lobby対応の複数標高サンプル
+### 12.3 world/lobby対応の複数標高サンプル（実機作業時）
 
 現在の1クリックフローだけで異なる標高の地点を測る。手動probe操作を追加しない。
 
 最低2地点、線形残差を見るなら3地点以上。
 
 結果が出ても、即座に変換を適用したりground-verifiedへ昇格させない。まずレポートと実機目視をレビューする。
-
-### 12.3 R3を続ける場合
-
-1回につき1責務だけ。
-
-推奨順:
-
-1. world probe / coordinate sample state
-2. 保存view / camera observation state
-3. character placement state
-4. timeline diagnostic state
-5. hook lifecycle state
-
-native hook本体、pointer、detour、framework updateを先に動かさない。
 
 ## 13. 次AI向けの検証チェックリスト
 
@@ -890,6 +903,8 @@ Test-Path projects\XIV-Mini-Util\bin\Release\XivMiniUtil.json
 git diff --check
 git status --short
 ```
+
+上記を一括実行する統合ゲートは `scripts/verify-refactor-phase.ps1`。PowerShell 7（pwsh）からは `& scripts\verify-refactor-phase.ps1` のように直接呼び出せば `-ExecutionPolicy Bypass` フラグは不要。AI実行環境の権限ポリシーがBypassフラグ付きコマンドを拒否する場合があるため、直接呼び出しを推奨する。
 
 TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、FixOn camera/focus、character placementを変更した場合は、自動検証だけで完了扱いにしない。
 
@@ -933,6 +948,7 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundAutomaticCheckRecovery.cs`
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundCharaSelectAnchor.cs`
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundWorldCoordinateCorrespondence.cs`
+- `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundWorldProbeRuntimeState.cs`
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundKnownSignatures.cs`
 - `projects/XIV-Mini-Util/Windows/Components/SettingsTab.TitleBackground.cs`
 - `projects/XIV-Mini-Util/Windows/Components/SettingsTab.TitleBackgroundDiagnostics.cs`
@@ -958,10 +974,10 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 
 ## 15. 最終状態
 
-- この時点でcommit、push、branch操作は行っていない。
-- ユーザー既存差分を戻していない。
+- 2026-07-02 19:04時点: リファクタ一式（R0〜R6）とR3の1責務目を、ユーザー指示により単一commit `5b2f9f6` としてmainへcommit済み。作業ツリーはclean。
+- pushは未実施（origin/mainよりahead 8）。push判断はユーザーが行う。
 - ソースコードは最新統合検証に成功。
-- 背景差し替えと1クリック自動確認は実機成功。
+- 背景差し替えと1クリック自動確認は実機成功。ユーザーは実機確認を「大体見た」とし、コード作業優先を指示。
 - character placementは実行済みだがground未確認。
-- 保存viewのコード経路は実装済みだが、再ログアウト時の自動再現は実機未確認。
-- 次AIは、保存view round-tripの確認を最優先にし、その後必要ならR3を1責務ずつ継続する。
+- 保存viewのコード経路は実装済み。目視はユーザー確認済みだが、診断値によるround-trip確認（view.enabled=True等）は未実施。
+- 次AIは、R3の2責務目（保存view / camera observation state）から1責務ずつ継続する。
