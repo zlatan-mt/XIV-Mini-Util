@@ -568,7 +568,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             TitleBackgroundQuickCheckRunState.Armed,
             DateTimeOffset.Now,
             _charaSelectCameraAdapter.RuntimeState.SceneGeneration,
-            _sceneReadySignalAcceptedCount,
+            _cameraRestoreCurve.SceneReadySignalAcceptedCount,
             _quickCheckOverrideAppliedCount,
             GetPhase2GApplyCount(),
             _configuration.TitleBackgroundCharacterSelectOverrideCandidateId,
@@ -666,7 +666,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         return TitleBackgroundAutomaticCheckLogic.ResolveVerdictSceneReadyAcceptedCount(
             automaticInvocation,
             IsRunScopedQuickCheckActive(),
-            _sceneReadySignalAcceptedCount,
+            _cameraRestoreCurve.SceneReadySignalAcceptedCount,
             _quickCheckState.SceneReadyAcceptedCountStart);
     }
 
@@ -676,8 +676,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var runScoped = _quickCheckState.StartedAt.HasValue
             && _quickCheckState.RunState != TitleBackgroundQuickCheckRunState.Idle;
         var sceneReadyAcceptedCount = runScoped
-            ? Math.Max(0, _sceneReadySignalAcceptedCount - _quickCheckState.SceneReadyAcceptedCountStart)
-            : _sceneReadySignalAcceptedCount;
+            ? Math.Max(0, _cameraRestoreCurve.SceneReadySignalAcceptedCount - _quickCheckState.SceneReadyAcceptedCountStart)
+            : _cameraRestoreCurve.SceneReadySignalAcceptedCount;
         var overrideAppliedCount = runScoped
             ? Math.Max(0, _quickCheckOverrideAppliedCount - _quickCheckState.OverrideAppliedCountStart)
             : _quickCheckOverrideAppliedCount;

@@ -213,24 +213,24 @@ public sealed unsafe partial class TitleScreenBackgroundService
             items.Add("scene-not-overridden");
         }
 
-        if (_sceneReadySignalAcceptedCount == 0)
+        if (_cameraRestoreCurve.SceneReadySignalAcceptedCount == 0)
         {
             items.Add("scene-ready-not-accepted");
         }
 
-        if (_lastCharaSelectCameraRuntimeRecordStatus is "failed")
+        if (_cameraRestoreCurve.LastCharaSelectCameraRuntimeRecordStatus is "failed")
         {
-            items.Add($"camera-pose-build-failed:{FormatNone(_lastCharaSelectCameraRuntimeRecordError)}");
+            items.Add($"camera-pose-build-failed:{FormatNone(_cameraRestoreCurve.LastCharaSelectCameraRuntimeRecordError)}");
         }
 
-        if (_lastCharaSelectCameraRuntimeRestoreStatus is "failed")
+        if (_cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus is "failed")
         {
-            items.Add($"camera-apply-failed:{FormatNone(_lastCharaSelectCameraRuntimeRestoreFailureReason)}");
+            items.Add($"camera-apply-failed:{FormatNone(_cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreFailureReason)}");
         }
 
-        if (_curveApplyLastStatus is "failed")
+        if (_cameraRestoreCurve.CurveApplyLastStatus is "failed")
         {
-            items.Add($"curve-apply-failed:{FormatNone(_curveApplyLastFailureReason)}");
+            items.Add($"curve-apply-failed:{FormatNone(_cameraRestoreCurve.CurveApplyLastFailureReason)}");
         }
 
         if (!latestSample.LobbyCameraCaptured)

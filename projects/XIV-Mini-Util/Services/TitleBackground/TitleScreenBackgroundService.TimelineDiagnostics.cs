@@ -24,15 +24,15 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _phase2MPlacementSkippedSceneGenerationCount = 0;
         _phase2MPlacementLastSkipReason = "none";
         _phase2MExperimentalWriteCount = 0;
-        _runtimeRestoreAppliedFrame = null;
-        _curveApplyAppliedFrame = null;
-        _curveApplyRequestedMid = null;
-        _curveApplyReadBackValueImmediatelyAfterWrite = null;
-        _curveApplyImmediateReadBackStatus = "not-run";
-        _curveApplyActiveCameraBefore = null;
-        _curveApplyActiveCameraAfter = null;
-        _curveApplyActiveCameraBeforeStatus = "not-run";
-        _curveApplyActiveCameraAfterStatus = "not-run";
+        _cameraRestoreCurve.RuntimeRestoreAppliedFrame = null;
+        _cameraRestoreCurve.CurveApplyAppliedFrame = null;
+        _cameraRestoreCurve.CurveApplyRequestedMid = null;
+        _cameraRestoreCurve.CurveApplyReadBackValueImmediatelyAfterWrite = null;
+        _cameraRestoreCurve.CurveApplyImmediateReadBackStatus = "not-run";
+        _cameraRestoreCurve.CurveApplyActiveCameraBefore = null;
+        _cameraRestoreCurve.CurveApplyActiveCameraAfter = null;
+        _cameraRestoreCurve.CurveApplyActiveCameraBeforeStatus = "not-run";
+        _cameraRestoreCurve.CurveApplyActiveCameraAfterStatus = "not-run";
     }
 
     private void CapturePhase2CTimelineOnFrameworkUpdate()
@@ -1208,14 +1208,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private string BuildPhase2GFinalCameraStateMatchesPresetVerdict(TitleBackgroundPhase2CTimelineSnapshot latestSample)
     {
-        if (_runtimeRestoreSuccessCount == 0)
+        if (_cameraRestoreCurve.RuntimeRestoreSuccessCount == 0)
         {
             return "inconclusive";
         }
 
-        if (!_runtimeRestoreLastRestoredYaw.HasValue
-            || !_runtimeRestoreLastRestoredPitch.HasValue
-            || !_runtimeRestoreLastRestoredDistance.HasValue
+        if (!_cameraRestoreCurve.RuntimeRestoreLastRestoredYaw.HasValue
+            || !_cameraRestoreCurve.RuntimeRestoreLastRestoredPitch.HasValue
+            || !_cameraRestoreCurve.RuntimeRestoreLastRestoredDistance.HasValue
             || !latestSample.LobbyDirH.HasValue
             || !latestSample.LobbyDirV.HasValue
             || !latestSample.LobbyDistance.HasValue
@@ -1224,10 +1224,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
             return "inconclusive";
         }
 
-        return IsNear(latestSample.LobbyDirH.Value, _runtimeRestoreLastRestoredYaw.Value)
-            && IsNear(latestSample.LobbyDirV.Value, _runtimeRestoreLastRestoredPitch.Value)
-            && IsNear(latestSample.LobbyDistance.Value, _runtimeRestoreLastRestoredDistance.Value)
-            && IsNear(latestSample.LobbyInterpDistance.Value, _runtimeRestoreLastRestoredDistance.Value)
+        return IsNear(latestSample.LobbyDirH.Value, _cameraRestoreCurve.RuntimeRestoreLastRestoredYaw.Value)
+            && IsNear(latestSample.LobbyDirV.Value, _cameraRestoreCurve.RuntimeRestoreLastRestoredPitch.Value)
+            && IsNear(latestSample.LobbyDistance.Value, _cameraRestoreCurve.RuntimeRestoreLastRestoredDistance.Value)
+            && IsNear(latestSample.LobbyInterpDistance.Value, _cameraRestoreCurve.RuntimeRestoreLastRestoredDistance.Value)
             ? "observed"
             : "not-observed";
     }

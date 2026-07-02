@@ -1,6 +1,6 @@
 # XIV Mini Util 現在実装・引き継ぎ資料
 
-- 更新日時: 2026-07-02（R3の4責務目完了後）
+- 更新日時: 2026-07-02（R3の5a責務目完了後）
 - 対象作業ツリー: `C:\Project\apps\XIV-Mini-Util`
 - 対象ブランチ: `main`
 - 直近の主要commit: `5b2f9f6`（リファクタ一式＋R3の1責務目）、`34c89c3`（本資料の更新）
@@ -70,16 +70,16 @@ b11a0e9 Clean up CharaSelect camera-aim dead code; report recognizes composited 
 
 ### 3.2 現在の規模
 
-計測方法は `git ls-files` とPowerShellの `Get-Content(...).Count`。以下は2026-07-02（R3の4責務目完了後）の再計測値。
+計測方法は `git ls-files` とPowerShellの `Get-Content(...).Count`。以下は2026-07-02（R3の5a責務目完了後）の再計測値。
 
 | 領域 | 現在値 |
 |---|---:|
-| リポジトリ内ファイル | 232 |
-| C# | 174ファイル |
-| TitleBackground | 57ファイル / 18,476行 |
+| リポジトリ内ファイル | 233 |
+| C# | 175ファイル |
+| TitleBackground | 58ファイル / 18,518行 |
 | Shop | 29ファイル / 5,277行 |
 | CharaSelect | 17ファイル / 3,642行 |
-| `TitleScreenBackgroundService` partial群 | 9ファイル / 8,778行 |
+| `TitleScreenBackgroundService` partial群 | 9ファイル / 8,748行 |
 | `tools/CharaSelectLogicTests/Program.cs` | 5行 |
 | LogicTests | 439件 |
 
@@ -87,9 +87,9 @@ b11a0e9 Clean up CharaSelect camera-aim dead code; report recognizes composited 
 
 ### 3.3 `TitleScreenBackgroundService` の残存状態
 
-`TitleScreenBackgroundService.cs` のコンストラクタ前を行ベースで数えると、private field宣言は136、うちreadonly/const/static readonlyを除く可変field宣言は99（2026-07-02 R3の4責務目完了後に再計測）。
+`TitleScreenBackgroundService.cs` のコンストラクタ前を行ベースで数えると、private field宣言は105、うちreadonly/const/static readonlyを除く可変field宣言は67（2026-07-02 R3の5a責務目完了後に再計測。リファクタ開始時は153）。
 
-automatic check関連の12状態は `TitleBackgroundAutomaticCheckRuntimeState` に、world probe / 座標サンプルの7状態は `TitleBackgroundWorldProbeRuntimeState` に、FixOn観測 / focus・view override記録 / pre-login・post-FixOnカメラ観測の30状態は `TitleBackgroundCameraObservationRuntimeState` に、character placementの8状態は `TitleBackgroundCharacterPlacementRuntimeState` に、probe session / camera probe timeline / phase2C timelineの15状態は `TitleBackgroundProbeTimelineRuntimeState` に移動済み。hook lifecycle状態のほか、phase2M/2E/2F/2Gの記録、sceneReadySignal / runtimeRestore / curveApply系の診断状態が依然としてservice本体に残る。
+automatic check関連の12状態は `TitleBackgroundAutomaticCheckRuntimeState` に、world probe / 座標サンプルの7状態は `TitleBackgroundWorldProbeRuntimeState` に、FixOn観測 / focus・view override記録 / pre-login・post-FixOnカメラ観測の30状態は `TitleBackgroundCameraObservationRuntimeState` に、character placementの8状態は `TitleBackgroundCharacterPlacementRuntimeState` に、probe session / camera probe timeline / phase2C timelineの15状態は `TitleBackgroundProbeTimelineRuntimeState` に、カメラcapture結果 / CharaSelectカメラruntime記録・復元 / sceneReady信号 / runtimeRestore / curveApplyの32状態は `TitleBackgroundCameraRestoreCurveRuntimeState` に移動済み。hook lifecycle状態とphase2M/2E/2F/2Gの記録がservice本体に残る。
 
 partial分割だけで責務分離完了とは扱わないこと。
 
@@ -273,10 +273,14 @@ tools/CharaSelectLogicTests/
 
 `TitleBackgroundProbeTimelineRuntimeState` に、probe session（active/last/counters/enabled/cameraProbeSession）、camera probe timeline（frame counter/status/error＋snapshot・event counts・lobby update snapshotの辞書3つ）、phase2C timeline（frame counter/status/error＋snapshot辞書）の計15状態を集約。readonly辞書はget-onlyプロパティで「参照差し替え不可」の境界を維持し、再代入される `_automaticProbeCounters` はget/setで引き継いだ。probe実行・timeline採取ロジックは不変。テスト側のロックはなし。
 
+### 実装済み（2026-07-02、R3の5a責務目）
+
+`TitleBackgroundCameraRestoreCurveRuntimeState` に、カメラcapture結果、CharaSelectカメラruntime記録・復元status、sceneReady信号、runtime復元カウンタ・復元値、curve適用カウンタ・値・前後カメラsnapshotの計32状態を集約。すべて非readonlyのためget/setで忠実に引き継ぎ。curve適用・カメラ復元の実行ロジックは不変。テスト側のロックはなし。
+
 ### 未実施
 
-- hook lifecycle state holder
-- phase2M/2E/2F/2G記録・sceneReadySignal / runtimeRestore / curveApply系診断状態の分離
+- hook lifecycle state holder（`Hook<T>` インスタンス8個と `_state` / `_stateReason` / `_disposed`。**実機確認できるタイミングまで保留**と2026-07-02にユーザーが決定。§13により自動検証だけで完了扱いにできないため）
+- phase2M/2E/2F/2G記録の分離（5b。次の安全な責務）
 - report builderのservice private stateからの完全分離
 
 native pointer、detour、framework update処理の大規模抽出は行っていない。
@@ -858,8 +862,13 @@ DownloadLink=v0.3.7/XivMiniUtil.zip
 1. ~~world probe / coordinate sample state~~ 実装済み（`TitleBackgroundWorldProbeRuntimeState`、commit `5b2f9f6`）
 2. ~~保存view / camera observation state~~ 実装済み（`TitleBackgroundCameraObservationRuntimeState`、2026-07-02）
 3. ~~character placement state~~ 実装済み（`TitleBackgroundCharacterPlacementRuntimeState`、2026-07-02）
-4. ~~timeline diagnostic state~~ 実装済み（`TitleBackgroundProbeTimelineRuntimeState`、2026-07-02。phase2M/2E/2F/2G記録・sceneReadySignal / runtimeRestore / curveApply系は未分離で残タスク）
-5. hook lifecycle state
+4. ~~timeline diagnostic state~~ 実装済み（`TitleBackgroundProbeTimelineRuntimeState`、2026-07-02）
+5. hook lifecycle state（**実機確認できるタイミングまで保留**。ユーザー決定 2026-07-02）
+
+追加責務（4完了後に細分化）:
+
+- 5a. ~~カメラcapture / runtime記録・復元 / sceneReady / runtimeRestore / curveApply診断~~ 実装済み（`TitleBackgroundCameraRestoreCurveRuntimeState`、2026-07-02）
+- 5b. phase2M/2E/2F/2G記録の分離（未着手・次の安全な責務）
 
 native hook本体、pointer、detour、framework updateを先に動かさない。
 
@@ -962,6 +971,7 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundCameraObservationRuntimeState.cs`
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundCharacterPlacementRuntimeState.cs`
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundProbeTimelineRuntimeState.cs`
+- `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundCameraRestoreCurveRuntimeState.cs`
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundKnownSignatures.cs`
 - `projects/XIV-Mini-Util/Windows/Components/SettingsTab.TitleBackground.cs`
 - `projects/XIV-Mini-Util/Windows/Components/SettingsTab.TitleBackgroundDiagnostics.cs`
@@ -993,5 +1003,6 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 - 背景差し替えと1クリック自動確認は実機成功。ユーザーは実機確認を「大体見た」とし、コード作業優先を指示。
 - character placementは実行済みだがground未確認。
 - 保存viewのコード経路は実装済み。目視はユーザー確認済みだが、診断値によるround-trip確認（view.enabled=True等）は未実施。
-- R3の2〜4責務目（`TitleBackgroundCameraObservationRuntimeState` 30状態 / `TitleBackgroundCharacterPlacementRuntimeState` 8状態 / `TitleBackgroundProbeTimelineRuntimeState` 15状態）は2026-07-02に実装・検証済み（LogicTests 439件、Debug/Release build、release package、`git diff --check` すべて緑）。
-- 次AIは、R3の5責務目（hook lifecycle state。最も慎重を要する）から1責務ずつ継続する。その後の残タスクはphase2M/2E/2F/2G記録・sceneReadySignal / runtimeRestore / curveApply系の分離とreport builderの完全分離。
+- R3の2〜4責務目と5a（`TitleBackgroundCameraObservationRuntimeState` 30状態 / `TitleBackgroundCharacterPlacementRuntimeState` 8状態 / `TitleBackgroundProbeTimelineRuntimeState` 15状態 / `TitleBackgroundCameraRestoreCurveRuntimeState` 32状態）は2026-07-02に実装・検証済み（各回LogicTests 439件、Debug/Release build、release package、`git diff --check` すべて緑）。serviceの可変fieldは153→67。
+- hook lifecycle state（5責務目）は実機確認できるタイミングまで保留（ユーザー決定）。
+- 次AIは、5b（phase2M/2E/2F/2G記録の分離）から1責務ずつ継続する。その後はreport builderの完全分離。

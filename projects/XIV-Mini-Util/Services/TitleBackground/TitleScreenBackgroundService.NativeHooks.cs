@@ -133,9 +133,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
         {
             var stateBeforeHandle = _charaSelectCameraAdapter.State;
             var map = ResolveSceneReadySignalLobbyMap();
-            _sceneReadySignalCallCount++;
-            _sceneReadySignalLastAdapterStateBeforeHandle = stateBeforeHandle.ToString();
-            _sceneReadySignalLastResolvedLobbyMap = map;
+            _cameraRestoreCurve.SceneReadySignalCallCount++;
+            _cameraRestoreCurve.SceneReadySignalLastAdapterStateBeforeHandle = stateBeforeHandle.ToString();
+            _cameraRestoreCurve.SceneReadySignalLastResolvedLobbyMap = map;
             var sceneReadySnapshot = BuildTransitionSnapshot("sceneReady");
             _transitionDiagnostics.RecordSceneReadyRaw(sceneReadySnapshot, $"map={map}; stateBefore={stateBeforeHandle}");
 
@@ -143,7 +143,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             // This is not a confirmed native LobbySceneLoaded-equivalent hook.
             if (ShouldHandleCharaSelectSceneReadySignal(stateBeforeHandle, map))
             {
-                _sceneReadySignalAcceptedCount++;
+                _cameraRestoreCurve.SceneReadySignalAcceptedCount++;
                 if (_quickCheckState.RunState == TitleBackgroundQuickCheckRunState.Armed)
                 {
                     _quickCheckState = _quickCheckState with { RunState = TitleBackgroundQuickCheckRunState.CharaSelectObserved };
@@ -173,10 +173,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         {
             MarkRuntimeError(ex, nameof(LobbySceneLoadedDetour));
             RecordTransitionEvent("sceneLoadedNotification failure", nameof(LobbySceneLoadedDetour), ex.Message);
-            _lastCharaSelectCameraRuntimeRestoreStatus = "runtime-error";
-            _lastCharaSelectCameraRuntimeRestoreFailureReason = ex.Message;
-            _curveApplyLastStatus = "runtime-error";
-            _curveApplyLastFailureReason = ex.Message;
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "runtime-error";
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreFailureReason = ex.Message;
+            _cameraRestoreCurve.CurveApplyLastStatus = "runtime-error";
+            _cameraRestoreCurve.CurveApplyLastFailureReason = ex.Message;
         }
     }
 
