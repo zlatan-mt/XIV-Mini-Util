@@ -38,6 +38,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundWorldProbeRuntimeState _worldProbeState = new();
     // FixOn観測・focus/view override記録・pre-login/post-FixOnカメラ観測のセッション限定状態（プラグイン再起動で消える）。
     private readonly TitleBackgroundCameraObservationRuntimeState _cameraObservation = new();
+    // pre-loginキャラDrawObject観測とCharaSelectキャラ配置記録のセッション限定状態（プラグイン再起動で消える）。
+    private readonly TitleBackgroundCharacterPlacementRuntimeState _characterPlacement = new();
 
     private Hook<CreateSceneDelegate>? _createSceneHook;
     private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
@@ -72,15 +74,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private string _lastHistoricalOverridePath = string.Empty;
     private string _sceneOverrideCleanupReason = "none";
     private bool _loggedInWorldTransitionRecorded;
-    private Vector3? _lastPreLoginCharacterDrawPosition;
-    private float _lastPreLoginCharacterDrawRotation;
-    private int _preLoginCharacterDrawObservedCount;
-    private int _charaSelectCharacterPlacementCount;
-    private string _charaSelectCharacterPlacementLastError = "none";
-    private Vector3? _lastCharaSelectCharacterPlacementTarget;
-    private string _lastCharaSelectCharacterPlacementSource = "none";
-    // 直近の配置で使ったアンカーの frame（地面 provenance 判定に使う）。camera-focus 由来は Unknown。
-    private string _lastCharaSelectCharacterPlacementAnchorFrame = TitleBackgroundCharaSelectAnchorFrame.Unknown;
     private TitleBackgroundCameraCaptureResult _lastCameraCaptureResult = TitleBackgroundCameraCaptureResult.NotRun;
     private string _lastCharaSelectCameraRuntimeRecordStatus = "not-run";
     private string _lastCharaSelectCameraRuntimeRestoreStatus = "not-run";
@@ -1825,35 +1818,35 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"phase2M.preLoginCapture.skippedInactiveCount={_phase2MPlacementSkippedInactiveCount}");
         lines.Add($"phase2M.preLoginCapture.skippedSceneGenerationCount={_phase2MPlacementSkippedSceneGenerationCount}");
         lines.Add($"phase2M.preLoginCapture.lastSkipReason={FormatNone(_phase2MPlacementLastSkipReason)}");
-        lines.Add($"characterDraw.preLoginObservedCount={_preLoginCharacterDrawObservedCount}");
-        lines.Add($"characterDraw.preLoginDrawPosition={(_lastPreLoginCharacterDrawPosition.HasValue ? FormatVector(_lastPreLoginCharacterDrawPosition.Value) : "none")}");
-        lines.Add($"characterDraw.preLoginDrawPositionNonZero={(_lastPreLoginCharacterDrawPosition.HasValue && !TitleBackgroundCharacterSourceEvaluation.IsZeroPosition(_lastPreLoginCharacterDrawPosition.Value))}");
-        lines.Add($"characterDraw.preLoginDrawRotation={FormatFloat(_lastPreLoginCharacterDrawRotation)}");
+        lines.Add($"characterDraw.preLoginObservedCount={_characterPlacement.PreLoginCharacterDrawObservedCount}");
+        lines.Add($"characterDraw.preLoginDrawPosition={(_characterPlacement.LastPreLoginCharacterDrawPosition.HasValue ? FormatVector(_characterPlacement.LastPreLoginCharacterDrawPosition.Value) : "none")}");
+        lines.Add($"characterDraw.preLoginDrawPositionNonZero={(_characterPlacement.LastPreLoginCharacterDrawPosition.HasValue && !TitleBackgroundCharacterSourceEvaluation.IsZeroPosition(_characterPlacement.LastPreLoginCharacterDrawPosition.Value))}");
+        lines.Add($"characterDraw.preLoginDrawRotation={FormatFloat(_characterPlacement.LastPreLoginCharacterDrawRotation)}");
         // 累積値（長期診断用）。/xmutbgdiag では従来どおり全 run の合計と最終配置を残す。
-        lines.Add($"characterPlace.appliedFrameCount={_charaSelectCharacterPlacementCount}");
-        lines.Add($"characterPlace.lastTarget={(_lastCharaSelectCharacterPlacementTarget.HasValue ? FormatVector(_lastCharaSelectCharacterPlacementTarget.Value) : "none")}");
-        lines.Add($"characterPlace.lastSource={FormatNone(_lastCharaSelectCharacterPlacementSource)}");
-        lines.Add($"characterPlace.lastAnchorFrame={FormatNone(_lastCharaSelectCharacterPlacementAnchorFrame)}");
-        lines.Add($"characterPlace.lastAnchorFrameGroundProvenance={TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(_lastCharaSelectCharacterPlacementAnchorFrame)}");
+        lines.Add($"characterPlace.appliedFrameCount={_characterPlacement.CharaSelectCharacterPlacementCount}");
+        lines.Add($"characterPlace.lastTarget={(_characterPlacement.LastCharaSelectCharacterPlacementTarget.HasValue ? FormatVector(_characterPlacement.LastCharaSelectCharacterPlacementTarget.Value) : "none")}");
+        lines.Add($"characterPlace.lastSource={FormatNone(_characterPlacement.LastCharaSelectCharacterPlacementSource)}");
+        lines.Add($"characterPlace.lastAnchorFrame={FormatNone(_characterPlacement.LastCharaSelectCharacterPlacementAnchorFrame)}");
+        lines.Add($"characterPlace.lastAnchorFrameGroundProvenance={TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(_characterPlacement.LastCharaSelectCharacterPlacementAnchorFrame)}");
         // run-scoped 値（自動確認レポート用）。今回 run の配置回数と、その配置に対応する source/target/frame。
         // 今回 0 回なら過去 run の位置・source を出さず none にする（run-scoped QuickCheck と整合させる）。
         var runActive = IsRunScopedQuickCheckActive();
         var runAppliedFrameCount = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedPlacementCount(
             runActive,
-            _charaSelectCharacterPlacementCount,
+            _characterPlacement.CharaSelectCharacterPlacementCount,
             _quickCheckState.CharacterPlacementCountStart);
         var runPlacementApplied = runAppliedFrameCount > 0;
         lines.Add($"characterPlace.runAppliedFrameCount={runAppliedFrameCount}");
-        lines.Add($"characterPlace.runTarget={(runPlacementApplied && _lastCharaSelectCharacterPlacementTarget.HasValue ? FormatVector(_lastCharaSelectCharacterPlacementTarget.Value) : "none")}");
-        lines.Add($"characterPlace.runSource={(runPlacementApplied ? FormatNone(_lastCharaSelectCharacterPlacementSource) : "none")}");
-        lines.Add($"characterPlace.runAnchorFrame={(runPlacementApplied ? FormatNone(_lastCharaSelectCharacterPlacementAnchorFrame) : "none")}");
-        lines.Add($"characterPlace.runAnchorFrameGroundProvenance={(runPlacementApplied && TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(_lastCharaSelectCharacterPlacementAnchorFrame))}");
+        lines.Add($"characterPlace.runTarget={(runPlacementApplied && _characterPlacement.LastCharaSelectCharacterPlacementTarget.HasValue ? FormatVector(_characterPlacement.LastCharaSelectCharacterPlacementTarget.Value) : "none")}");
+        lines.Add($"characterPlace.runSource={(runPlacementApplied ? FormatNone(_characterPlacement.LastCharaSelectCharacterPlacementSource) : "none")}");
+        lines.Add($"characterPlace.runAnchorFrame={(runPlacementApplied ? FormatNone(_characterPlacement.LastCharaSelectCharacterPlacementAnchorFrame) : "none")}");
+        lines.Add($"characterPlace.runAnchorFrameGroundProvenance={(runPlacementApplied && TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(_characterPlacement.LastCharaSelectCharacterPlacementAnchorFrame))}");
         lines.Add($"characterPlace.anchorEnabled={_configuration.TitleBackgroundCharaSelectAnchorEnabled}");
         lines.Add($"characterPlace.anchorFrame={FormatNone(_configuration.TitleBackgroundCharaSelectAnchorFrame)}");
         lines.Add($"characterPlace.anchorFrameSupported={TitleBackgroundCharaSelectAnchorFrame.IsPlacementSupported(_configuration.TitleBackgroundCharaSelectAnchorFrame)}");
         lines.Add($"characterPlace.anchorCandidate={FormatNone(_configuration.TitleBackgroundCharaSelectAnchorCandidateId)}");
         lines.Add($"characterPlace.anchorTarget={(_configuration.TitleBackgroundCharaSelectAnchorEnabled ? FormatVector(new Vector3(_configuration.TitleBackgroundCharaSelectAnchorX, _configuration.TitleBackgroundCharaSelectAnchorY, _configuration.TitleBackgroundCharaSelectAnchorZ)) : "none")}");
-        lines.Add($"characterPlace.lastError={FormatNone(_charaSelectCharacterPlacementLastError)}");
+        lines.Add($"characterPlace.lastError={FormatNone(_characterPlacement.CharaSelectCharacterPlacementLastError)}");
 
         // 問題4: world experimental の適用可否を1フローで判断できる config/eligibility 状態。
         // probe 有効時は probe 値、それ以外は永続 config 値を出す（run 回数ではなく現在状態の記述）。

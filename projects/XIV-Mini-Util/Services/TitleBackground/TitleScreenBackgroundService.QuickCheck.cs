@@ -577,7 +577,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _configuration.TitleBackgroundCharacterSelectLightingMode,
             currentMap,
             _clientState.IsLoggedIn,
-            _charaSelectCharacterPlacementCount,
+            _characterPlacement.CharaSelectCharacterPlacementCount,
             _transitionDiagnostics.EventSequenceWatermark);
         _configuration.TitleBackgroundLastQuickCheckResult = TitleBackgroundQuickCheckLevel.NotRun;
         _configuration.TitleBackgroundLastQuickCheckCandidateId = candidate.Id;
@@ -763,19 +763,19 @@ public sealed unsafe partial class TitleScreenBackgroundService
         // 配置結果は run-scoped で判定する。前回 run の成功回数・source・frame を今回へ流用しない。
         var runScopedPlacementCount = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedPlacementCount(
             runScoped,
-            _charaSelectCharacterPlacementCount,
+            _characterPlacement.CharaSelectCharacterPlacementCount,
             _quickCheckState.CharacterPlacementCountStart);
         var characterCompositedApplied = runScopedPlacementCount > 0;
         // camera-focus は画面内に置いただけ（地面位置は未確認）。
         var characterPlacedViaCameraFocusFallback = TitleBackgroundAutomaticCheckLogic.ResolveCameraFocusFallbackPlacement(
             characterCompositedApplied,
-            _lastCharaSelectCharacterPlacementSource);
+            _characterPlacement.LastCharaSelectCharacterPlacementSource);
         // 地面検証済みは anchor 由来かつ frame が明確な地面 provenance（LobbyNative）を持つ場合のみ。
         // CharaSelectFallback（水上座標の再保存の可能性）/ Unknown / World は ground verified にしない。
         var characterGroundPlacementVerified = TitleBackgroundAutomaticCheckLogic.ResolveGroundPlacementVerified(
             characterCompositedApplied,
-            _lastCharaSelectCharacterPlacementSource,
-            _lastCharaSelectCharacterPlacementAnchorFrame);
+            _characterPlacement.LastCharaSelectCharacterPlacementSource,
+            _characterPlacement.LastCharaSelectCharacterPlacementAnchorFrame);
         var passiveCameraObservationActive = _configuration.TitleBackgroundFixOnPassiveObservationEnabled;
 
         return new TitleBackgroundQuickCheckInput(

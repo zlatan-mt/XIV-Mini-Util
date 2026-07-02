@@ -149,9 +149,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var nativeCharacterSource = TitleBackgroundCharacterSourceProbe.Capture(frame);
         if (TitleBackgroundCharacterSourceProbe.TryReadCurrentCharacterAim(out var drawPosition, out var drawRotation))
         {
-            _lastPreLoginCharacterDrawPosition = drawPosition;
-            _lastPreLoginCharacterDrawRotation = drawRotation;
-            _preLoginCharacterDrawObservedCount++;
+            _characterPlacement.LastPreLoginCharacterDrawPosition = drawPosition;
+            _characterPlacement.LastPreLoginCharacterDrawRotation = drawRotation;
+            _characterPlacement.PreLoginCharacterDrawObservedCount++;
         }
 
         var actorResult = CaptureCharacterPlacementActorCandidate(
@@ -1464,7 +1464,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
             if (!TryCaptureActiveCameraSnapshot(out var camera, out var error))
             {
-                _charaSelectCharacterPlacementLastError = string.IsNullOrWhiteSpace(error) ? "camera-unavailable" : error;
+                _characterPlacement.CharaSelectCharacterPlacementLastError = string.IsNullOrWhiteSpace(error) ? "camera-unavailable" : error;
                 return;
             }
 
@@ -1478,7 +1478,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 && !supportedAnchor.HasUsableAnchor
                 && !TitleBackgroundCameraMath.IsFiniteVector(lookAt))
             {
-                _charaSelectCharacterPlacementLastError = "lookat-non-finite";
+                _characterPlacement.CharaSelectCharacterPlacementLastError = "lookat-non-finite";
                 return;
             }
 
@@ -1495,22 +1495,22 @@ public sealed unsafe partial class TitleScreenBackgroundService
             var target = decision.Target;
             if (TitleBackgroundCharacterSourceProbe.TrySetCurrentCharacterDrawPosition(target))
             {
-                _charaSelectCharacterPlacementCount++;
-                _lastCharaSelectCharacterPlacementTarget = target;
-                _lastCharaSelectCharacterPlacementSource = decision.Source;
+                _characterPlacement.CharaSelectCharacterPlacementCount++;
+                _characterPlacement.LastCharaSelectCharacterPlacementTarget = target;
+                _characterPlacement.LastCharaSelectCharacterPlacementSource = decision.Source;
                 // 実際に選択したアンカーの effective frame を記録する（config からではない）。
                 // World/probe 適用時に config frame と取り違えないことが provenance 判定の前提。
-                _lastCharaSelectCharacterPlacementAnchorFrame = decision.EffectiveFrame;
-                _charaSelectCharacterPlacementLastError = "none";
+                _characterPlacement.LastCharaSelectCharacterPlacementAnchorFrame = decision.EffectiveFrame;
+                _characterPlacement.CharaSelectCharacterPlacementLastError = "none";
             }
             else
             {
-                _charaSelectCharacterPlacementLastError = "draw-position-write-failed";
+                _characterPlacement.CharaSelectCharacterPlacementLastError = "draw-position-write-failed";
             }
         }
         catch (Exception ex)
         {
-            _charaSelectCharacterPlacementLastError = ex.GetType().Name;
+            _characterPlacement.CharaSelectCharacterPlacementLastError = ex.GetType().Name;
             MarkRuntimeError(ex, nameof(MaintainCharaSelectCharacterPlacement));
         }
     }
@@ -1961,11 +1961,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
             var runActive = IsRunScopedQuickCheckActive();
             var runApplied = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedPlacementCount(
                 runActive,
-                _charaSelectCharacterPlacementCount,
+                _characterPlacement.CharaSelectCharacterPlacementCount,
                 _quickCheckState.CharacterPlacementCountStart);
-            var runSource = runApplied > 0 ? _lastCharaSelectCharacterPlacementSource : "none";
-            var runTarget = _lastCharaSelectCharacterPlacementTarget ?? Vector3.Zero;
-            var runAnchorFrame = runApplied > 0 ? _lastCharaSelectCharacterPlacementAnchorFrame : "none";
+            var runSource = runApplied > 0 ? _characterPlacement.LastCharaSelectCharacterPlacementSource : "none";
+            var runTarget = _characterPlacement.LastCharaSelectCharacterPlacementTarget ?? Vector3.Zero;
+            var runAnchorFrame = runApplied > 0 ? _characterPlacement.LastCharaSelectCharacterPlacementAnchorFrame : "none";
             var generationMatched = _cameraObservation.LastPreLoginSceneCameraGeneration > 0
                 && _cameraObservation.LastPreLoginSceneCameraGeneration == _cameraObservation.FixOnExperimentSceneGeneration;
 

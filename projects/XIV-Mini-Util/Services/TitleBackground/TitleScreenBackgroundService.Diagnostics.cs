@@ -489,7 +489,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _quickCheckState.TransitionEventSeqStart);
         var deliveryCharacterPlacementApplied = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedPlacementCount(
             deliveryRunScoped,
-            _charaSelectCharacterPlacementCount,
+            _characterPlacement.CharaSelectCharacterPlacementCount,
             _quickCheckState.CharacterPlacementCountStart) > 0;
         // 背景適用も run-scoped 化する。今回 run で override が適用されたかを差分で判定し、
         // 0 回なら historical flag/path も Delivery 判定へ入れない（前回成功を引き継がない）。

@@ -996,7 +996,7 @@ Test(108, "delivery diagnostic is wired to run-scoped anomaly and placement valu
         && call.Contains("deliveryHistoricalOverrideApplied", StringComparison.Ordinal)
         && call.Contains("deliveryHistoricalOverridePath", StringComparison.Ordinal)
         // 累積 placement count / sticky Phase2G / 累積 override 履歴をそのまま渡していない。
-        && !call.Contains("_charaSelectCharacterPlacementCount > 0", StringComparison.Ordinal)
+        && !call.Contains("_characterPlacement.CharaSelectCharacterPlacementCount > 0", StringComparison.Ordinal)
         && !call.Contains("_transitionDiagnostics.Phase2GAppliedAfterLogin", StringComparison.Ordinal)
         && !call.Contains("_lastOverrideApplied", StringComparison.Ordinal)
         && !call.Contains("_lastHistoricalOverridePath", StringComparison.Ordinal)
@@ -4639,7 +4639,7 @@ Test(387, "placement records effective frame from decision and saves measured te
     var timelineText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.TimelineDiagnostics.cs"));
     var placement = ExtractMethodBody(timelineText, "private void MaintainCharaSelectCharacterPlacement()");
     var capture = ExtractMethodBody(timelineText, "public bool TryCaptureLoggedInPositionAsAnchor(out string status)");
-    return placement.Contains("_lastCharaSelectCharacterPlacementAnchorFrame = decision.EffectiveFrame", StringComparison.Ordinal)
+    return placement.Contains("_characterPlacement.LastCharaSelectCharacterPlacementAnchorFrame = decision.EffectiveFrame", StringComparison.Ordinal)
         && capture.Contains("_configuration.TitleBackgroundCharaSelectAnchorTerritoryTypeId = _clientState.TerritoryType", StringComparison.Ordinal);
 });
 
