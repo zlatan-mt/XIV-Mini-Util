@@ -173,10 +173,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
 
         if (!TitleBackgroundCameraProbeReport.IsGeneratedCurveOverrideSuccess(
-            _phase2GGenerationOverrideSetMidAttemptCount,
-            _phase2GGenerationOverrideSetMidAppliedCount,
-            _phase2GGenerationOverrideLowHighAttemptCount,
-            _phase2GGenerationOverrideLowHighAppliedCount,
+            _phaseRecording.Phase2GGenerationOverrideSetMidAttemptCount,
+            _phaseRecording.Phase2GGenerationOverrideSetMidAppliedCount,
+            _phaseRecording.Phase2GGenerationOverrideLowHighAttemptCount,
+            _phaseRecording.Phase2GGenerationOverrideLowHighAppliedCount,
             lookAtY))
         {
             return TitleBackgroundSelfTestVerdict.Fail("phase2g-counts-not-applied");

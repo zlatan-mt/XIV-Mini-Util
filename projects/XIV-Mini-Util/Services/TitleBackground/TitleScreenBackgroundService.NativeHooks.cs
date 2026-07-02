@@ -482,7 +482,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         CurvePoint* midPoint,
         CurvePoint* highPoint)
     {
-        var callIndex = ++_phase2ECalculateLookAtYCallCount;
+        var callIndex = ++_phaseRecording.Phase2ECalculateLookAtYCallCount;
         RecordTransitionEvent("calculateLobbyCameraLookAtY hook called", $"callIndex={callIndex}");
         var frame = GetCurrentPhase2CFrame();
         var low = ReadCurvePoint(lowPoint);
@@ -498,7 +498,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
         catch (Exception ex)
         {
-            _phase2ECalculateLookAtYLastError = ex.Message;
+            _phaseRecording.Phase2ECalculateLookAtYLastError = ex.Message;
             RecordPhase2ECalculateLookAtYCall(new TitleBackgroundPhase2ECalculateLookAtYCall(
                 callIndex,
                 frame,
@@ -519,7 +519,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             : (float?)null;
         var status = activeAfter.HasValue ? "success" : "active-camera-unavailable";
         var error = activeAfter.HasValue ? string.Empty : afterError;
-        _phase2ECalculateLookAtYLastError = error;
+        _phaseRecording.Phase2ECalculateLookAtYLastError = error;
         RecordPhase2ECalculateLookAtYCall(new TitleBackgroundPhase2ECalculateLookAtYCall(
             callIndex,
             frame,
@@ -537,7 +537,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void SetCameraCurveMidPointDetour(nint self, float value)
     {
-        var callIndex = ++_phase2FSetCameraCurveMidPointCallCount;
+        var callIndex = ++_phaseRecording.Phase2FSetCameraCurveMidPointCallCount;
         RecordTransitionEvent("SetCameraCurveMidPoint hook called", $"callIndex={callIndex}");
         var frame = GetCurrentPhase2CFrame();
         var beforeCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var before, out var beforeError);
@@ -553,7 +553,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
         catch (Exception ex)
         {
-            _phase2FSetCameraCurveMidPointLastError = ex.Message;
+            _phaseRecording.Phase2FSetCameraCurveMidPointLastError = ex.Message;
             RecordPhase2FSetCameraCurveMidPointCall(
                 BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, null, activeBefore, null, "original-error", ex.Message));
             throw;
@@ -566,14 +566,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var status = beforeCaptured && afterCaptured ? "success" : "partial";
         status = string.IsNullOrWhiteSpace(phase2GStatus) ? status : $"{status}; phase2G={phase2GStatus}";
         var error = JoinErrors(JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError), phase2GError);
-        _phase2FSetCameraCurveMidPointLastError = error;
+        _phaseRecording.Phase2FSetCameraCurveMidPointLastError = error;
         RecordPhase2FSetCameraCurveMidPointCall(
             BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
     }
 
     private void CalculateCameraCurveLowAndHighPointDetour(nint self, float value)
     {
-        var callIndex = ++_phase2FCalculateCameraCurveLowAndHighPointCallCount;
+        var callIndex = ++_phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCallCount;
         RecordTransitionEvent("CalculateCameraCurveLowAndHighPoint hook called", $"callIndex={callIndex}");
         var frame = GetCurrentPhase2CFrame();
         var beforeCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var before, out var beforeError);
@@ -589,7 +589,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
         catch (Exception ex)
         {
-            _phase2FCalculateCameraCurveLowAndHighPointLastError = ex.Message;
+            _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointLastError = ex.Message;
             RecordPhase2FCalculateCameraCurveLowAndHighPointCall(
                 BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, null, activeBefore, null, "original-error", ex.Message));
             throw;
@@ -602,7 +602,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var status = beforeCaptured && afterCaptured ? "success" : "partial";
         status = string.IsNullOrWhiteSpace(phase2GStatus) ? status : $"{status}; phase2G={phase2GStatus}";
         var error = JoinErrors(JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError), phase2GError);
-        _phase2FCalculateCameraCurveLowAndHighPointLastError = error;
+        _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointLastError = error;
         RecordPhase2FCalculateCameraCurveLowAndHighPointCall(
             BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
     }
@@ -613,14 +613,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
         if (!TryGetPhase2GGenerationOverrideCurve(out var curve, out var skippedReason))
         {
             status = $"skipped:{skippedReason}";
-            _phase2GGenerationOverrideLastStatus = status;
-            _phase2GGenerationOverrideLastSkippedReason = skippedReason;
+            _phaseRecording.Phase2GGenerationOverrideLastStatus = status;
+            _phaseRecording.Phase2GGenerationOverrideLastSkippedReason = skippedReason;
             _transitionDiagnostics.RecordPhase2GSkipped(skippedReason);
             RecordTransitionEvent("Phase 2G setMid skipped", skippedReason);
             return false;
         }
 
-        _phase2GGenerationOverrideSetMidAttemptCount++;
+        _phaseRecording.Phase2GGenerationOverrideSetMidAttemptCount++;
         RecordTransitionEvent("Phase 2G setMid attempted", $"frame={FormatFrame(frame)}");
         try
         {
@@ -629,7 +629,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             // Do not add Framework.Update maintenance or direct SceneCamera writes here.
             WriteCurvePointY(self, LobbyCameraExpandedMidPointOffset, curve.Mid);
             MarkPhase2GGenerationOverrideApplied(frame, "set-mid-applied");
-            _phase2GGenerationOverrideSetMidAppliedCount++;
+            _phaseRecording.Phase2GGenerationOverrideSetMidAppliedCount++;
             _charaSelectService?.MarkTitleBackgroundCharacterCompositionBridgeCameraApplied();
             _transitionDiagnostics.RecordPhase2GApply(
                 BuildTransitionSnapshot("Phase 2G setMid applied"),
@@ -644,8 +644,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
         {
             status = "failed";
             errorMessage = ex.Message;
-            _phase2GGenerationOverrideLastStatus = "set-mid-failed";
-            _phase2GGenerationOverrideLastSkippedReason = string.Empty;
+            _phaseRecording.Phase2GGenerationOverrideLastStatus = "set-mid-failed";
+            _phaseRecording.Phase2GGenerationOverrideLastSkippedReason = string.Empty;
             RecordTransitionEvent("Phase 2G setMid skipped", "failed", ex.Message);
             _log.Warning(ex, "TitleBackground Phase2G SetCameraCurveMidPoint override failed.");
             return false;
@@ -658,14 +658,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
         if (!TryGetPhase2GGenerationOverrideCurve(out var curve, out var skippedReason))
         {
             status = $"skipped:{skippedReason}";
-            _phase2GGenerationOverrideLastStatus = status;
-            _phase2GGenerationOverrideLastSkippedReason = skippedReason;
+            _phaseRecording.Phase2GGenerationOverrideLastStatus = status;
+            _phaseRecording.Phase2GGenerationOverrideLastSkippedReason = skippedReason;
             _transitionDiagnostics.RecordPhase2GSkipped(skippedReason);
             RecordTransitionEvent("Phase 2G lowHigh skipped", skippedReason);
             return false;
         }
 
-        _phase2GGenerationOverrideLowHighAttemptCount++;
+        _phaseRecording.Phase2GGenerationOverrideLowHighAttemptCount++;
         RecordTransitionEvent("Phase 2G lowHigh attempted", $"frame={FormatFrame(frame)}");
         try
         {
@@ -675,7 +675,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             WriteCurvePointY(self, LobbyCameraExpandedLowPointOffset, curve.Low);
             WriteCurvePointY(self, LobbyCameraExpandedHighPointOffset, curve.High);
             MarkPhase2GGenerationOverrideApplied(frame, "low-high-applied");
-            _phase2GGenerationOverrideLowHighAppliedCount++;
+            _phaseRecording.Phase2GGenerationOverrideLowHighAppliedCount++;
             _charaSelectService?.MarkTitleBackgroundCharacterCompositionBridgeCameraApplied();
             _transitionDiagnostics.RecordPhase2GApply(
                 BuildTransitionSnapshot("Phase 2G lowHigh applied"),
@@ -690,8 +690,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
         {
             status = "failed";
             errorMessage = ex.Message;
-            _phase2GGenerationOverrideLastStatus = "low-high-failed";
-            _phase2GGenerationOverrideLastSkippedReason = string.Empty;
+            _phaseRecording.Phase2GGenerationOverrideLastStatus = "low-high-failed";
+            _phaseRecording.Phase2GGenerationOverrideLastSkippedReason = string.Empty;
             RecordTransitionEvent("Phase 2G lowHigh skipped", "failed", ex.Message);
             _log.Warning(ex, "TitleBackground Phase2G CalculateCameraCurveLowAndHighPoint override failed.");
             return false;
@@ -806,10 +806,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void MarkPhase2GGenerationOverrideApplied(int? frame, string status)
     {
-        _phase2GGenerationOverrideLastAppliedFrame = frame;
-        _phase2GGenerationOverrideLastAppliedSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
-        _phase2GGenerationOverrideLastStatus = status;
-        _phase2GGenerationOverrideLastSkippedReason = string.Empty;
+        _phaseRecording.Phase2GGenerationOverrideLastAppliedFrame = frame;
+        _phaseRecording.Phase2GGenerationOverrideLastAppliedSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+        _phaseRecording.Phase2GGenerationOverrideLastStatus = status;
+        _phaseRecording.Phase2GGenerationOverrideLastSkippedReason = string.Empty;
     }
 
     private static void WriteCurvePointY(nint lobbyCameraAddress, int offset, float value)

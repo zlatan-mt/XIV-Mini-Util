@@ -76,7 +76,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private int GetPhase2GApplyCount()
     {
-        return _phase2GGenerationOverrideSetMidAppliedCount + _phase2GGenerationOverrideLowHighAppliedCount;
+        return _phaseRecording.Phase2GGenerationOverrideSetMidAppliedCount + _phaseRecording.Phase2GGenerationOverrideLowHighAppliedCount;
     }
 
     private bool IsQuickCheckCharaSelectObserved()
@@ -104,11 +104,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
             ? GetVerdictSceneReadyAcceptedCount(automaticInvocation)
             : _transitionDiagnostics.SceneReadyAcceptedCount;
         var counters = new TitleBackgroundTransitionCounters(
-            _phase2ECalculateLookAtYCallCount,
-            _phase2FSetCameraCurveMidPointCallCount,
-            _phase2FCalculateCameraCurveLowAndHighPointCallCount,
-            _phase2GGenerationOverrideSetMidAttemptCount,
-            _phase2GGenerationOverrideLowHighAttemptCount,
+            _phaseRecording.Phase2ECalculateLookAtYCallCount,
+            _phaseRecording.Phase2FSetCameraCurveMidPointCallCount,
+            _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCallCount,
+            _phaseRecording.Phase2GGenerationOverrideSetMidAttemptCount,
+            _phaseRecording.Phase2GGenerationOverrideLowHighAttemptCount,
             _cameraRestoreCurve.SceneReadySignalAcceptedCount,
             _cameraRestoreCurve.SceneReadySignalCallCount);
         var delta = _transitionDiagnostics.ComputeDeltaSinceLastDiagnostic(counters);
@@ -189,7 +189,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 _transitionDiagnostics.Phase2GAppliedAfterLeavingCharaSelect,
                 _transitionDiagnostics.LastPhase2GAllowedReason,
                 string.IsNullOrWhiteSpace(_transitionDiagnostics.LastPhase2GSkippedReason)
-                    ? FormatNone(_phase2GGenerationOverrideLastSkippedReason)
+                    ? FormatNone(_phaseRecording.Phase2GGenerationOverrideLastSkippedReason)
                     : _transitionDiagnostics.LastPhase2GSkippedReason),
             new TitleBackgroundTransitionCameraState(
                 currentCaptureStatus,
@@ -270,8 +270,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
             var path = Path.Combine(_configDirectory, "title-background-placementdiag.txt");
             var lines = new List<string>();
             AddCharacterPlacementPreLoginCaptureLines(lines);
-            AddCharacterPlacementSummaryLines(lines, TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(_phase2MPlacementFrames.Values));
-            foreach (var frame in _phase2MPlacementFrames.Values.OrderBy(frame => frame.Frame))
+            AddCharacterPlacementSummaryLines(lines, TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(_phaseRecording.Phase2MPlacementFrames.Values));
+            foreach (var frame in _phaseRecording.Phase2MPlacementFrames.Values.OrderBy(frame => frame.Frame))
             {
                 AddCharacterPlacementPlacementFrameLines(lines, frame);
             }
@@ -357,13 +357,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
             ["runtimeRecordStatus"] = _cameraRestoreCurve.LastCharaSelectCameraRuntimeRecordStatus,
             ["runtimeRecordFailureReason"] = FormatNone(_cameraRestoreCurve.LastCharaSelectCameraRuntimeRecordError),
             ["runtimeRestoreFailureReason"] = FormatNone(_cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreFailureReason),
-            ["phase2G.setMid.attemptCount"] = _phase2GGenerationOverrideSetMidAttemptCount.ToString(),
-            ["phase2G.setMid.appliedCount"] = _phase2GGenerationOverrideSetMidAppliedCount.ToString(),
-            ["phase2G.lowHigh.attemptCount"] = _phase2GGenerationOverrideLowHighAttemptCount.ToString(),
-            ["phase2G.lowHigh.appliedCount"] = _phase2GGenerationOverrideLowHighAppliedCount.ToString(),
-            ["phase2G.lastStatus"] = FormatNone(_phase2GGenerationOverrideLastStatus),
-            ["phase2G.lastSkippedReason"] = FormatNone(_phase2GGenerationOverrideLastSkippedReason),
-            ["phase2G.lastAppliedSceneGeneration"] = _phase2GGenerationOverrideLastAppliedSceneGeneration.ToString(),
+            ["phase2G.setMid.attemptCount"] = _phaseRecording.Phase2GGenerationOverrideSetMidAttemptCount.ToString(),
+            ["phase2G.setMid.appliedCount"] = _phaseRecording.Phase2GGenerationOverrideSetMidAppliedCount.ToString(),
+            ["phase2G.lowHigh.attemptCount"] = _phaseRecording.Phase2GGenerationOverrideLowHighAttemptCount.ToString(),
+            ["phase2G.lowHigh.appliedCount"] = _phaseRecording.Phase2GGenerationOverrideLowHighAppliedCount.ToString(),
+            ["phase2G.lastStatus"] = FormatNone(_phaseRecording.Phase2GGenerationOverrideLastStatus),
+            ["phase2G.lastSkippedReason"] = FormatNone(_phaseRecording.Phase2GGenerationOverrideLastSkippedReason),
+            ["phase2G.lastAppliedSceneGeneration"] = _phaseRecording.Phase2GGenerationOverrideLastAppliedSceneGeneration.ToString(),
         };
     }
 
@@ -460,7 +460,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var phase2GGeneratedCurveOverrideEffective = BuildPhase2GGeneratedCurveOverrideEffectiveVerdict(phase2FCurveSamples);
         var phase2GFinalLookAtYMatchesGeneratedCurve = BuildPhase2GFinalLookAtYMatchesGeneratedCurveVerdict(phase2DLatestSample);
         var phase2GFinalYawPitchDistanceMatchesPreset = BuildPhase2GFinalCameraStateMatchesPresetVerdict(phase2DLatestSample);
-        var phase2MSummary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(_phase2MPlacementFrames.Values);
+        var phase2MSummary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(_phaseRecording.Phase2MPlacementFrames.Values);
         EvaluateCharacterPlacementExperimentalApply(phase2MSummary);
         var phase2MObjectTableStats = GetLatestCharacterPlacementObjectTableStats();
         var phase2MActorCandidateStatus = GetLatestCharacterPlacementActorCandidateStatus();
@@ -539,7 +539,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var deliveryDetailPath = !includeDetailedPhase2Diagnostics
             ? SaveDeliveryDeliveryDiagnosticDump(phase2NDeliverySummary)
             : string.Empty;
-        var placementDetailPath = !includeDetailedPhase2Diagnostics && _phase2MPlacementFrames.Count > 0
+        var placementDetailPath = !includeDetailedPhase2Diagnostics && _phaseRecording.Phase2MPlacementFrames.Count > 0
             ? SaveCharacterPlacementPlacementDiagnosticDump()
             : string.Empty;
         if (!includeDetailedPhase2Diagnostics)
@@ -553,20 +553,20 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 $"setCameraCurveMidPointHookEnabled={IsHookEnabled(_setCameraCurveMidPointHook)}",
                 $"calculateCameraCurveLowAndHighPointHookEnabled={IsHookEnabled(_calculateCameraCurveLowAndHighPointHook)}",
                 $"sceneReadySignal.acceptedCount={_cameraRestoreCurve.SceneReadySignalAcceptedCount}",
-                $"phase2E.calculateLobbyCameraLookAtY.callCount={_phase2ECalculateLookAtYCallCount}",
-                $"phase2E.calculateLobbyCameraLookAtY.lastError={FormatNone(_phase2ECalculateLookAtYLastError)}",
-                $"phase2F.setCameraCurveMidPoint.callCount={_phase2FSetCameraCurveMidPointCallCount}",
-                $"phase2F.setCameraCurveMidPoint.lastError={FormatNone(_phase2FSetCameraCurveMidPointLastError)}",
-                $"phase2F.calculateCameraCurveLowAndHighPoint.callCount={_phase2FCalculateCameraCurveLowAndHighPointCallCount}",
-                $"phase2F.calculateCameraCurveLowAndHighPoint.lastError={FormatNone(_phase2FCalculateCameraCurveLowAndHighPointLastError)}",
+                $"phase2E.calculateLobbyCameraLookAtY.callCount={_phaseRecording.Phase2ECalculateLookAtYCallCount}",
+                $"phase2E.calculateLobbyCameraLookAtY.lastError={FormatNone(_phaseRecording.Phase2ECalculateLookAtYLastError)}",
+                $"phase2F.setCameraCurveMidPoint.callCount={_phaseRecording.Phase2FSetCameraCurveMidPointCallCount}",
+                $"phase2F.setCameraCurveMidPoint.lastError={FormatNone(_phaseRecording.Phase2FSetCameraCurveMidPointLastError)}",
+                $"phase2F.calculateCameraCurveLowAndHighPoint.callCount={_phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCallCount}",
+                $"phase2F.calculateCameraCurveLowAndHighPoint.lastError={FormatNone(_phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointLastError)}",
                 $"phase2G.generationOverride.enabled={IsPhase2GGenerationOverrideConfigured()}",
                 "phase2G.generationOverride.writeTiming=post-original",
-                $"phase2G.generationOverride.setMid.attemptCount={_phase2GGenerationOverrideSetMidAttemptCount}",
-                $"phase2G.generationOverride.setMid.appliedCount={_phase2GGenerationOverrideSetMidAppliedCount}",
-                $"phase2G.generationOverride.lowHigh.attemptCount={_phase2GGenerationOverrideLowHighAttemptCount}",
-                $"phase2G.generationOverride.lowHigh.appliedCount={_phase2GGenerationOverrideLowHighAppliedCount}",
-                $"phase2G.generationOverride.lastStatus={FormatNone(_phase2GGenerationOverrideLastStatus)}",
-                $"phase2G.generationOverride.lastSkippedReason={FormatNone(_phase2GGenerationOverrideLastSkippedReason)}",
+                $"phase2G.generationOverride.setMid.attemptCount={_phaseRecording.Phase2GGenerationOverrideSetMidAttemptCount}",
+                $"phase2G.generationOverride.setMid.appliedCount={_phaseRecording.Phase2GGenerationOverrideSetMidAppliedCount}",
+                $"phase2G.generationOverride.lowHigh.attemptCount={_phaseRecording.Phase2GGenerationOverrideLowHighAttemptCount}",
+                $"phase2G.generationOverride.lowHigh.appliedCount={_phaseRecording.Phase2GGenerationOverrideLowHighAppliedCount}",
+                $"phase2G.generationOverride.lastStatus={FormatNone(_phaseRecording.Phase2GGenerationOverrideLastStatus)}",
+                $"phase2G.generationOverride.lastSkippedReason={FormatNone(_phaseRecording.Phase2GGenerationOverrideLastSkippedReason)}",
                 $"verdict.phase2G.generatedCurveOverrideEffective={phase2GGeneratedCurveOverrideEffective}",
                 $"verdict.phase2G.finalLookAtYMatchesGeneratedCurve={phase2GFinalLookAtYMatchesGeneratedCurve}",
                 $"verdict.phase2G.finalYawPitchDistanceMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
@@ -616,9 +616,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 $"phase2M.nextAction={phase2MSummary.NextAction}",
                 $"phase2M.nextAction.reason={phase2MSummary.NextActionReason}",
                 $"phase2M.experimental.applyMode={_configuration.TitleBackgroundCharacterPlacementExperimentalApplyMode}",
-                $"phase2M.experimental.lastStatus={FormatNone(_phase2MExperimentalLastStatus)}",
-                $"phase2M.experimental.writeCount={_phase2MExperimentalWriteCount}",
-                $"phase2M.experimental.skippedCount={_phase2MExperimentalSkippedCount}",
+                $"phase2M.experimental.lastStatus={FormatNone(_phaseRecording.Phase2MExperimentalLastStatus)}",
+                $"phase2M.experimental.writeCount={_phaseRecording.Phase2MExperimentalWriteCount}",
+                $"phase2M.experimental.skippedCount={_phaseRecording.Phase2MExperimentalSkippedCount}",
                 $"verdict.phase2M.visualPlacementSafety={phase2MSummary.VisualPlacementSafety}",
                 ..TitleBackgroundDeliveryDiagnostic.BuildLineList(phase2NDeliverySummary),
                 $"transition.detailDump={FormatNone(string.IsNullOrWhiteSpace(transitionDetailPath) ? string.Empty : Path.GetFileName(transitionDetailPath))}",
@@ -764,9 +764,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
             $"verdict.phase2E.nativeReturnMatchesActiveLookAtY={phase2EVerdicts.NativeReturnMatchesActiveLookAtY}",
             $"verdict.phase2E.nativeReturnMatchesFinalStableLookAtY={phase2EVerdicts.NativeReturnMatchesFinalStableLookAtY}",
             $"verdict.phase2E.comparedCallCount={phase2EVerdicts.ComparedCallCount}",
-            $"phase2E.calculateLobbyCameraLookAtY.callCount={_phase2ECalculateLookAtYCallCount}",
-            $"phase2E.calculateLobbyCameraLookAtY.recordedCallCount={_phase2ECalculateLookAtYCalls.Count}",
-            $"phase2E.calculateLobbyCameraLookAtY.lastError={FormatNone(_phase2ECalculateLookAtYLastError)}",
+            $"phase2E.calculateLobbyCameraLookAtY.callCount={_phaseRecording.Phase2ECalculateLookAtYCallCount}",
+            $"phase2E.calculateLobbyCameraLookAtY.recordedCallCount={_phaseRecording.Phase2ECalculateLookAtYCalls.Count}",
+            $"phase2E.calculateLobbyCameraLookAtY.lastError={FormatNone(_phaseRecording.Phase2ECalculateLookAtYLastError)}",
             $"phase2E.calculateLobbyCameraLookAtY.finalStableLookAtY={FormatFloat(phase2EFinalStableLookAtY)}",
             $"phase2F.curveTimeline.firstCapturedFrame={FormatFrame(phase2FVerdicts.FirstCapturedFrame)}",
             $"phase2F.curveTimeline.lastChangedFrame={FormatFrame(phase2FVerdicts.LastChangedFrame)}",
@@ -785,27 +785,27 @@ public sealed unsafe partial class TitleScreenBackgroundService
             $"phase2F.generatedCurveTransitions.lastFrame={FormatFrame(phase2FGeneratedCurveTransitions.LastFrame)}",
             $"phase2F.generatedCurveTransitions.setCameraCurveMidPointCount={phase2FGeneratedCurveTransitions.SetCameraCurveMidPointCount}",
             $"phase2F.generatedCurveTransitions.calculateCameraCurveLowAndHighPointCount={phase2FGeneratedCurveTransitions.CalculateCameraCurveLowAndHighPointCount}",
-            $"phase2F.setCameraCurveMidPoint.callCount={_phase2FSetCameraCurveMidPointCallCount}",
-            $"phase2F.setCameraCurveMidPoint.recordedCallCount={_phase2FSetCameraCurveMidPointCalls.Count}",
-            $"phase2F.setCameraCurveMidPoint.recentCallCount={_phase2FSetCameraCurveMidPointCalls.Count}",
-            $"phase2F.setCameraCurveMidPoint.interestingCallCount={_phase2FSetCameraCurveMidPointInterestingCalls.Count}",
-            $"phase2F.setCameraCurveMidPoint.lastError={FormatNone(_phase2FSetCameraCurveMidPointLastError)}",
-            $"phase2F.calculateCameraCurveLowAndHighPoint.callCount={_phase2FCalculateCameraCurveLowAndHighPointCallCount}",
-            $"phase2F.calculateCameraCurveLowAndHighPoint.recordedCallCount={_phase2FCalculateCameraCurveLowAndHighPointCalls.Count}",
-            $"phase2F.calculateCameraCurveLowAndHighPoint.recentCallCount={_phase2FCalculateCameraCurveLowAndHighPointCalls.Count}",
-            $"phase2F.calculateCameraCurveLowAndHighPoint.interestingCallCount={_phase2FCalculateCameraCurveLowAndHighPointInterestingCalls.Count}",
-            $"phase2F.calculateCameraCurveLowAndHighPoint.lastError={FormatNone(_phase2FCalculateCameraCurveLowAndHighPointLastError)}",
+            $"phase2F.setCameraCurveMidPoint.callCount={_phaseRecording.Phase2FSetCameraCurveMidPointCallCount}",
+            $"phase2F.setCameraCurveMidPoint.recordedCallCount={_phaseRecording.Phase2FSetCameraCurveMidPointCalls.Count}",
+            $"phase2F.setCameraCurveMidPoint.recentCallCount={_phaseRecording.Phase2FSetCameraCurveMidPointCalls.Count}",
+            $"phase2F.setCameraCurveMidPoint.interestingCallCount={_phaseRecording.Phase2FSetCameraCurveMidPointInterestingCalls.Count}",
+            $"phase2F.setCameraCurveMidPoint.lastError={FormatNone(_phaseRecording.Phase2FSetCameraCurveMidPointLastError)}",
+            $"phase2F.calculateCameraCurveLowAndHighPoint.callCount={_phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCallCount}",
+            $"phase2F.calculateCameraCurveLowAndHighPoint.recordedCallCount={_phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCalls.Count}",
+            $"phase2F.calculateCameraCurveLowAndHighPoint.recentCallCount={_phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCalls.Count}",
+            $"phase2F.calculateCameraCurveLowAndHighPoint.interestingCallCount={_phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointInterestingCalls.Count}",
+            $"phase2F.calculateCameraCurveLowAndHighPoint.lastError={FormatNone(_phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointLastError)}",
             $"phase2G.generationOverride.enabled={IsPhase2GGenerationOverrideConfigured()}",
             "phase2G.generationOverride.writeTiming=post-original",
             "phase2G.generationOverride.writeScope=generated-curve-points-only",
-            $"phase2G.generationOverride.setMid.attemptCount={_phase2GGenerationOverrideSetMidAttemptCount}",
-            $"phase2G.generationOverride.setMid.appliedCount={_phase2GGenerationOverrideSetMidAppliedCount}",
-            $"phase2G.generationOverride.lowHigh.attemptCount={_phase2GGenerationOverrideLowHighAttemptCount}",
-            $"phase2G.generationOverride.lowHigh.appliedCount={_phase2GGenerationOverrideLowHighAppliedCount}",
-            $"phase2G.generationOverride.lastAppliedFrame={FormatFrame(_phase2GGenerationOverrideLastAppliedFrame)}",
-            $"phase2G.generationOverride.lastAppliedSceneGeneration={_phase2GGenerationOverrideLastAppliedSceneGeneration}",
-            $"phase2G.generationOverride.lastStatus={FormatNone(_phase2GGenerationOverrideLastStatus)}",
-            $"phase2G.generationOverride.lastSkippedReason={FormatNone(_phase2GGenerationOverrideLastSkippedReason)}",
+            $"phase2G.generationOverride.setMid.attemptCount={_phaseRecording.Phase2GGenerationOverrideSetMidAttemptCount}",
+            $"phase2G.generationOverride.setMid.appliedCount={_phaseRecording.Phase2GGenerationOverrideSetMidAppliedCount}",
+            $"phase2G.generationOverride.lowHigh.attemptCount={_phaseRecording.Phase2GGenerationOverrideLowHighAttemptCount}",
+            $"phase2G.generationOverride.lowHigh.appliedCount={_phaseRecording.Phase2GGenerationOverrideLowHighAppliedCount}",
+            $"phase2G.generationOverride.lastAppliedFrame={FormatFrame(_phaseRecording.Phase2GGenerationOverrideLastAppliedFrame)}",
+            $"phase2G.generationOverride.lastAppliedSceneGeneration={_phaseRecording.Phase2GGenerationOverrideLastAppliedSceneGeneration}",
+            $"phase2G.generationOverride.lastStatus={FormatNone(_phaseRecording.Phase2GGenerationOverrideLastStatus)}",
+            $"phase2G.generationOverride.lastSkippedReason={FormatNone(_phaseRecording.Phase2GGenerationOverrideLastSkippedReason)}",
             $"verdict.phase2G.generatedCurveOverrideEffective={phase2GGeneratedCurveOverrideEffective}",
             $"verdict.phase2G.finalLookAtYMatchesGeneratedCurve={phase2GFinalLookAtYMatchesGeneratedCurve}",
             $"verdict.phase2G.finalYawPitchDistanceMatchesPreset={phase2GFinalYawPitchDistanceMatchesPreset}",
@@ -959,12 +959,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
             lines.Add($"phase2F.timeline[{sample.Frame}].activeCamera.SceneCamera.LookAtVector.Y={FormatFloat(sample.SceneCameraLookAtVector?.Y)}");
         }
 
-        foreach (var frame in _phase2MPlacementFrames.Values.OrderBy(frame => frame.Frame))
+        foreach (var frame in _phaseRecording.Phase2MPlacementFrames.Values.OrderBy(frame => frame.Frame))
         {
             AddCharacterPlacementPlacementFrameLines(lines, frame);
         }
 
-        foreach (var call in _phase2ECalculateLookAtYCalls)
+        foreach (var call in _phaseRecording.Phase2ECalculateLookAtYCalls)
         {
             lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].frame={FormatFrame(call.Frame)}");
             lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].distance={FormatFloat(call.Distance)}");
@@ -979,22 +979,22 @@ public sealed unsafe partial class TitleScreenBackgroundService
             lines.Add($"phase2E.calculateLobbyCameraLookAtY.call[{call.CallIndex}].error={FormatNone(call.Error)}");
         }
 
-        foreach (var call in _phase2FSetCameraCurveMidPointCalls)
+        foreach (var call in _phaseRecording.Phase2FSetCameraCurveMidPointCalls)
         {
             AddGeneratedCurveCallLines(lines, "phase2F.setCameraCurveMidPoint", call);
         }
 
-        foreach (var call in _phase2FSetCameraCurveMidPointInterestingCalls)
+        foreach (var call in _phaseRecording.Phase2FSetCameraCurveMidPointInterestingCalls)
         {
             AddGeneratedCurveCallLines(lines, "phase2F.setCameraCurveMidPoint", "interestingCall", call);
         }
 
-        foreach (var call in _phase2FCalculateCameraCurveLowAndHighPointCalls)
+        foreach (var call in _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCalls)
         {
             AddGeneratedCurveCallLines(lines, "phase2F.calculateCameraCurveLowAndHighPoint", call);
         }
 
-        foreach (var call in _phase2FCalculateCameraCurveLowAndHighPointInterestingCalls)
+        foreach (var call in _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointInterestingCalls)
         {
             AddGeneratedCurveCallLines(lines, "phase2F.calculateCameraCurveLowAndHighPoint", "interestingCall", call);
         }

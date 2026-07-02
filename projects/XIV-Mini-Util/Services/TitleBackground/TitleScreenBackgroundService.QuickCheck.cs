@@ -689,7 +689,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var currentLobbyMapRemainedAfterLogin = _clientState.IsLoggedIn
             && currentLobbyMapAvailable
             && currentLobbyMap != GameLobbyType.None;
-        var phase2MSummary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(_phase2MPlacementFrames.Values);
+        var phase2MSummary = TitleBackgroundCharacterPlacementDiagnostic.BuildSummary(_phaseRecording.Phase2MPlacementFrames.Values);
         var characterKnownLimitation = !candidate.CharacterExpectedVisible
             || string.Equals(phase2MSummary.ActorVisible, "not-observed", StringComparison.OrdinalIgnoreCase);
         var actorSourceAmbiguous = string.Equals(GetLatestCharacterPlacementActorCandidateStatus(), "ambiguous", StringComparison.OrdinalIgnoreCase)

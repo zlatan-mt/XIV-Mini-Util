@@ -44,6 +44,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundProbeTimelineRuntimeState _probeTimeline = new();
     // カメラcapture結果・CharaSelectカメラruntime記録/復元・sceneReady信号・runtime復元・curve適用のセッション限定診断状態（プラグイン再起動で消える）。
     private readonly TitleBackgroundCameraRestoreCurveRuntimeState _cameraRestoreCurve = new();
+    // phase2M placement / phase2E lookAtY / phase2F generated curve / phase2G generation overrideのセッション限定記録状態（プラグイン再起動で消える）。
+    private readonly TitleBackgroundPhaseRecordingRuntimeState _phaseRecording = new();
 
     private Hook<CreateSceneDelegate>? _createSceneHook;
     private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
@@ -78,37 +80,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private string _lastHistoricalOverridePath = string.Empty;
     private string _sceneOverrideCleanupReason = "none";
     private bool _loggedInWorldTransitionRecorded;
-    private readonly Dictionary<int, TitleBackgroundCharacterPlacementFrame> _phase2MPlacementFrames = [];
-    private int _phase2MPlacementCaptureSceneGeneration;
-    private string _phase2MPlacementCaptureReason = "not-run";
-    private int _phase2MPlacementSkippedPostLoginCount;
-    private int _phase2MPlacementSkippedInactiveCount;
-    private int _phase2MPlacementSkippedSceneGenerationCount;
-    private string _phase2MPlacementLastSkipReason = "none";
-    private string _phase2MExperimentalLastStatus = "not-run";
-    private int _phase2MExperimentalWriteCount;
-    private int _phase2MExperimentalSkippedCount;
-    private readonly List<TitleBackgroundPhase2ECalculateLookAtYCall> _phase2ECalculateLookAtYCalls = [];
-    private readonly List<TitleBackgroundPhase2FGeneratedCurveCall> _phase2FSetCameraCurveMidPointCalls = [];
-    private readonly List<TitleBackgroundPhase2FGeneratedCurveCall> _phase2FCalculateCameraCurveLowAndHighPointCalls = [];
-    private readonly List<TitleBackgroundPhase2FGeneratedCurveCall> _phase2FSetCameraCurveMidPointInterestingCalls = [];
-    private readonly List<TitleBackgroundPhase2FGeneratedCurveCall> _phase2FCalculateCameraCurveLowAndHighPointInterestingCalls = [];
-    private int _phase2ECalculateLookAtYCallCount;
-    private int _phase2FSetCameraCurveMidPointCallCount;
-    private int _phase2FCalculateCameraCurveLowAndHighPointCallCount;
-    private float? _phase2FSetCameraCurveMidPointPreviousInputValue;
-    private float? _phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue;
-    private string _phase2ECalculateLookAtYLastError = string.Empty;
-    private string _phase2FSetCameraCurveMidPointLastError = string.Empty;
-    private string _phase2FCalculateCameraCurveLowAndHighPointLastError = string.Empty;
-    private int _phase2GGenerationOverrideSetMidAttemptCount;
-    private int _phase2GGenerationOverrideSetMidAppliedCount;
-    private int _phase2GGenerationOverrideLowHighAttemptCount;
-    private int _phase2GGenerationOverrideLowHighAppliedCount;
-    private int? _phase2GGenerationOverrideLastAppliedFrame;
-    private int _phase2GGenerationOverrideLastAppliedSceneGeneration;
-    private string _phase2GGenerationOverrideLastStatus = "not-run";
-    private string _phase2GGenerationOverrideLastSkippedReason = string.Empty;
     private int _quickCheckOverrideAppliedCount;
     private bool _integratedCompositionRouteInvoked;
     private string _integratedCompositionRouteLastReason = string.Empty;
@@ -1316,7 +1287,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _probeTimeline.Phase2CTimelineStatus = "not-run";
         _probeTimeline.Phase2CTimelineError = string.Empty;
         _probeTimeline.Phase2CTimelineSnapshots.Clear();
-        _phase2MPlacementFrames.Clear();
+        _phaseRecording.Phase2MPlacementFrames.Clear();
         ResetPhase2ECalculateLookAtYObservation();
         ClearPostFixOnCameraObservation();
         _cameraObservation.LastPostFixOnCameraCaptureStatus = "not-run";
@@ -1764,17 +1735,17 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     private void AddCharacterPlacementPreLoginCaptureLines(List<string> lines)
     {
-        var frames = _phase2MPlacementFrames.Keys.OrderBy(frame => frame).ToArray();
+        var frames = _phaseRecording.Phase2MPlacementFrames.Keys.OrderBy(frame => frame).ToArray();
         lines.Add($"phase2M.preLoginCapture.available={frames.Length > 0}");
-        lines.Add($"phase2M.preLoginCapture.sceneGeneration={_phase2MPlacementCaptureSceneGeneration}");
+        lines.Add($"phase2M.preLoginCapture.sceneGeneration={_phaseRecording.Phase2MPlacementCaptureSceneGeneration}");
         lines.Add($"phase2M.preLoginCapture.firstFrame={(frames.Length > 0 ? frames[0].ToString() : "none")}");
         lines.Add($"phase2M.preLoginCapture.lastFrame={(frames.Length > 0 ? frames[^1].ToString() : "none")}");
         lines.Add($"phase2M.preLoginCapture.frameCount={frames.Length}");
-        lines.Add($"phase2M.preLoginCapture.reason={FormatNone(_phase2MPlacementCaptureReason)}");
-        lines.Add($"phase2M.preLoginCapture.skippedPostLoginCount={_phase2MPlacementSkippedPostLoginCount}");
-        lines.Add($"phase2M.preLoginCapture.skippedInactiveCount={_phase2MPlacementSkippedInactiveCount}");
-        lines.Add($"phase2M.preLoginCapture.skippedSceneGenerationCount={_phase2MPlacementSkippedSceneGenerationCount}");
-        lines.Add($"phase2M.preLoginCapture.lastSkipReason={FormatNone(_phase2MPlacementLastSkipReason)}");
+        lines.Add($"phase2M.preLoginCapture.reason={FormatNone(_phaseRecording.Phase2MPlacementCaptureReason)}");
+        lines.Add($"phase2M.preLoginCapture.skippedPostLoginCount={_phaseRecording.Phase2MPlacementSkippedPostLoginCount}");
+        lines.Add($"phase2M.preLoginCapture.skippedInactiveCount={_phaseRecording.Phase2MPlacementSkippedInactiveCount}");
+        lines.Add($"phase2M.preLoginCapture.skippedSceneGenerationCount={_phaseRecording.Phase2MPlacementSkippedSceneGenerationCount}");
+        lines.Add($"phase2M.preLoginCapture.lastSkipReason={FormatNone(_phaseRecording.Phase2MPlacementLastSkipReason)}");
         lines.Add($"characterDraw.preLoginObservedCount={_characterPlacement.PreLoginCharacterDrawObservedCount}");
         lines.Add($"characterDraw.preLoginDrawPosition={(_characterPlacement.LastPreLoginCharacterDrawPosition.HasValue ? FormatVector(_characterPlacement.LastPreLoginCharacterDrawPosition.Value) : "none")}");
         lines.Add($"characterDraw.preLoginDrawPositionNonZero={(_characterPlacement.LastPreLoginCharacterDrawPosition.HasValue && !TitleBackgroundCharacterSourceEvaluation.IsZeroPosition(_characterPlacement.LastPreLoginCharacterDrawPosition.Value))}");
@@ -1938,7 +1909,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     private void AddCharacterPlacementTopCandidateLines(List<string> lines)
     {
-        var topCandidates = _phase2MPlacementFrames.Values
+        var topCandidates = _phaseRecording.Phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
             .SelectMany(frame => frame.ObjectCandidates)
             .GroupBy(BuildCharacterPlacementCandidateKey)

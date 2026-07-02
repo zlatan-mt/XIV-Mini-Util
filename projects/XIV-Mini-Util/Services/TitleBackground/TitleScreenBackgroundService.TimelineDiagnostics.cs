@@ -16,14 +16,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _probeTimeline.Phase2CTimelineStatus = "collecting";
         _probeTimeline.Phase2CTimelineError = string.Empty;
         _probeTimeline.Phase2CTimelineSnapshots.Clear();
-        _phase2MPlacementFrames.Clear();
-        _phase2MPlacementCaptureSceneGeneration = 0;
-        _phase2MPlacementCaptureReason = "reset";
-        _phase2MPlacementSkippedPostLoginCount = 0;
-        _phase2MPlacementSkippedInactiveCount = 0;
-        _phase2MPlacementSkippedSceneGenerationCount = 0;
-        _phase2MPlacementLastSkipReason = "none";
-        _phase2MExperimentalWriteCount = 0;
+        _phaseRecording.Phase2MPlacementFrames.Clear();
+        _phaseRecording.Phase2MPlacementCaptureSceneGeneration = 0;
+        _phaseRecording.Phase2MPlacementCaptureReason = "reset";
+        _phaseRecording.Phase2MPlacementSkippedPostLoginCount = 0;
+        _phaseRecording.Phase2MPlacementSkippedInactiveCount = 0;
+        _phaseRecording.Phase2MPlacementSkippedSceneGenerationCount = 0;
+        _phaseRecording.Phase2MPlacementLastSkipReason = "none";
+        _phaseRecording.Phase2MExperimentalWriteCount = 0;
         _cameraRestoreCurve.RuntimeRestoreAppliedFrame = null;
         _cameraRestoreCurve.CurveApplyAppliedFrame = null;
         _cameraRestoreCurve.CurveApplyRequestedMid = null;
@@ -102,7 +102,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
     private void CaptureCharacterPlacementPlacementFrame(int frame, string reason)
     {
         if (!TitleBackgroundCharacterPlacementDiagnostic.ShouldCaptureFrame(frame)
-            || _phase2MPlacementFrames.ContainsKey(frame))
+            || _phaseRecording.Phase2MPlacementFrames.ContainsKey(frame))
         {
             return;
         }
@@ -117,17 +117,17 @@ public sealed unsafe partial class TitleScreenBackgroundService
             switch (captureGate.Status)
             {
                 case "skipped-post-login":
-                    _phase2MPlacementSkippedPostLoginCount++;
+                    _phaseRecording.Phase2MPlacementSkippedPostLoginCount++;
                     break;
                 case "skipped-inactive-chara-select":
-                    _phase2MPlacementSkippedInactiveCount++;
+                    _phaseRecording.Phase2MPlacementSkippedInactiveCount++;
                     break;
                 case "skipped-scene-generation-mismatch":
-                    _phase2MPlacementSkippedSceneGenerationCount++;
+                    _phaseRecording.Phase2MPlacementSkippedSceneGenerationCount++;
                     break;
             }
 
-            _phase2MPlacementLastSkipReason = captureGate.Status;
+            _phaseRecording.Phase2MPlacementLastSkipReason = captureGate.Status;
             return;
         }
 
@@ -161,10 +161,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
             nativeCharacterSource);
         var actor = actorResult.Actor;
         var actorPosition = actor?.Position;
-        _phase2MPlacementCaptureSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
-        _phase2MPlacementCaptureReason = reason;
+        _phaseRecording.Phase2MPlacementCaptureSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+        _phaseRecording.Phase2MPlacementCaptureReason = reason;
 
-        _phase2MPlacementFrames[frame] = new TitleBackgroundCharacterPlacementFrame(
+        _phaseRecording.Phase2MPlacementFrames[frame] = new TitleBackgroundCharacterPlacementFrame(
             frame,
             reason,
             activeCaptured,
@@ -448,7 +448,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
     private bool IsStableCharacterPlacementCandidate(TitleBackgroundCharacterPlacementActorCandidate candidate)
     {
         var key = BuildCharacterPlacementCandidateKey(candidate);
-        var matched = _phase2MPlacementFrames.Values
+        var matched = _phaseRecording.Phase2MPlacementFrames.Values
             .SelectMany(frame => frame.ObjectCandidates)
             .Where(existing => BuildCharacterPlacementCandidateKey(existing) == key)
             .ToArray();
@@ -571,7 +571,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private TitleBackgroundCharacterPlacementObjectTableStats GetLatestCharacterPlacementObjectTableStats()
     {
-        return _phase2MPlacementFrames.Values
+        return _phaseRecording.Phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
             .Select(frame => frame.ObjectTableStats)
             .FirstOrDefault();
@@ -579,7 +579,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private string GetLatestCharacterPlacementActorCandidateStatus()
     {
-        return _phase2MPlacementFrames.Values
+        return _phaseRecording.Phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
             .Select(frame => frame.ActorCandidateStatus)
             .FirstOrDefault() ?? "none";
@@ -587,7 +587,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private string GetLatestCharacterPlacementActorCandidateReason()
     {
-        return _phase2MPlacementFrames.Values
+        return _phaseRecording.Phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
             .Select(frame => frame.ActorCandidateReason)
             .FirstOrDefault() ?? "none";
@@ -595,7 +595,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private string GetLatestCharacterPlacementActorSource()
     {
-        return _phase2MPlacementFrames.Values
+        return _phaseRecording.Phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
             .Select(frame => frame.ActorSource)
             .FirstOrDefault() ?? "none";
@@ -603,7 +603,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private string GetLatestCharacterPlacementNextNativeSourceToInspect()
     {
-        return _phase2MPlacementFrames.Values
+        return _phaseRecording.Phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
             .Select(frame => frame.NextNativeSourceToInspect)
             .FirstOrDefault() ?? "none";
@@ -611,7 +611,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private IReadOnlyList<TitleBackgroundCharacterPlacementSourceDiscovery> GetLatestCharacterPlacementSourceDiscovery()
     {
-        return _phase2MPlacementFrames.Values
+        return _phaseRecording.Phase2MPlacementFrames.Values
             .OrderByDescending(frame => frame.Frame)
             .Select(frame => frame.SourceDiscovery)
             .FirstOrDefault() ?? [];
@@ -865,25 +865,25 @@ public sealed unsafe partial class TitleScreenBackgroundService
             mode,
             summary,
             _activeCharaSelectSceneGeneration > 0
-                && _phase2MPlacementCaptureSceneGeneration == _activeCharaSelectSceneGeneration,
+                && _phaseRecording.Phase2MPlacementCaptureSceneGeneration == _activeCharaSelectSceneGeneration,
             _charaSelectTitleBackgroundSessionActive,
             _clientState.IsLoggedIn);
 
         if (mode == TitleBackgroundCharacterPlacementExperimentalApplyMode.None)
         {
-            _phase2MExperimentalLastStatus = status;
+            _phaseRecording.Phase2MExperimentalLastStatus = status;
             return;
         }
 
         if (status != "ready")
         {
-            _phase2MExperimentalSkippedCount++;
-            _phase2MExperimentalLastStatus = status;
+            _phaseRecording.Phase2MExperimentalSkippedCount++;
+            _phaseRecording.Phase2MExperimentalLastStatus = status;
             return;
         }
 
-        _phase2MExperimentalSkippedCount++;
-        _phase2MExperimentalLastStatus = mode switch
+        _phaseRecording.Phase2MExperimentalSkippedCount++;
+        _phaseRecording.Phase2MExperimentalLastStatus = mode switch
         {
             TitleBackgroundCharacterPlacementExperimentalApplyMode.CameraAnchorOnly => "skip:unsupported-camera-anchor-write-not-exposed",
             TitleBackgroundCharacterPlacementExperimentalApplyMode.GeneratedCurvePlusCameraAnchor => "skip:unsupported-camera-anchor-write-not-exposed",
@@ -909,7 +909,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private IReadOnlyList<TitleBackgroundPhase2EProbeSample> BuildPhase2EProbeSamples()
     {
-        return _phase2ECalculateLookAtYCalls
+        return _phaseRecording.Phase2ECalculateLookAtYCalls
             .Select(call => new TitleBackgroundPhase2EProbeSample(
                 call.CallIndex,
                 call.Frame,
@@ -937,36 +937,36 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void RecordPhase2ECalculateLookAtYCall(TitleBackgroundPhase2ECalculateLookAtYCall call)
     {
-        _phase2ECalculateLookAtYCalls.Add(call);
-        while (_phase2ECalculateLookAtYCalls.Count > Phase2EMaxRecordedCalls)
+        _phaseRecording.Phase2ECalculateLookAtYCalls.Add(call);
+        while (_phaseRecording.Phase2ECalculateLookAtYCalls.Count > Phase2EMaxRecordedCalls)
         {
-            _phase2ECalculateLookAtYCalls.RemoveAt(0);
+            _phaseRecording.Phase2ECalculateLookAtYCalls.RemoveAt(0);
         }
     }
 
     private void ResetPhase2ECalculateLookAtYObservation()
     {
-        _phase2ECalculateLookAtYCallCount = 0;
-        _phase2ECalculateLookAtYLastError = string.Empty;
-        _phase2ECalculateLookAtYCalls.Clear();
-        _phase2FSetCameraCurveMidPointCallCount = 0;
-        _phase2FCalculateCameraCurveLowAndHighPointCallCount = 0;
-        _phase2FSetCameraCurveMidPointLastError = string.Empty;
-        _phase2FCalculateCameraCurveLowAndHighPointLastError = string.Empty;
-        _phase2FSetCameraCurveMidPointCalls.Clear();
-        _phase2FCalculateCameraCurveLowAndHighPointCalls.Clear();
-        _phase2FSetCameraCurveMidPointInterestingCalls.Clear();
-        _phase2FCalculateCameraCurveLowAndHighPointInterestingCalls.Clear();
-        _phase2FSetCameraCurveMidPointPreviousInputValue = null;
-        _phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue = null;
-        _phase2GGenerationOverrideSetMidAttemptCount = 0;
-        _phase2GGenerationOverrideSetMidAppliedCount = 0;
-        _phase2GGenerationOverrideLowHighAttemptCount = 0;
-        _phase2GGenerationOverrideLowHighAppliedCount = 0;
-        _phase2GGenerationOverrideLastAppliedFrame = null;
-        _phase2GGenerationOverrideLastAppliedSceneGeneration = 0;
-        _phase2GGenerationOverrideLastStatus = "not-run";
-        _phase2GGenerationOverrideLastSkippedReason = string.Empty;
+        _phaseRecording.Phase2ECalculateLookAtYCallCount = 0;
+        _phaseRecording.Phase2ECalculateLookAtYLastError = string.Empty;
+        _phaseRecording.Phase2ECalculateLookAtYCalls.Clear();
+        _phaseRecording.Phase2FSetCameraCurveMidPointCallCount = 0;
+        _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCallCount = 0;
+        _phaseRecording.Phase2FSetCameraCurveMidPointLastError = string.Empty;
+        _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointLastError = string.Empty;
+        _phaseRecording.Phase2FSetCameraCurveMidPointCalls.Clear();
+        _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCalls.Clear();
+        _phaseRecording.Phase2FSetCameraCurveMidPointInterestingCalls.Clear();
+        _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointInterestingCalls.Clear();
+        _phaseRecording.Phase2FSetCameraCurveMidPointPreviousInputValue = null;
+        _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue = null;
+        _phaseRecording.Phase2GGenerationOverrideSetMidAttemptCount = 0;
+        _phaseRecording.Phase2GGenerationOverrideSetMidAppliedCount = 0;
+        _phaseRecording.Phase2GGenerationOverrideLowHighAttemptCount = 0;
+        _phaseRecording.Phase2GGenerationOverrideLowHighAppliedCount = 0;
+        _phaseRecording.Phase2GGenerationOverrideLastAppliedFrame = null;
+        _phaseRecording.Phase2GGenerationOverrideLastAppliedSceneGeneration = 0;
+        _phaseRecording.Phase2GGenerationOverrideLastStatus = "not-run";
+        _phaseRecording.Phase2GGenerationOverrideLastSkippedReason = string.Empty;
     }
 
     private TitleBackgroundPhase2FGeneratedCurveCall BuildPhase2FGeneratedCurveCall(
@@ -1003,21 +1003,21 @@ public sealed unsafe partial class TitleScreenBackgroundService
     private void RecordPhase2FSetCameraCurveMidPointCall(TitleBackgroundPhase2FGeneratedCurveCall call)
     {
         RecordPhase2FGeneratedCurveCall(
-            _phase2FSetCameraCurveMidPointCalls,
-            _phase2FSetCameraCurveMidPointInterestingCalls,
+            _phaseRecording.Phase2FSetCameraCurveMidPointCalls,
+            _phaseRecording.Phase2FSetCameraCurveMidPointInterestingCalls,
             call,
-            _phase2FSetCameraCurveMidPointPreviousInputValue);
-        _phase2FSetCameraCurveMidPointPreviousInputValue = call.InputValue;
+            _phaseRecording.Phase2FSetCameraCurveMidPointPreviousInputValue);
+        _phaseRecording.Phase2FSetCameraCurveMidPointPreviousInputValue = call.InputValue;
     }
 
     private void RecordPhase2FCalculateCameraCurveLowAndHighPointCall(TitleBackgroundPhase2FGeneratedCurveCall call)
     {
         RecordPhase2FGeneratedCurveCall(
-            _phase2FCalculateCameraCurveLowAndHighPointCalls,
-            _phase2FCalculateCameraCurveLowAndHighPointInterestingCalls,
+            _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCalls,
+            _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointInterestingCalls,
             call,
-            _phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue);
-        _phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue = call.InputValue;
+            _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue);
+        _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointPreviousInputValue = call.InputValue;
     }
 
     private static void RecordPhase2FGeneratedCurveCall(
@@ -1131,10 +1131,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private TitleBackgroundPhase2FGeneratedCurveTransitionSummary BuildPhase2FGeneratedCurveTransitionSummary()
     {
-        var setCameraCurveMidPointCount = _phase2FSetCameraCurveMidPointInterestingCalls.Count(HasGeneratedCurvePointChanged);
-        var calculateCameraCurveLowAndHighPointCount = _phase2FCalculateCameraCurveLowAndHighPointInterestingCalls.Count(HasGeneratedCurvePointChanged);
-        var transitionFrames = _phase2FSetCameraCurveMidPointInterestingCalls
-            .Concat(_phase2FCalculateCameraCurveLowAndHighPointInterestingCalls)
+        var setCameraCurveMidPointCount = _phaseRecording.Phase2FSetCameraCurveMidPointInterestingCalls.Count(HasGeneratedCurvePointChanged);
+        var calculateCameraCurveLowAndHighPointCount = _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointInterestingCalls.Count(HasGeneratedCurvePointChanged);
+        var transitionFrames = _phaseRecording.Phase2FSetCameraCurveMidPointInterestingCalls
+            .Concat(_phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointInterestingCalls)
             .Where(HasGeneratedCurvePointChanged)
             .Select(call => call.Frame)
             .Where(frame => frame.HasValue)
@@ -1160,8 +1160,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
         IReadOnlyList<TitleBackgroundPhase2FCurveTimelineSample> samples,
         TitleBackgroundCharaSelectCameraCurve? expectedCurve)
     {
-        if (_phase2GGenerationOverrideSetMidAppliedCount == 0
-            && _phase2GGenerationOverrideLowHighAppliedCount == 0)
+        if (_phaseRecording.Phase2GGenerationOverrideSetMidAppliedCount == 0
+            && _phaseRecording.Phase2GGenerationOverrideLowHighAppliedCount == 0)
         {
             return "inconclusive";
         }
@@ -1188,8 +1188,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private string BuildPhase2GFinalLookAtYMatchesGeneratedCurveVerdict(TitleBackgroundPhase2CTimelineSnapshot latestSample)
     {
-        if (_phase2GGenerationOverrideSetMidAppliedCount == 0
-            && _phase2GGenerationOverrideLowHighAppliedCount == 0)
+        if (_phaseRecording.Phase2GGenerationOverrideSetMidAppliedCount == 0
+            && _phaseRecording.Phase2GGenerationOverrideLowHighAppliedCount == 0)
         {
             return "inconclusive";
         }
@@ -1234,7 +1234,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private float? GetLatestCalculateLobbyCameraLookAtYReturnValue()
     {
-        return _phase2ECalculateLookAtYCalls
+        return _phaseRecording.Phase2ECalculateLookAtYCalls
             .Where(call => call.ReturnValue.HasValue)
             .OrderByDescending(call => call.Frame ?? -1)
             .ThenByDescending(call => call.CallIndex)
