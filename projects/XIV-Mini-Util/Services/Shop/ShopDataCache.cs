@@ -10,7 +10,7 @@ using XivMiniUtil;
 
 namespace XivMiniUtil.Services.Shop;
 
-public sealed class ShopDataCache
+public sealed class ShopDataCache : IDisposable
 {
     private readonly IDataManager _dataManager;
     private readonly IPluginLog _pluginLog;
@@ -25,7 +25,7 @@ public sealed class ShopDataCache
     private readonly NpcShopInfoRegistry _npcShopInfoRegistry;
     private readonly ItemNameResolver _itemNameResolver;
     private readonly NpcShopMappingBuilder _npcShopMappingBuilder;
-    private readonly object _buildLock = new();
+    private readonly ShopCacheBuildCoordinator _buildCoordinator = new();
     private readonly Dictionary<uint, List<ShopLocationInfo>> _itemToLocations = new();
     private readonly Dictionary<uint, string> _itemNames = new();
     private readonly Dictionary<uint, string> _territoryNames = new();
@@ -40,11 +40,8 @@ public sealed class ShopDataCache
     private Dictionary<uint, List<NpcShopInfo>> _gilShopNpcInfos = new();
     private Dictionary<uint, List<NpcShopInfo>> _specialShopNpcInfos = new();
 
-    private Task? _initializeTask;
-    private CancellationTokenSource? _buildCts;
     private bool _isInitialized;
     private bool _territoryGroupsDirty = true;
-    private int _buildGeneration;
     private ShopCacheBuildStatus _buildStatus = ShopCacheBuildStatus.Idle;
     private const int ProgressUpdateInterval = 500;
 
@@ -77,7 +74,7 @@ public sealed class ShopDataCache
     public bool IsInitialized => _isInitialized;
     private bool IsVerboseLogging => _configuration.ShopDataVerboseLogging;
     internal ShopCacheBuildStatus BuildStatus => _buildStatus;
-    internal int BuildVersion => _buildGeneration;
+    internal int BuildVersion => _buildCoordinator.Generation;
 
     public Task InitializeAsync()
     {
@@ -91,10 +88,12 @@ public sealed class ShopDataCache
 
     public void CancelBuild()
     {
-        lock (_buildLock)
-        {
-            _buildCts?.Cancel();
-        }
+        _buildCoordinator.Cancel();
+    }
+
+    public void Dispose()
+    {
+        _buildCoordinator.Dispose();
     }
 
     public bool HasShopData(uint itemId)
@@ -548,22 +547,9 @@ public sealed class ShopDataCache
 
     private Task StartBuildAsync(bool rebuild, string reason)
     {
-        lock (_buildLock)
-        {
-            if (!rebuild && _initializeTask != null)
-            {
-                return _initializeTask;
-            }
-
-            _buildCts?.Cancel();
-            _buildCts?.Dispose();
-            _buildCts = new CancellationTokenSource();
-
-            var generation = ++_buildGeneration;
-            var token = _buildCts.Token;
-            _initializeTask = Task.Run(() => BuildCacheSafeAsync(generation, token, reason), token);
-            return _initializeTask;
-        }
+        return _buildCoordinator.Start(
+            rebuild,
+            (generation, token) => BuildCacheSafeAsync(generation, token, reason));
     }
 
     private async Task BuildCacheSafeAsync(int generation, CancellationToken cancellationToken, string reason)
@@ -579,7 +565,7 @@ public sealed class ShopDataCache
                 return;
             }
 
-            if (generation != _buildGeneration)
+            if (!_buildCoordinator.IsCurrent(generation))
             {
                 return;
             }

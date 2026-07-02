@@ -218,7 +218,12 @@ public sealed unsafe class SubmarineService : IDisposable
 
             // 探索中の潜水艦のみを通知（全艦のはずだが念のためフィルタ）
             var exploringSubs = currentSubs.Where(s => s.Status == SubmarineStatus.Exploring).ToList();
-            _ = _discordService.SendDispatchNotificationAsync(characterName, world, exploringSubs);
+            _ = SubmarineNotificationDispatcher.SendSafeAsync(
+                _discordService,
+                _pluginLog,
+                characterName,
+                world,
+                exploringSubs);
         }
     }
 

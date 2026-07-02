@@ -22,6 +22,16 @@ internal enum TitleBackgroundAnchorCaptureAvailability
     LoggedIn,
 }
 
+// Simple UI「現在地をキャラの立ち位置に保存（実験）」ボタンの押下可否と理由。
+// ログイン中・候補確定・現在 territory が候補と一致のときだけ保存できる。
+internal enum TitleBackgroundStandingCaptureAvailability
+{
+    Available,
+    NotLoggedIn,
+    NoCandidate,
+    TerritoryMismatch,
+}
+
 internal static class TitleBackgroundAnchorCaptureGate
 {
     public static TitleBackgroundAnchorCaptureAvailability Evaluate(bool isLoggedIn, bool isCharaSelect)
@@ -121,6 +131,113 @@ internal static class TitleBackgroundCharaSelectAnchorFrame
         return string.Equals(frame, LobbyNative, StringComparison.Ordinal);
     }
 }
+
+// 問題4: world 座標（ログイン中の LocalPlayer.Position）を CharaSelect のキャラ配置へ
+// experimental に流すための判定理由。実機で陸上一致が未確認のため fail-closed が原則。
+internal enum TitleBackgroundExperimentalWorldPlacementGate
+{
+    Eligible,
+    Disabled,
+    AnchorUnusable,
+    NotWorldFrame,
+    CandidateUnknownOrEmpty,
+    CandidateMismatch,
+    NoSavedTerritory,
+    TerritoryMismatch,
+}
+
+// world 座標を experimental に適用してよいかの純粋判定。安全条件を fail-closed 優先順で評価し、
+// すべて満たすときだけ Eligible を返す。camera/FixOn には一切関与せず、キャラ配置経路専用。
+internal static class TitleBackgroundExperimentalWorldPlacementLogic
+{
+    // Phase 0B（実機での陸上成立確認）が済むまでは false。
+    // Developer の非永続 probe（Phase 0A）だけを先行させ、Simple UI の公開と
+    // 永続 config の適用経路はこのフラグで一括ゲートする。陸上成立確認後に true へ切り替える。
+    // static readonly にして「const による到達不能コード警告」を避ける。
+    public static readonly bool PersistentApplyEnabled = false;
+
+    public static TitleBackgroundExperimentalWorldPlacementGate Evaluate(
+        bool experimentalEnabled,
+        bool anchorEnabled,
+        Vector3 anchorPosition,
+        string? anchorFrame,
+        string? anchorCandidateId,
+        uint savedTerritoryTypeId,
+        string? activeCandidateId,
+        uint activeCandidateTerritoryId)
+    {
+        if (!experimentalEnabled)
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.Disabled;
+        }
+
+        if (!anchorEnabled || !TitleBackgroundCameraMath.IsFiniteVector(anchorPosition))
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.AnchorUnusable;
+        }
+
+        if (!string.Equals(anchorFrame, TitleBackgroundCharaSelectAnchorFrame.World, StringComparison.Ordinal))
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.NotWorldFrame;
+        }
+
+        var normalizedAnchorCandidate =
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(anchorCandidateId);
+        var normalizedActiveCandidate =
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(activeCandidateId);
+        if (string.IsNullOrEmpty(normalizedAnchorCandidate) || string.IsNullOrEmpty(normalizedActiveCandidate))
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.CandidateUnknownOrEmpty;
+        }
+
+        if (!string.Equals(normalizedAnchorCandidate, normalizedActiveCandidate, StringComparison.Ordinal))
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.CandidateMismatch;
+        }
+
+        if (savedTerritoryTypeId == 0)
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.NoSavedTerritory;
+        }
+
+        // active candidate が territory 不明（0）なら照合できないので拒否。
+        if (activeCandidateTerritoryId == 0 || savedTerritoryTypeId != activeCandidateTerritoryId)
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.TerritoryMismatch;
+        }
+
+        return TitleBackgroundExperimentalWorldPlacementGate.Eligible;
+    }
+
+    public static bool IsEligible(TitleBackgroundExperimentalWorldPlacementGate gate)
+    {
+        return gate == TitleBackgroundExperimentalWorldPlacementGate.Eligible;
+    }
+
+    public static string DescribeReason(TitleBackgroundExperimentalWorldPlacementGate gate)
+    {
+        return gate switch
+        {
+            TitleBackgroundExperimentalWorldPlacementGate.Eligible => "eligible",
+            TitleBackgroundExperimentalWorldPlacementGate.Disabled => "disabled",
+            TitleBackgroundExperimentalWorldPlacementGate.AnchorUnusable => "anchor-unusable",
+            TitleBackgroundExperimentalWorldPlacementGate.NotWorldFrame => "not-world-frame",
+            TitleBackgroundExperimentalWorldPlacementGate.CandidateUnknownOrEmpty => "candidate-unknown",
+            TitleBackgroundExperimentalWorldPlacementGate.CandidateMismatch => "candidate-mismatch",
+            TitleBackgroundExperimentalWorldPlacementGate.NoSavedTerritory => "no-saved-territory",
+            TitleBackgroundExperimentalWorldPlacementGate.TerritoryMismatch => "territory-mismatch",
+            _ => "unknown",
+        };
+    }
+}
+
+// 配置の最終決定（Target/Source に加え、実際に選ばれたアンカーの effective frame を持つ）。
+// EffectiveFrame は診断の provenance 判定（HasGroundProvenance）へ正しい frame を渡すために必要。
+internal readonly record struct TitleBackgroundCharaSelectPlacementDecision(
+    Vector3 Target,
+    string Source,
+    bool UsedAnchor,
+    string EffectiveFrame);
 
 // 「今の見え方を保存」した CharaSelect カメラ（scene-local 絶対値）。TitleEdit の CameraPos/FixOnPos/FovY 相当。
 internal readonly record struct TitleBackgroundCharaSelectView(
@@ -315,6 +432,8 @@ internal static class TitleBackgroundCharaSelectAnchorLogic
 {
     public const string AnchorSource = "anchor";
     public const string CameraFocusSource = "camera-focus";
+    // experimental world 座標由来の配置（anchor / camera-focus と区別し、ground-verified にしない）。
+    public const string WorldExperimentalSource = "world-experimental";
 
     public const float DefaultPositionNudgeStep = 0.1f;
 
@@ -390,6 +509,48 @@ internal static class TitleBackgroundCharaSelectAnchorLogic
 
         var fallback = new Vector3(cameraLookAt.X, cameraLookAt.Y - bodyDrop, cameraLookAt.Z);
         return new TitleBackgroundCharaSelectPlacementResolution(fallback, CameraFocusSource, false);
+    }
+
+    // 配置の優先順位を明示する純粋関数（problem 4）。
+    // 1) experimental World（呼び出し側が territory/candidate を gate 済みのときのみ true）
+    // 2) 既存の placement-supported アンカー（LobbyNative / CharaSelectFallback）
+    // 3) camera-focus フォールバック
+    // World が無効でも 2) の既存アンカーは従来どおり使われる（巻き添え無効化を防ぐ）。
+    public static TitleBackgroundCharaSelectPlacementDecision ResolvePlacementWithExperimentalWorld(
+        bool worldExperimentalEligible,
+        Vector3 worldPosition,
+        TitleBackgroundCharaSelectAnchor supportedAnchor,
+        string? supportedFrame,
+        string? activeCandidateId,
+        Vector3 cameraLookAt,
+        float bodyDrop)
+    {
+        if (worldExperimentalEligible && TitleBackgroundCameraMath.IsFiniteVector(worldPosition))
+        {
+            return new TitleBackgroundCharaSelectPlacementDecision(
+                worldPosition,
+                WorldExperimentalSource,
+                true,
+                TitleBackgroundCharaSelectAnchorFrame.World);
+        }
+
+        if (supportedAnchor.HasUsableAnchor && AnchorMatchesCandidate(supportedAnchor, activeCandidateId))
+        {
+            return new TitleBackgroundCharaSelectPlacementDecision(
+                supportedAnchor.Position,
+                AnchorSource,
+                true,
+                string.IsNullOrWhiteSpace(supportedFrame)
+                    ? TitleBackgroundCharaSelectAnchorFrame.Unknown
+                    : supportedFrame);
+        }
+
+        var fallback = new Vector3(cameraLookAt.X, cameraLookAt.Y - bodyDrop, cameraLookAt.Z);
+        return new TitleBackgroundCharaSelectPlacementDecision(
+            fallback,
+            CameraFocusSource,
+            false,
+            TitleBackgroundCharaSelectAnchorFrame.Unknown);
     }
 
     public static bool AnchorMatchesCandidate(

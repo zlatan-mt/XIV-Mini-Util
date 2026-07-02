@@ -28,7 +28,10 @@ internal sealed unsafe class TitleBackgroundAddressResolver
     public string LastError { get; private set; } = string.Empty;
     public IReadOnlyList<TitleBackgroundSignatureScanResult> ScanResults => _scanResults;
 
-    public bool Resolve(ISigScanner sigScanner, Configuration configuration)
+    public bool Resolve(
+        ISigScanner sigScanner,
+        Configuration configuration,
+        bool useKnownSignaturesForMissing = false)
     {
         CreateScene = nint.Zero;
         CreateSceneMatch = nint.Zero;
@@ -44,12 +47,45 @@ internal sealed unsafe class TitleBackgroundAddressResolver
         LastError = string.Empty;
         _scanResults.Clear();
 
+        var createSceneSignature = TitleBackgroundKnownSignatures.ResolveMissing(
+            configuration.TitleBackgroundCreateSceneSignature,
+            TitleBackgroundKnownSignatures.CreateScene,
+            useKnownSignaturesForMissing);
+        var fixOnSignature = TitleBackgroundKnownSignatures.ResolveMissing(
+            configuration.TitleBackgroundFixOnSignature,
+            TitleBackgroundKnownSignatures.FixOn,
+            useKnownSignaturesForMissing);
+        var lobbyUpdateSignature = TitleBackgroundKnownSignatures.ResolveMissing(
+            configuration.TitleBackgroundLobbyUpdateSignature,
+            TitleBackgroundKnownSignatures.LobbyUpdate,
+            useKnownSignaturesForMissing);
+        var loadLobbySceneSignature = TitleBackgroundKnownSignatures.ResolveMissing(
+            configuration.TitleBackgroundLoadLobbySceneSignature,
+            TitleBackgroundKnownSignatures.LoadLobbyScene,
+            useKnownSignaturesForMissing);
+        var lobbyCurrentMapSignature = TitleBackgroundKnownSignatures.ResolveMissing(
+            configuration.TitleBackgroundLobbyCurrentMapSignature,
+            TitleBackgroundKnownSignatures.LobbyCurrentMap,
+            useKnownSignaturesForMissing);
+        var calculateLobbyCameraLookAtYSignature = TitleBackgroundKnownSignatures.ResolveMissing(
+            configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature,
+            TitleBackgroundKnownSignatures.CalculateLobbyCameraLookAtY,
+            useKnownSignaturesForMissing);
+        var setCameraCurveMidPointSignature = TitleBackgroundKnownSignatures.ResolveMissing(
+            configuration.TitleBackgroundSetCameraCurveMidPointSignature,
+            TitleBackgroundKnownSignatures.SetCameraCurveMidPoint,
+            useKnownSignaturesForMissing);
+        var calculateCameraCurveLowAndHighPointSignature = TitleBackgroundKnownSignatures.ResolveMissing(
+            configuration.TitleBackgroundCalculateCameraCurveLowAndHighPointSignature,
+            TitleBackgroundKnownSignatures.CalculateCameraCurveLowAndHighPoint,
+            useKnownSignaturesForMissing);
+
         var allowDirectTextHookTargets = TitleBackgroundRuntimeModeHelper.ShouldAllowDirectTextHookTargets(
             configuration.TitleBackgroundRuntimeMode,
             configuration.TitleBackgroundOverrideEnabled);
         var createSceneResolved = TryResolveE8Call(
             sigScanner,
-            configuration.TitleBackgroundCreateSceneSignature,
+            createSceneSignature,
             nameof(CreateScene),
             configuration.TitleBackgroundCreateSceneResolverMode,
             allowDirectTextHookTargets,
@@ -57,29 +93,29 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             out var createScene);
         var lobbyUpdateResolved = TryResolveE8Call(
             sigScanner,
-            configuration.TitleBackgroundLobbyUpdateSignature,
+            lobbyUpdateSignature,
             nameof(LobbyUpdate),
             configuration.TitleBackgroundLobbyUpdateResolverMode,
             allowDirectTextHookTargets,
             out var lobbyUpdateMatch,
             out var lobbyUpdate);
-        var loadLobbySceneResolved = TryResolveText(sigScanner, configuration.TitleBackgroundLoadLobbySceneSignature, nameof(LoadLobbyScene), out var loadLobbyScene);
-        var currentMapResolved = TryResolveStatic(sigScanner, configuration.TitleBackgroundLobbyCurrentMapSignature, nameof(LobbyCurrentMap), out var lobbyCurrentMap);
+        var loadLobbySceneResolved = TryResolveText(sigScanner, loadLobbySceneSignature, nameof(LoadLobbyScene), out var loadLobbyScene);
+        var currentMapResolved = TryResolveStatic(sigScanner, lobbyCurrentMapSignature, nameof(LobbyCurrentMap), out var lobbyCurrentMap);
         _ = TryResolveText(
             sigScanner,
-            configuration.TitleBackgroundCalculateLobbyCameraLookAtYSignature,
+            calculateLobbyCameraLookAtYSignature,
             nameof(CalculateLobbyCameraLookAtY),
             out var calculateLobbyCameraLookAtY,
             required: false);
         _ = TryResolveText(
             sigScanner,
-            configuration.TitleBackgroundSetCameraCurveMidPointSignature,
+            setCameraCurveMidPointSignature,
             nameof(SetCameraCurveMidPoint),
             out var setCameraCurveMidPoint,
             required: false);
         _ = TryResolveText(
             sigScanner,
-            configuration.TitleBackgroundCalculateCameraCurveLowAndHighPointSignature,
+            calculateCameraCurveLowAndHighPointSignature,
             nameof(CalculateCameraCurveLowAndHighPoint),
             out var calculateCameraCurveLowAndHighPoint,
             required: false);
@@ -87,7 +123,7 @@ internal sealed unsafe class TitleBackgroundAddressResolver
             configuration.TitleBackgroundRuntimeMode,
             configuration.TitleBackgroundOverrideEnabled,
             configuration.TitleBackgroundCameraOverrideEnabled);
-        var fixOnResolved = TryResolveText(sigScanner, configuration.TitleBackgroundFixOnSignature, "LobbyCameraFixOn", out var fixOn, required: cameraHookRequired);
+        var fixOnResolved = TryResolveText(sigScanner, fixOnSignature, "LobbyCameraFixOn", out var fixOn, required: cameraHookRequired);
         _ = TryResolveUpdateLobbyUiStage(sigScanner, out var updateLobbyUiStage);
 
         CreateSceneMatch = createSceneMatch;

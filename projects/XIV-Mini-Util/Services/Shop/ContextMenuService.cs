@@ -14,8 +14,6 @@ namespace XivMiniUtil.Services.Shop;
 
 public sealed class ContextMenuService : IDisposable
 {
-    private const ulong ItemIdVariantOffset = 500000;
-    private const ulong HighQualityItemIdOffset = 1000000;
     private const string SearchLabel = "販売場所を検索";
     private const string UniversalisSearchLabel = "Universalisで価格確認";
 
@@ -239,7 +237,7 @@ public sealed class ContextMenuService : IDisposable
                 // アイテムIDは下位32ビット
                 var extractedId = (uint)(contentIdVal & 0xFFFFFFFF);
                 var extractedContext = CreateItemContext(extractedId);
-                if (extractedContext.ItemId != 0 && extractedContext.ItemId < ItemIdVariantOffset)
+                if (extractedContext.ItemId != 0 && extractedContext.ItemId < ShopItemIdentity.VariantOffset)
                 {
                     itemContext = extractedContext;
                     return true;
@@ -349,35 +347,22 @@ public sealed class ContextMenuService : IDisposable
 
     internal static uint NormalizeItemId(uint itemId)
     {
-        return NormalizeItemId((ulong)itemId);
+        return ShopItemIdentity.Normalize(itemId);
     }
 
     internal static UniversalisItemQuality GetItemQuality(uint itemId)
     {
-        return GetItemQuality((ulong)itemId);
+        return ShopItemIdentity.GetQuality(itemId);
     }
 
     private static uint NormalizeItemId(ulong itemId)
     {
-        if (itemId == 0)
-        {
-            return 0;
-        }
-
-        var normalized = itemId % ItemIdVariantOffset;
-        if (normalized != 0)
-        {
-            return (uint)normalized;
-        }
-
-        return itemId <= uint.MaxValue ? (uint)itemId : 0;
+        return ShopItemIdentity.Normalize(itemId);
     }
 
     private static UniversalisItemQuality GetItemQuality(ulong itemId)
     {
-        return itemId >= HighQualityItemIdOffset && NormalizeItemId(itemId) != 0
-            ? UniversalisItemQuality.HighQuality
-            : UniversalisItemQuality.Normal;
+        return ShopItemIdentity.GetQuality(itemId);
     }
 
     private static ItemContext CreateItemContext(ulong rawItemId)

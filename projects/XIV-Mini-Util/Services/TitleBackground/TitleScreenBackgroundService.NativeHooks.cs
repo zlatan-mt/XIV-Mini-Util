@@ -12,11 +12,14 @@ namespace XivMiniUtil.Services.TitleBackground;
 
 public sealed unsafe partial class TitleScreenBackgroundService
 {
-    private void InitializeHooks()
+    private void InitializeHooks(bool useKnownSignaturesForMissing = false)
     {
         try
         {
-            if (!_addressResolver.Resolve(_sigScanner, _configuration))
+            if (!_addressResolver.Resolve(
+                    _sigScanner,
+                    _configuration,
+                    useKnownSignaturesForMissing))
             {
                 _state = TitleBackgroundServiceState.AddressResolveFailed;
                 _stateReason = _addressResolver.LastError;
@@ -417,7 +420,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             {
                 var focusResolution = TitleBackgroundFixOnFocusOverrideLogic.Resolve(
                     _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled,
-                    BuildCharaSelectAnchor(),
+                    BuildFixOnFocusAnchor(),
                     ResolveCurrentOverrideCandidate().Id,
                     _lastObservedFixOnFocus ?? Vector3.Zero,
                     CharaSelectCharacterFocusBodyDrop);

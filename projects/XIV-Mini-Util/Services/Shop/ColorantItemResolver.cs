@@ -469,7 +469,7 @@ public sealed class ColorantItemResolver
                     continue;
                 }
 
-                if (!IsIgnorableColorantUiText(sanitized) && itemTextCandidates.Count < 20)
+                if (!ColorantItemTextParser.IsIgnorableUiText(sanitized) && itemTextCandidates.Count < 20)
                 {
                     itemTextCandidates.Add($"[{i}] {sanitized}");
                 }
@@ -695,7 +695,7 @@ public sealed class ColorantItemResolver
             return false;
         }
 
-        if (IsIgnorableColorantUiText(text))
+        if (ColorantItemTextParser.IsIgnorableUiText(text))
         {
             return false;
         }
@@ -706,8 +706,8 @@ public sealed class ColorantItemResolver
             return false;
         }
 
-        var normalized = NormalizeItemLabel(text);
-        if (string.IsNullOrWhiteSpace(normalized) || IsIgnorableColorantUiText(normalized))
+        var normalized = ColorantItemTextParser.NormalizeItemLabel(text);
+        if (string.IsNullOrWhiteSpace(normalized) || ColorantItemTextParser.IsIgnorableUiText(normalized))
         {
             return false;
         }
@@ -717,7 +717,7 @@ public sealed class ColorantItemResolver
             return false;
         }
 
-        var candidate = TrimItemLabelSuffixes(normalized);
+        var candidate = ColorantItemTextParser.TrimItemLabelSuffixes(normalized);
         if (!string.IsNullOrWhiteSpace(candidate))
         {
             var candidateId = _shopDataCache.GetItemIdFromName(candidate);
@@ -740,132 +740,15 @@ public sealed class ColorantItemResolver
         return true;
     }
 
-    private static string NormalizeItemLabel(string text)
-    {
-        var trimmed = TrimNonLabelSuffix(text);
-        if (string.IsNullOrWhiteSpace(trimmed))
-        {
-            return string.Empty;
-        }
-
-        trimmed = TrimTrailingAsciiTag(trimmed);
-        trimmed = StripLeadingMarkers(trimmed);
-        return trimmed.Trim();
-    }
-
-    private static string StripLeadingMarkers(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return string.Empty;
-        }
-
-        // テレビン油・Terebinth・Turpentineを検出し、その位置から抽出する
-        // 先頭にゴミがある場合も、ない場合も統一的に処理する
-        if (text.IndexOf("テレビン油", StringComparison.Ordinal) is var jaIndex && jaIndex >= 0)
-        {
-            return text[jaIndex..].Trim();
-        }
-
-        if (text.IndexOf("Terebinth", StringComparison.OrdinalIgnoreCase) is var enIndex && enIndex >= 0)
-        {
-            return text[enIndex..].Trim();
-        }
-
-        if (text.IndexOf("Turpentine", StringComparison.OrdinalIgnoreCase) is var legacyIndex && legacyIndex >= 0)
-        {
-            return text[legacyIndex..].Trim();
-        }
-
-        var start = FindFirstPreferredChar(text, preferNonAscii: true);
-        if (start < 0)
-        {
-            start = FindFirstPreferredChar(text, preferNonAscii: false);
-        }
-
-        if (start <= 0)
-        {
-            return text.Trim();
-        }
-
-        return text[start..].Trim();
-    }
-
-    private static int FindFirstPreferredChar(string text, bool preferNonAscii)
-    {
-        for (var i = 0; i < text.Length; i++)
-        {
-            var ch = text[i];
-            if (!IsPreferredItemChar(ch))
-            {
-                continue;
-            }
-
-            if (!preferNonAscii || ch > 0x7F)
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
-    private static bool IsPreferredItemChar(char ch)
-    {
-        return char.IsLetterOrDigit(ch)
-            || ch == '・'
-            || ch == 'ー'
-            || ch == '－'
-            || ch == '-';
-    }
-
-    private static string TrimItemLabelSuffixes(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return string.Empty;
-        }
-
-        var separators = new[]
-        {
-            " 所持",
-            " 必要",
-            " 所要",
-            " 個",
-            " 枚",
-            " x",
-            " ×",
-            "／",
-            "/",
-        };
-
-        foreach (var separator in separators)
-        {
-            var index = text.IndexOf(separator, StringComparison.Ordinal);
-            if (index > 0)
-            {
-                return text[..index].Trim();
-            }
-        }
-
-        return text.Trim();
-    }
-
-    private static bool IsIgnorableColorantUiText(string text)
-    {
-        return text.Contains("このカララント", StringComparison.Ordinal)
-            || text.Contains("染色1の使用カララント", StringComparison.Ordinal)
-            || text.Contains("染色2の使用カララント", StringComparison.Ordinal)
-            || text.Contains("EQUIPMENT", StringComparison.Ordinal);
-    }
-
     private static unsafe string ExtractString(AtkValue value)
     {
         switch (value.Type)
         {
             case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String:
             case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.ManagedString:
+#pragma warning disable CS0618 // API 15 defines String8 and ConstString as the same value (10).
             case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.String8:
+#pragma warning restore CS0618
                 return value.String.ToString();
             case FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.WideString:
                 return Marshal.PtrToStringUni((nint)value.WideString) ?? string.Empty;
@@ -933,62 +816,12 @@ public sealed class ColorantItemResolver
         if (prefixIndex >= 0)
         {
             var candidate = text[prefixIndex..];
-            label = TrimNonLabelSuffix(candidate);
+            label = ColorantItemTextParser.TrimNonLabelSuffix(candidate);
             return !string.IsNullOrWhiteSpace(label);
         }
 
-        label = TrimNonLabelSuffix(text);
+        label = ColorantItemTextParser.TrimNonLabelSuffix(text);
         return !string.IsNullOrWhiteSpace(label);
-    }
-
-    private static string TrimNonLabelSuffix(string text)
-    {
-        var end = text.Length - 1;
-        while (end >= 0)
-        {
-            var ch = text[end];
-            if (char.IsLetterOrDigit(ch)
-                || ch == ':'
-                || ch == ' '
-                || ch == '・'
-                || ch == 'ー'
-                || ch == '－'
-                || ch == '-')
-            {
-                break;
-            }
-
-            end--;
-        }
-
-        if (end < 0)
-        {
-            return string.Empty;
-        }
-
-        var trimmed = text[..(end + 1)].Trim();
-        if (trimmed.StartsWith("カララント:", StringComparison.Ordinal))
-        {
-            trimmed = TrimTrailingAsciiTag(trimmed);
-        }
-
-        return trimmed;
-    }
-
-    private static string TrimTrailingAsciiTag(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return string.Empty;
-        }
-
-        if (text.EndsWith("IH", StringComparison.Ordinal)
-            || text.EndsWith("HQ", StringComparison.Ordinal))
-        {
-            return text[..^2].Trim();
-        }
-
-        return text.Trim();
     }
 
     private static bool TryFindSelectedColorantLabelFromUsageSection(

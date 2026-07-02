@@ -17,17 +17,19 @@ public sealed unsafe partial class TitleScreenBackgroundService
             || !previousRestore.RuntimeReloaded
             || File.Exists(AutomaticCheckRecoveryPath))
         {
-            _automaticCheckState = TitleBackgroundAutomaticCheckState.Failed;
-            _automaticCheckStatus = "前回の設定を復元できないため、新しい自動確認を開始しませんでした。";
-            return ["[XMU AutoCheck] FAILED", _automaticCheckStatus];
+            _automaticCheck.State = TitleBackgroundAutomaticCheckState.Failed;
+            _automaticCheck.Status = "前回の設定を復元できないため、新しい自動確認を開始しませんでした。";
+            return ["[XMU AutoCheck] FAILED", _automaticCheck.Status];
         }
 
         if (!TryBeginAutomaticCheckSettingsTransaction(out var transactionError))
         {
-            _automaticCheckState = TitleBackgroundAutomaticCheckState.Failed;
-            _automaticCheckStatus = $"自動確認を開始できませんでした: {transactionError}";
-            return ["[XMU AutoCheck] FAILED", _automaticCheckStatus];
+            _automaticCheck.State = TitleBackgroundAutomaticCheckState.Failed;
+            _automaticCheck.Status = $"自動確認を開始できませんでした: {transactionError}";
+            return ["[XMU AutoCheck] FAILED", _automaticCheck.Status];
         }
+
+        ResetAutomaticCheckReportForNewRun();
 
         try
         {
@@ -37,16 +39,16 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
 
             PrepareAutomaticQuickCheckDiagnostics();
-            _automaticCheckRequested = true;
-            _automaticCheckCompletionDueAt = null;
-            _automaticCheckLoginObservedAt = null;
-            _pendingAutomaticCheckClipboardText = string.Empty;
+            _automaticCheck.Requested = true;
+            _automaticCheck.CompletionDueAt = null;
+            _automaticCheck.LoginObservedAt = null;
+            _automaticCheck.PendingClipboardText = string.Empty;
 
             if (_clientState.IsLoggedIn)
             {
                 _quickCheckState = TitleBackgroundQuickCheckState.Idle;
-                _automaticCheckState = TitleBackgroundAutomaticCheckState.WaitingForCharacterSelect;
-                _automaticCheckStatus = "待機中: ログアウトしてキャラ選択画面を開いてください。";
+                _automaticCheck.State = TitleBackgroundAutomaticCheckState.WaitingForCharacterSelect;
+                _automaticCheck.Status = "待機中: ログアウトしてキャラ選択画面を開いてください。";
             }
             else
             {
@@ -56,24 +58,27 @@ public sealed unsafe partial class TitleScreenBackgroundService
             return
             [
                 "[XMU AutoCheck] START",
-                _automaticCheckStatus,
+                _automaticCheck.Status,
                 "ログイン後に診断ログを自動保存し、クリップボードへコピーします。",
             ];
         }
         catch (Exception ex)
         {
-            _automaticCheckState = TitleBackgroundAutomaticCheckState.Failed;
-            _automaticCheckStatus = "自動確認の準備に失敗しました。設定を元に戻しました。";
+            _automaticCheck.State = TitleBackgroundAutomaticCheckState.Failed;
+            _automaticCheck.Status = "自動確認の準備に失敗しました。設定を元に戻しました。";
             _log.Warning(ex, "[XMU BG] Failed to prepare automatic check.");
+            PublishAutomaticCheckReport(
+                BuildAutomaticCheckFailureFallback("prepare-exception", ex.GetType().Name),
+                "automatic-check-prepare-failed");
             RestoreAutomaticCheckSettingsOnce("automatic-check-prepare-failed", reloadNativeIntegration: true);
-            return ["[XMU AutoCheck] FAILED", _automaticCheckStatus];
+            return ["[XMU AutoCheck] FAILED", _automaticCheck.Status];
         }
     }
 
     internal TitleBackgroundAutomaticCheckStatus GetAutomaticQuickCheckStatus()
     {
         EnsureAutomaticCheckReportAvailability();
-        var nextAction = _automaticCheckState switch
+        var nextAction = _automaticCheck.State switch
         {
             TitleBackgroundAutomaticCheckState.WaitingForCharacterSelect => "ログアウトし、Character Select からログインしてください。",
             TitleBackgroundAutomaticCheckState.Collecting => "そのままログインしてください。操作やコマンド入力は不要です。",
@@ -82,10 +87,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _ => "「自動確認を開始」を押した後、Character Select からログインしてください。",
         };
         return new TitleBackgroundAutomaticCheckStatus(
-            _automaticCheckState,
-            _automaticCheckStatus,
+            _automaticCheck.State,
+            _automaticCheck.Status,
             nextAction,
-            _automaticCheckReportAvailable);
+            _automaticCheck.ReportAvailable);
     }
 
     internal bool QueueLastAutomaticCheckReportForClipboard()
@@ -93,58 +98,58 @@ public sealed unsafe partial class TitleScreenBackgroundService
         try
         {
             EnsureAutomaticCheckReportAvailability();
-            if (string.IsNullOrWhiteSpace(_lastAutomaticCheckReport) && _automaticCheckReportAvailable)
+            if (string.IsNullOrWhiteSpace(_automaticCheck.LastReport) && _automaticCheck.ReportAvailable)
             {
                 var path = Path.Combine(_configDirectory, TitleBackgroundAutomaticCheckReportBuilder.FileName);
-                _lastAutomaticCheckReport = File.ReadAllText(path);
+                _automaticCheck.LastReport = File.ReadAllText(path);
             }
         }
         catch (Exception ex)
         {
-            _automaticCheckStatus = "前回の確認ログを読み込めませんでした。";
+            _automaticCheck.Status = "前回の確認ログを読み込めませんでした。";
             _log.Warning(ex, "[XMU BG] Failed to read previous automatic check report.");
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(_lastAutomaticCheckReport))
+        if (string.IsNullOrWhiteSpace(_automaticCheck.LastReport))
         {
             return false;
         }
 
-        _pendingAutomaticCheckClipboardText = _lastAutomaticCheckReport;
-        _automaticCheckStatus = "前回の確認ログをクリップボードへコピーします。";
+        _automaticCheck.PendingClipboardText = _automaticCheck.LastReport;
+        _automaticCheck.Status = "前回の確認ログをクリップボードへコピーします。";
         return true;
     }
 
     private void EnsureAutomaticCheckReportAvailability()
     {
-        if (_automaticCheckReportAvailabilityInitialized)
+        if (_automaticCheck.ReportAvailabilityInitialized)
         {
             return;
         }
 
-        _automaticCheckReportAvailable = File.Exists(
+        _automaticCheck.ReportAvailable = File.Exists(
             Path.Combine(_configDirectory, TitleBackgroundAutomaticCheckReportBuilder.FileName));
-        _automaticCheckReportAvailabilityInitialized = true;
+        _automaticCheck.ReportAvailabilityInitialized = true;
     }
 
     internal bool TryConsumeAutomaticCheckClipboardText(out string text)
     {
-        text = _pendingAutomaticCheckClipboardText;
+        text = _automaticCheck.PendingClipboardText;
         if (string.IsNullOrWhiteSpace(text))
         {
             return false;
         }
 
-        _pendingAutomaticCheckClipboardText = string.Empty;
+        _automaticCheck.PendingClipboardText = string.Empty;
         return true;
     }
 
     private void ArmAutomaticQuickCheck()
     {
         StartQuickCheck();
-        _automaticCheckState = TitleBackgroundAutomaticCheckState.Collecting;
-        _automaticCheckStatus = "収集中: Character Select からログインしてください。";
+        _automaticCheck.State = TitleBackgroundAutomaticCheckState.Collecting;
+        _automaticCheck.Status = "収集中: Character Select からログインしてください。";
     }
 
     private void PrepareAutomaticQuickCheckDiagnostics()
@@ -166,48 +171,48 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void UpdateAutomaticQuickCheck()
     {
-        if (!_automaticCheckRequested)
+        if (!_automaticCheck.Requested)
         {
             return;
         }
 
-        if (_automaticCheckState == TitleBackgroundAutomaticCheckState.WaitingForCharacterSelect
+        if (_automaticCheck.State == TitleBackgroundAutomaticCheckState.WaitingForCharacterSelect
             && !_clientState.IsLoggedIn)
         {
             ArmAutomaticQuickCheck();
             return;
         }
 
-        if (_automaticCheckState != TitleBackgroundAutomaticCheckState.Collecting)
+        if (_automaticCheck.State != TitleBackgroundAutomaticCheckState.Collecting)
         {
             return;
         }
 
         if (!_clientState.IsLoggedIn)
         {
-            _automaticCheckLoginObservedAt = null;
+            _automaticCheck.LoginObservedAt = null;
             return;
         }
 
         var now = DateTimeOffset.Now;
-        _automaticCheckLoginObservedAt ??= now;
+        _automaticCheck.LoginObservedAt ??= now;
         var transitionObserved = _quickCheckState.RunState == TitleBackgroundQuickCheckRunState.LoggedInObserved;
         var forcePartial = !transitionObserved
             && TitleBackgroundAutomaticCheckLogic.ShouldForcePartialCompletion(
-                _automaticCheckState,
+                _automaticCheck.State,
                 _clientState.IsLoggedIn,
-                _automaticCheckLoginObservedAt,
+                _automaticCheck.LoginObservedAt,
                 now);
         if (!transitionObserved && !forcePartial)
         {
-            _automaticCheckStatus = "ログインを検出しました。診断の完了を待っています。";
+            _automaticCheck.Status = "ログインを検出しました。診断の完了を待っています。";
             return;
         }
 
-        _automaticCheckCompletionDueAt ??= forcePartial ? now : now.AddSeconds(1);
-        if (now < _automaticCheckCompletionDueAt.Value)
+        _automaticCheck.CompletionDueAt ??= forcePartial ? now : now.AddSeconds(1);
+        if (now < _automaticCheck.CompletionDueAt.Value)
         {
-            _automaticCheckStatus = "ログイン完了を確認中です。";
+            _automaticCheck.Status = "ログイン完了を確認中です。";
             return;
         }
 
@@ -219,42 +224,50 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var restoreResult = AutomaticCheckRestoreResult.NotRequired;
         try
         {
+            // 1) QuickCheck 評価
             var result = EvaluateQuickCheck();
             SaveQuickCheckResult(result);
             _quickCheckState = _quickCheckState with { RunState = result.RunState };
+            // 2) Phase 0C: 完了時点の run-scoped 値から有効な probe run だけを 1 サンプル蓄積する
+            //    （config 非保存・採用可否は純粋ゲートに委譲）。設定復元(finally)で runId が消える前に実行。
+            //    レポート統合より前に追加し、今回 run を集約結果へ反映する。
+            TryAddWorldCoordinateSampleFromRun(
+                _automaticCheck.RunId,
+                result.CompletedAt.ToString("yyyy-MM-dd HH:mm:ss zzz"));
+            // 3) QuickCheck・主要診断・座標対応分析を 1 つのレポートへ統合（別ボタン操作を不要にする）。
             var quickCheckLines = TitleBackgroundQuickCheckEvaluator.BuildChatLines(result);
-            var diagnosticLines = TitleBackgroundAutomaticCheckDiagnosticSelector.Select(
-                GetDiagnosticLines(automaticInvocation: true));
+            var diagnosticLines = new List<string>(
+                TitleBackgroundAutomaticCheckDiagnosticSelector.Select(
+                    GetDiagnosticLines(automaticInvocation: true)));
+            diagnosticLines.Add("--- World/Lobby Coordinate Correspondence ---");
+            diagnosticLines.AddRange(
+                TitleBackgroundWorldCoordinateCorrespondenceLogic.BuildReport(_worldProbeState.Samples));
             var report = TitleBackgroundAutomaticCheckReportBuilder.Build(
                 result.CompletedAt,
                 quickCheckLines,
                 diagnosticLines,
                 partial,
-                _automaticCheckRunId);
-            File.WriteAllText(
-                Path.Combine(_configDirectory, TitleBackgroundAutomaticCheckReportBuilder.FileName),
-                report);
-
-            _lastAutomaticCheckReport = report;
-            _pendingAutomaticCheckClipboardText = report;
-            _automaticCheckReportAvailable = true;
-            _automaticCheckReportAvailabilityInitialized = true;
-            _automaticCheckState = TitleBackgroundAutomaticCheckState.Completed;
-            _automaticCheckStatus = partial
+                _automaticCheck.RunId);
+            PublishAutomaticCheckReport(report, "complete");
+            _automaticCheck.State = TitleBackgroundAutomaticCheckState.Completed;
+            _automaticCheck.Status = partial
                 ? $"部分完了: {result.Level}。遷移検出が完了しなかったため、取得済みログを自動コピーしました。"
                 : $"完了: {result.Level}。確認ログを自動コピーしました。";
         }
         catch (Exception ex)
         {
-            _automaticCheckState = TitleBackgroundAutomaticCheckState.Failed;
-            _automaticCheckStatus = "自動確認ログの作成に失敗しました。";
+            _automaticCheck.State = TitleBackgroundAutomaticCheckState.Failed;
+            _automaticCheck.Status = "自動確認ログの作成に失敗しました。";
             _log.Warning(ex, "[XMU BG] Automatic QuickCheck failed.");
+            PublishAutomaticCheckReport(
+                BuildAutomaticCheckFailureFallback("completion-exception", ex.GetType().Name),
+                "automatic-check-completion-failed");
         }
         finally
         {
-            _automaticCheckRequested = false;
-            _automaticCheckCompletionDueAt = null;
-            _automaticCheckLoginObservedAt = null;
+            _automaticCheck.Requested = false;
+            _automaticCheck.CompletionDueAt = null;
+            _automaticCheck.LoginObservedAt = null;
             restoreResult = RestoreAutomaticCheckSettingsOnce(
                 "automatic-check-complete",
                 reloadNativeIntegration: true);
@@ -264,19 +277,19 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     internal void CancelAutomaticQuickCheck()
     {
-        _automaticCheckRequested = false;
-        _automaticCheckCompletionDueAt = null;
-        _automaticCheckLoginObservedAt = null;
-        _automaticCheckState = TitleBackgroundAutomaticCheckState.Idle;
-        _automaticCheckStatus = "自動確認を中止し、設定を元に戻しました。";
+        _automaticCheck.Requested = false;
+        _automaticCheck.CompletionDueAt = null;
+        _automaticCheck.LoginObservedAt = null;
+        _automaticCheck.State = TitleBackgroundAutomaticCheckState.Idle;
+        _automaticCheck.Status = "自動確認を中止し、設定を元に戻しました。";
         RestoreAutomaticCheckSettingsOnce("automatic-check-cancelled", reloadNativeIntegration: true);
     }
 
     internal bool ResetSimpleTitleBackgroundSettings()
     {
-        _automaticCheckRequested = false;
-        _automaticCheckCompletionDueAt = null;
-        _automaticCheckLoginObservedAt = null;
+        _automaticCheck.Requested = false;
+        _automaticCheck.CompletionDueAt = null;
+        _automaticCheck.LoginObservedAt = null;
         var restoreResult = RestoreAutomaticCheckSettingsOnce(
             "simple-settings-reset",
             reloadNativeIntegration: false);
@@ -310,6 +323,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _configuration.TitleBackgroundCharaSelectAnchorZ = 0f;
         _configuration.TitleBackgroundCharaSelectAnchorRotation = 0f;
         _configuration.TitleBackgroundCharaSelectAnchorFrame = string.Empty;
+        _configuration.TitleBackgroundCharaSelectAnchorTerritoryTypeId = 0;
+        _configuration.TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled = false;
+        // セッション限定 probe（config 外）も解除しないと、リセット後も実験配置が継続し得る。
+        ClearWorldProbeAnchor();
+        // Phase 0C: セッション内の対応サンプルも解除する。
+        ClearWorldCoordinateSamples();
         _configuration.TitleBackgroundCharaSelectViewEnabled = false;
         _configuration.TitleBackgroundCharaSelectViewCandidateId = string.Empty;
         _configuration.TitleBackgroundCharaSelectViewCameraX = 0f;
@@ -321,17 +340,17 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _configuration.TitleBackgroundCharaSelectViewFovY = TitleBackgroundPreset.DefaultFovY;
         _configuration.Save();
 
-        _automaticCheckState = TitleBackgroundAutomaticCheckState.Idle;
+        _automaticCheck.State = TitleBackgroundAutomaticCheckState.Idle;
         try
         {
             _charaSelectService?.ReapplyCompositionRuntimeStateFromConfiguration();
             ReloadNativeIntegration();
-            _automaticCheckStatus = "背景と位置の設定を初期状態に戻しました。";
+            _automaticCheck.Status = "背景と位置の設定を初期状態に戻しました。";
             return true;
         }
         catch (Exception ex)
         {
-            _automaticCheckStatus = "設定は初期化しましたが、実行状態の再読み込みに失敗しました。";
+            _automaticCheck.Status = "設定は初期化しましたが、実行状態の再読み込みに失敗しました。";
             _log.Warning(ex, "[XMU BG] Failed to reload runtime after simple settings reset.");
             return false;
         }
@@ -359,9 +378,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             File.Move(tempPath, path, overwrite: true);
 
-            _automaticCheckSettingsSnapshot = journal.OriginalSettings;
-            _automaticCheckRunId = runId;
-            _automaticCheckSettingsRestored = false;
+            _automaticCheck.SettingsSnapshot = journal.OriginalSettings;
+            _automaticCheck.RunId = runId;
+            _automaticCheck.SettingsRestored = false;
             return true;
         }
         catch (Exception ex)
@@ -385,7 +404,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             var journal = TitleBackgroundAutomaticCheckRecoveryJournal.Deserialize(File.ReadAllText(path));
             if (journal == null)
             {
-                _automaticCheckStatus = "中断された自動確認の復元情報を読み取れませんでした。";
+                _automaticCheck.Status = "中断された自動確認の復元情報を読み取れませんでした。";
                 return;
             }
 
@@ -393,12 +412,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _configuration.Save();
             _charaSelectService?.ReapplyCompositionRuntimeStateFromConfiguration();
             File.Delete(path);
-            _automaticCheckStatus = "中断された自動確認の設定を元に戻しました。";
-            _automaticCheckSettingsRestored = true;
+            _automaticCheck.Status = "中断された自動確認の設定を元に戻しました。";
+            _automaticCheck.SettingsRestored = true;
         }
         catch (Exception ex)
         {
-            _automaticCheckStatus = "中断された自動確認の設定復元に失敗しました。";
+            _automaticCheck.Status = "中断された自動確認の設定復元に失敗しました。";
             _log.Warning(ex, "[XMU BG] Failed to restore interrupted automatic check.");
         }
     }
@@ -407,17 +426,17 @@ public sealed unsafe partial class TitleScreenBackgroundService
         string reason,
         bool reloadNativeIntegration)
     {
-        if (_automaticCheckSettingsRestored || _automaticCheckSettingsSnapshot == null)
+        if (_automaticCheck.SettingsRestored || _automaticCheck.SettingsSnapshot == null)
         {
             return AutomaticCheckRestoreResult.NotRequired;
         }
 
         try
         {
-            _automaticCheckSettingsSnapshot.ApplyTo(_configuration);
+            _automaticCheck.SettingsSnapshot.ApplyTo(_configuration);
             _configuration.Save();
             _charaSelectService?.ReapplyCompositionRuntimeStateFromConfiguration();
-            _automaticCheckSettingsRestored = true;
+            _automaticCheck.SettingsRestored = true;
             if (File.Exists(AutomaticCheckRecoveryPath))
             {
                 File.Delete(AutomaticCheckRecoveryPath);
@@ -427,16 +446,16 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
         catch (Exception ex)
         {
-            _automaticCheckStatus = "自動確認の設定復元に失敗しました。次回起動時に再試行します。";
+            _automaticCheck.Status = "自動確認の設定復元に失敗しました。次回起動時に再試行します。";
             _log.Warning(ex, "[XMU BG] Failed to restore automatic check settings. reason={Reason}", reason);
             return new AutomaticCheckRestoreResult(false, false);
         }
         finally
         {
-            if (_automaticCheckSettingsRestored)
+            if (_automaticCheck.SettingsRestored)
             {
-                _automaticCheckSettingsSnapshot = null;
-                _automaticCheckRunId = string.Empty;
+                _automaticCheck.SettingsSnapshot = null;
+                _automaticCheck.RunId = string.Empty;
             }
         }
 
@@ -448,7 +467,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
             catch (Exception ex)
             {
-                _automaticCheckStatus = "設定は復元しましたが、実行状態の再読み込みに失敗しました。";
+                _automaticCheck.Status = "設定は復元しましたが、実行状態の再読み込みに失敗しました。";
                 _log.Warning(
                     ex,
                     "[XMU BG] Settings were restored, but native integration reload failed. reason={Reason}",
@@ -462,28 +481,63 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void FinalizeAutomaticCheckReport(AutomaticCheckRestoreResult restoreResult)
     {
-        if (string.IsNullOrWhiteSpace(_lastAutomaticCheckReport))
+        if (string.IsNullOrWhiteSpace(_automaticCheck.LastReport))
         {
             return;
         }
 
-        var report = $"{_lastAutomaticCheckReport.TrimEnd()}{Environment.NewLine}"
+        var report = $"{_automaticCheck.LastReport.TrimEnd()}{Environment.NewLine}"
             + $"[XIV Mini Util] settingsRestored={restoreResult.SettingsRestored}{Environment.NewLine}"
             + $"[XIV Mini Util] runtimeReloaded={restoreResult.RuntimeReloaded}{Environment.NewLine}";
+        PublishAutomaticCheckReport(report, "finalize");
+    }
+
+    // Clipboard handoff is the primary contract. Persisting the same report is best-effort and
+    // must never prevent the in-memory report from being copied.
+    private void PublishAutomaticCheckReport(string report, string context)
+    {
+        _automaticCheck.LastReport = report;
+        _automaticCheck.PendingClipboardText = report;
+        _automaticCheck.ReportAvailable = true;
+        _automaticCheck.ReportAvailabilityInitialized = true;
+
         try
         {
+            Directory.CreateDirectory(_configDirectory);
             File.WriteAllText(
                 Path.Combine(_configDirectory, TitleBackgroundAutomaticCheckReportBuilder.FileName),
                 report);
-            _lastAutomaticCheckReport = report;
-            _pendingAutomaticCheckClipboardText = report;
-            _automaticCheckReportAvailable = true;
-            _automaticCheckReportAvailabilityInitialized = true;
         }
         catch (Exception ex)
         {
-            _log.Warning(ex, "[XMU BG] Failed to finalize automatic check report.");
+            _log.Warning(
+                ex,
+                "[XMU BG] Failed to persist automatic check report. context={Context}",
+                context);
         }
+    }
+
+    private void ResetAutomaticCheckReportForNewRun()
+    {
+        _automaticCheck.LastReport = string.Empty;
+        _automaticCheck.PendingClipboardText = string.Empty;
+        _automaticCheck.ReportAvailable = false;
+        _automaticCheck.ReportAvailabilityInitialized = true;
+    }
+
+    private string BuildAutomaticCheckFailureFallback(string reason, string detail)
+    {
+        var safeReason = reason.Replace('\r', ' ').Replace('\n', ' ');
+        var safeDetail = detail.Replace('\r', ' ').Replace('\n', ' ');
+        return string.Join(
+            Environment.NewLine,
+            "[XIV Mini Util] Title Background automatic check",
+            $"[XIV Mini Util] completedAt={DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}",
+            $"[XIV Mini Util] runId={_automaticCheck.RunId}",
+            "[XIV Mini Util] completion=failed",
+            "[XIV Mini Util] result=FAILED",
+            $"[XIV Mini Util] reason={safeReason}",
+            $"[XIV Mini Util] detail={safeDetail}");
     }
 
     private readonly record struct AutomaticCheckRestoreResult(
@@ -563,11 +617,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
     public IReadOnlyList<string> ResetQuickCheck()
     {
         _quickCheckState = TitleBackgroundQuickCheckState.Idle;
-        _automaticCheckRequested = false;
-        _automaticCheckCompletionDueAt = null;
-        _automaticCheckLoginObservedAt = null;
-        _automaticCheckState = TitleBackgroundAutomaticCheckState.Idle;
-        _automaticCheckStatus = "自動確認は未開始です。";
+        _automaticCheck.Requested = false;
+        _automaticCheck.CompletionDueAt = null;
+        _automaticCheck.LoginObservedAt = null;
+        _automaticCheck.State = TitleBackgroundAutomaticCheckState.Idle;
+        _automaticCheck.Status = "自動確認は未開始です。";
         RestoreAutomaticCheckSettingsOnce("quick-check-reset", reloadNativeIntegration: true);
         _configuration.TitleBackgroundLastQuickCheckResult = TitleBackgroundQuickCheckLevel.NotRun;
         _configuration.TitleBackgroundLastQuickCheckCandidateId = string.Empty;

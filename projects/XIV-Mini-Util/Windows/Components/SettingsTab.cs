@@ -43,17 +43,8 @@ public sealed partial class SettingsTab : ITabComponent
     private Configuration? _pendingImportConfig;
     private string? _configIoMessage;
     private Vector4 _configIoMessageColor = new(0.9f, 0.9f, 0.9f, 1f);
-    private string _titleBackgroundPendingPresetId = string.Empty;
-    private string _titleBackgroundPresetMessage = string.Empty;
-    private Vector4 _titleBackgroundPresetMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
-    private string _titleBackgroundSceneCopyMessage = string.Empty;
-    private Vector4 _titleBackgroundSceneCopyMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
-    private string _titleBackgroundCameraProfileMessage = string.Empty;
-    private Vector4 _titleBackgroundCameraProfileMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
     private string _titleBackgroundAnchorMessage = string.Empty;
     private Vector4 _titleBackgroundAnchorMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
-    private string _titleBackgroundViewMessage = string.Empty;
-    private Vector4 _titleBackgroundViewMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
 
     // Submarine Settings State
 
@@ -117,7 +108,9 @@ public sealed partial class SettingsTab : ITabComponent
             "Shop Search",
             "Checklist",
             "シャキ通知",
-            "Login / Title Background",
+            "ログイン背景",
+            "キャラ選択 エモート",
+            "Title背景 診断（開発者）",
             "Submarines",
         };
 
@@ -157,9 +150,15 @@ public sealed partial class SettingsTab : ITabComponent
                 DrawDutyReadySettings();
                 break;
             case 5:
-                DrawCharaSelectSettings();
+                DrawTitleBackgroundSettings();
                 break;
             case 6:
+                DrawCharaSelectEmoteSettings();
+                break;
+            case 7:
+                DrawTitleBackgroundDiagnostics();
+                break;
+            case 8:
                 DrawSubmarineSettings();
                 break;
             default:

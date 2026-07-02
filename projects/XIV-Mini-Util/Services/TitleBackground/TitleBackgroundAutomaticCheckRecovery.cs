@@ -30,6 +30,8 @@ internal sealed record TitleBackgroundAutomaticCheckSettingsSnapshot
     public float AnchorZ { get; init; }
     public float AnchorRotation { get; init; }
     public string AnchorFrame { get; init; } = string.Empty;
+    public uint AnchorTerritoryTypeId { get; init; }
+    public bool AnchorWorldExperimentalEnabled { get; init; }
     public bool ViewEnabled { get; init; }
     public string ViewCandidateId { get; init; } = string.Empty;
     public float ViewCameraX { get; init; }
@@ -67,6 +69,8 @@ internal sealed record TitleBackgroundAutomaticCheckSettingsSnapshot
             AnchorZ = configuration.TitleBackgroundCharaSelectAnchorZ,
             AnchorRotation = configuration.TitleBackgroundCharaSelectAnchorRotation,
             AnchorFrame = configuration.TitleBackgroundCharaSelectAnchorFrame,
+            AnchorTerritoryTypeId = configuration.TitleBackgroundCharaSelectAnchorTerritoryTypeId,
+            AnchorWorldExperimentalEnabled = configuration.TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled,
             ViewEnabled = configuration.TitleBackgroundCharaSelectViewEnabled,
             ViewCandidateId = configuration.TitleBackgroundCharaSelectViewCandidateId,
             ViewCameraX = configuration.TitleBackgroundCharaSelectViewCameraX,
@@ -104,6 +108,8 @@ internal sealed record TitleBackgroundAutomaticCheckSettingsSnapshot
         configuration.TitleBackgroundCharaSelectAnchorZ = AnchorZ;
         configuration.TitleBackgroundCharaSelectAnchorRotation = AnchorRotation;
         configuration.TitleBackgroundCharaSelectAnchorFrame = AnchorFrame;
+        configuration.TitleBackgroundCharaSelectAnchorTerritoryTypeId = AnchorTerritoryTypeId;
+        configuration.TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled = AnchorWorldExperimentalEnabled;
         configuration.TitleBackgroundCharaSelectViewEnabled = ViewEnabled;
         configuration.TitleBackgroundCharaSelectViewCandidateId = ViewCandidateId;
         configuration.TitleBackgroundCharaSelectViewCameraX = ViewCameraX;

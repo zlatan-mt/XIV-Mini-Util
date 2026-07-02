@@ -1469,32 +1469,38 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
 
             var lookAt = camera.LookAtVector;
-            var anchor = BuildCharaSelectAnchor();
-            // アンカーが無い場合は camera focus フォールバックを使うので lookAt の有限性が必要。
-            if (!anchor.HasUsableAnchor && !TitleBackgroundCameraMath.IsFiniteVector(lookAt))
+            var activeCandidate = ResolveCurrentOverrideCandidate();
+            var supportedAnchor = BuildSupportedFrameAnchor();
+            // 問題4: experimental world は別 gate で territory/candidate を厳格照合してから許可。
+            var worldPlacement = ResolveExperimentalWorldPlacement(activeCandidate);
+            // World も既存アンカーも無い場合は camera focus フォールバックを使うので lookAt の有限性が必要。
+            if (!worldPlacement.Eligible
+                && !supportedAnchor.HasUsableAnchor
+                && !TitleBackgroundCameraMath.IsFiniteVector(lookAt))
             {
                 _charaSelectCharacterPlacementLastError = "lookat-non-finite";
                 return;
             }
 
-            // アンカーが有効かつ現在の候補に一致すれば陸上固定座標、なければ従来どおり
-            // カメラ注視点ベース（torso がフォーカスに来るよう body drop ぶん下げる）。
-            // いずれの場合もカメラには一切書き込まない。
-            var resolution = TitleBackgroundCharaSelectAnchorLogic.ResolvePlacementTarget(
-                anchor,
-                ResolveCurrentOverrideCandidate().Id,
+            // 優先順位: 1) experimental World → 2) 既存 placement-supported アンカー → 3) camera-focus。
+            // いずれの場合もカメラ・背景には一切書き込まない（キャラ DrawObject 座標のみ）。
+            var decision = TitleBackgroundCharaSelectAnchorLogic.ResolvePlacementWithExperimentalWorld(
+                worldPlacement.Eligible,
+                worldPlacement.Position,
+                supportedAnchor,
+                _configuration.TitleBackgroundCharaSelectAnchorFrame,
+                activeCandidate.Id,
                 lookAt,
                 CharaSelectCharacterFocusBodyDrop);
-            var target = resolution.Target;
+            var target = decision.Target;
             if (TitleBackgroundCharacterSourceProbe.TrySetCurrentCharacterDrawPosition(target))
             {
                 _charaSelectCharacterPlacementCount++;
                 _lastCharaSelectCharacterPlacementTarget = target;
-                _lastCharaSelectCharacterPlacementSource = resolution.Source;
-                // anchor 由来のときだけ実際に使った frame を控える。camera-focus フォールバックは Unknown。
-                _lastCharaSelectCharacterPlacementAnchorFrame = resolution.UsedAnchor
-                    ? _configuration.TitleBackgroundCharaSelectAnchorFrame
-                    : TitleBackgroundCharaSelectAnchorFrame.Unknown;
+                _lastCharaSelectCharacterPlacementSource = decision.Source;
+                // 実際に選択したアンカーの effective frame を記録する（config からではない）。
+                // World/probe 適用時に config frame と取り違えないことが provenance 判定の前提。
+                _lastCharaSelectCharacterPlacementAnchorFrame = decision.EffectiveFrame;
                 _charaSelectCharacterPlacementLastError = "none";
             }
             else
@@ -1511,7 +1517,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private const float CharaSelectCharacterFocusBodyDrop = 0.9f;
 
-    private TitleBackgroundCharaSelectAnchor BuildCharaSelectAnchor()
+    // placement-supported（LobbyNative / CharaSelectFallback）frame のときだけ有効なアンカー。
+    // World 実験座標はここでは決して有効化しない（World は別 gate の experimental 経路だけが扱う）。
+    private TitleBackgroundCharaSelectAnchor BuildSupportedFrameAnchor()
     {
         return new TitleBackgroundCharaSelectAnchor(
             _configuration.TitleBackgroundCharaSelectAnchorEnabled
@@ -1523,6 +1531,116 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 _configuration.TitleBackgroundCharaSelectAnchorY,
                 _configuration.TitleBackgroundCharaSelectAnchorZ),
             _configuration.TitleBackgroundCharaSelectAnchorRotation);
+    }
+
+    // FixOn 焦点 override 専用アンカー。FixOn はカメラ焦点へ書き込むため、未検証の World 座標を
+    // 絶対に流さない。placement-supported frame のみ（= BuildSupportedFrameAnchor と同一ポリシー）。
+    private TitleBackgroundCharaSelectAnchor BuildFixOnFocusAnchor()
+    {
+        return BuildSupportedFrameAnchor();
+    }
+
+    // experimental world placement の最終決定。選択元（probe/config/none）と、その選択元の
+    // 実効値一式（候補・保存 territory・enabled・gate）を返す。診断はこの戻り値だけを使うことで、
+    // 「適用元は config なのに表示は probe」のような混在を防ぐ。
+    // 優先順位: 1) セッション限定 probe（Phase 0A・config 非書き込み）、2) 永続 config world アンカー。
+    // 永続 config 経路は PersistentApplyEnabled が false の間は無効（Phase 0B 成立まで適用しない）。
+    private readonly record struct WorldExperimentalResolution(
+        bool Eligible,
+        Vector3 Position,
+        TitleBackgroundExperimentalWorldPlacementGate Gate,
+        string Source,
+        string AnchorCandidateId,
+        uint SavedTerritoryTypeId,
+        // ExperimentalEnabled は gate に渡したのと同じ「実効値」。config 経路では
+        // PersistentApplyEnabled を加味した値（gate=disabled と整合する）。
+        bool ExperimentalEnabled,
+        // ConfiguredEnabled はユーザー設定の「生値」。リリースゲートで実効が落ちても保持する。
+        bool ConfiguredEnabled);
+
+    private const string WorldExperimentalSourceProbe = "probe";
+    private const string WorldExperimentalSourceConfig = "config";
+
+    private WorldExperimentalResolution ResolveExperimentalWorldPlacement(
+        TitleBackgroundCharacterSelectOverrideCandidate activeCandidate)
+    {
+        var probeGate = TitleBackgroundExperimentalWorldPlacementLogic.Evaluate(
+            _worldProbeState.Enabled,
+            _worldProbeState.HasValue,
+            _worldProbeState.Position,
+            TitleBackgroundCharaSelectAnchorFrame.World,
+            _worldProbeState.CandidateId,
+            _worldProbeState.TerritoryTypeId,
+            activeCandidate.Id,
+            activeCandidate.TerritoryId);
+        if (TitleBackgroundExperimentalWorldPlacementLogic.IsEligible(probeGate))
+        {
+            return new WorldExperimentalResolution(
+                true,
+                _worldProbeState.Position,
+                probeGate,
+                WorldExperimentalSourceProbe,
+                _worldProbeState.CandidateId,
+                _worldProbeState.TerritoryTypeId,
+                _worldProbeState.Enabled,
+                _worldProbeState.Enabled);
+        }
+
+        var configPosition = new Vector3(
+            _configuration.TitleBackgroundCharaSelectAnchorX,
+            _configuration.TitleBackgroundCharaSelectAnchorY,
+            _configuration.TitleBackgroundCharaSelectAnchorZ);
+        // PersistentApplyEnabled が false の間は永続経路を experimentalEnabled=false 扱いにし、
+        // 適用も「applicable=True」表示も出さない（gate は disabled になる）。
+        var configExperimentalEffective =
+            _configuration.TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled
+            && TitleBackgroundExperimentalWorldPlacementLogic.PersistentApplyEnabled;
+        var configGate = TitleBackgroundExperimentalWorldPlacementLogic.Evaluate(
+            configExperimentalEffective,
+            _configuration.TitleBackgroundCharaSelectAnchorEnabled,
+            configPosition,
+            _configuration.TitleBackgroundCharaSelectAnchorFrame,
+            _configuration.TitleBackgroundCharaSelectAnchorCandidateId,
+            _configuration.TitleBackgroundCharaSelectAnchorTerritoryTypeId,
+            activeCandidate.Id,
+            activeCandidate.TerritoryId);
+        if (TitleBackgroundExperimentalWorldPlacementLogic.IsEligible(configGate))
+        {
+            return new WorldExperimentalResolution(
+                true,
+                configPosition,
+                configGate,
+                WorldExperimentalSourceConfig,
+                _configuration.TitleBackgroundCharaSelectAnchorCandidateId,
+                _configuration.TitleBackgroundCharaSelectAnchorTerritoryTypeId,
+                configExperimentalEffective,
+                _configuration.TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled);
+        }
+
+        // 不可: 実際に選ばれ得る源で報告する（probe 有効なら probe、なければ config）。
+        // gate と候補/territory を同一源から取り、診断の矛盾を防ぐ。
+        if (_worldProbeState.Enabled)
+        {
+            return new WorldExperimentalResolution(
+                false,
+                Vector3.Zero,
+                probeGate,
+                WorldExperimentalSourceProbe,
+                _worldProbeState.CandidateId,
+                _worldProbeState.TerritoryTypeId,
+                _worldProbeState.Enabled,
+                _worldProbeState.Enabled);
+        }
+
+        return new WorldExperimentalResolution(
+            false,
+            Vector3.Zero,
+            configGate,
+            WorldExperimentalSourceConfig,
+            _configuration.TitleBackgroundCharaSelectAnchorCandidateId,
+            _configuration.TitleBackgroundCharaSelectAnchorTerritoryTypeId,
+            configExperimentalEffective,
+            _configuration.TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled);
     }
 
     internal bool IsConfiguredCharaSelectAnchorPlacementSupported()
@@ -1560,6 +1678,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _configuration.TitleBackgroundCharaSelectViewFocusZ = view.Focus.Z;
         _configuration.TitleBackgroundCharaSelectViewFovY = view.FovY;
         _configuration.Save();
+    }
+
+    internal bool IsCharaSelectViewCaptureAvailable()
+    {
+        return !_clientState.IsLoggedIn
+            && TryReadCurrentLobbyMap(out var lobbyMap)
+            && lobbyMap == GameLobbyType.CharaSelect;
     }
 
     // ゲーム内 capture:「今の見え方を保存」。CharaSelect 中の現在 SceneCamera（位置/注視点/FovY）を
@@ -1671,6 +1796,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
         // placement が毎フレーム DrawObject を fallback/anchor へ強制配置しているため、ここで読む値は
         // native の自然立ち位置ではなく合成 fallback（camera focus - bodyDrop）になり得る。別種として記録する。
         _configuration.TitleBackgroundCharaSelectAnchorFrame = TitleBackgroundCharaSelectAnchorFrame.CharaSelectFallback;
+        // World 専用フィールドは CharaSelectFallback では無効化する（territory provenance は world のみ）。
+        _configuration.TitleBackgroundCharaSelectAnchorTerritoryTypeId = 0;
+        _configuration.TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled = false;
         StoreCharaSelectAnchor(anchor);
         status = "captured";
         return true;
@@ -1680,7 +1808,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
     // （次の placement フレームで反映される）。capture 前は何もしない。
     public void NudgeCharaSelectAnchor(TitleBackgroundCharaSelectAnchorAxis axis, float delta)
     {
-        var anchor = BuildCharaSelectAnchor();
+        var anchor = BuildSupportedFrameAnchor();
         if (!anchor.Enabled)
         {
             return;
@@ -1692,6 +1820,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
     public void ClearCharaSelectAnchor()
     {
         _configuration.TitleBackgroundCharaSelectAnchorFrame = string.Empty;
+        _configuration.TitleBackgroundCharaSelectAnchorTerritoryTypeId = 0;
+        _configuration.TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled = false;
         StoreCharaSelectAnchor(TitleBackgroundCharaSelectAnchor.None);
     }
 
@@ -1731,9 +1861,241 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
 
         _configuration.TitleBackgroundCharaSelectAnchorFrame = TitleBackgroundCharaSelectAnchorFrame.World;
+        // 問題4: territory は candidate.TerritoryId ではなく「実際に取得した場所」を保存する（provenance）。
+        _configuration.TitleBackgroundCharaSelectAnchorTerritoryTypeId = _clientState.TerritoryType;
         StoreCharaSelectAnchor(anchor);
         status = "captured-logged-in";
         return true;
+    }
+
+    // Simple UI 用ラッパー: ログイン中の現在地を world アンカーとして保存し、保存=適用の意図に合わせて
+    // experimental 適用フラグを ON にする（候補/territory が一致するときのみ実際に適用される）。
+    // 低レベル capture 名を UI 本体へ露出させないための薄いラッパー。
+    public bool SaveStandingPositionExperimentalAnchor(out string status)
+    {
+        if (!TryCaptureLoggedInPositionAsAnchor(out status))
+        {
+            return false;
+        }
+
+        _configuration.TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled = true;
+        _configuration.Save();
+        return true;
+    }
+
+    // Phase 0A: Developer 限定の非永続 probe。Configuration / StoreCharaSelectAnchor / Save を呼ばず、
+    // セッション限定の in-memory フィールドにのみ書く（プラグイン再起動で消える）。
+    public bool CaptureWorldProbeAnchorInMemory(out string status)
+    {
+        if (!_clientState.IsLoggedIn)
+        {
+            status = "skipped-not-logged-in";
+            return false;
+        }
+
+        var player = _objectTable.LocalPlayer;
+        if (player == null)
+        {
+            status = "skipped-no-local-player";
+            return false;
+        }
+
+        var candidate = ResolveCurrentOverrideCandidate();
+        if (candidate.TerritoryId != 0 && _clientState.TerritoryType != candidate.TerritoryId)
+        {
+            status = $"skipped-territory-mismatch:{_clientState.TerritoryType}!={candidate.TerritoryId}";
+            return false;
+        }
+
+        var position = player.Position;
+        if (!TitleBackgroundCameraMath.IsFiniteVector(position))
+        {
+            status = "skipped-non-finite";
+            return false;
+        }
+
+        _worldProbeState.CandidateId =
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(candidate.Id);
+        _worldProbeState.Position = position;
+        _worldProbeState.TerritoryTypeId = _clientState.TerritoryType;
+        _worldProbeState.HasValue = true;
+        _worldProbeState.Enabled = true;
+        status = "captured-probe";
+        return true;
+    }
+
+    public void SetWorldProbeAnchorEnabled(bool enabled)
+    {
+        _worldProbeState.Enabled = enabled;
+    }
+
+    public void ClearWorldProbeAnchor()
+    {
+        _worldProbeState.Enabled = false;
+        _worldProbeState.HasValue = false;
+        _worldProbeState.CandidateId = string.Empty;
+        _worldProbeState.Position = Vector3.Zero;
+        _worldProbeState.TerritoryTypeId = 0;
+    }
+
+    internal bool IsWorldProbeAnchorEnabled => _worldProbeState.Enabled;
+    internal bool HasWorldProbeAnchor => _worldProbeState.HasValue;
+    internal int WorldCoordinateSampleCount => _worldProbeState.Samples.Count;
+
+    // Phase 0C: 自動確認完了時点の run-scoped 値から「有効な probe run」だけを 1 サンプル採取する。
+    // config は一切書かない（セッション限定）。採用条件は IsAcceptableRun（純粋ゲート）に委譲。
+    public bool TryAddWorldCoordinateSampleFromRun(string runId, string completedAt)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(runId)
+                || string.IsNullOrWhiteSpace(completedAt)
+                || _worldProbeState.Samples.Any(
+                    sample => string.Equals(sample.RunId, runId, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            var active = ResolveCurrentOverrideCandidate();
+            var worldRes = ResolveExperimentalWorldPlacement(active);
+            var runActive = IsRunScopedQuickCheckActive();
+            var runApplied = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedPlacementCount(
+                runActive,
+                _charaSelectCharacterPlacementCount,
+                _quickCheckState.CharacterPlacementCountStart);
+            var runSource = runApplied > 0 ? _lastCharaSelectCharacterPlacementSource : "none";
+            var runTarget = _lastCharaSelectCharacterPlacementTarget ?? Vector3.Zero;
+            var runAnchorFrame = runApplied > 0 ? _lastCharaSelectCharacterPlacementAnchorFrame : "none";
+            var generationMatched = _lastPreLoginSceneCameraGeneration > 0
+                && _lastPreLoginSceneCameraGeneration == _fixOnExperimentSceneGeneration;
+
+            // 観測値が欠けている run は採用しない（zero 埋めで偽サンプルを作らない）。
+            if (!_lastObservedFixOnFocus.HasValue
+                || !_lastPreLoginSceneCameraPosition.HasValue
+                || !_lastPreLoginSceneCameraLookAt.HasValue)
+            {
+                return false;
+            }
+
+            // 検証済み world 座標は probe の生値ではなく resolver が gate を通した値を使う。
+            var worldPosition = worldRes.Position;
+            var fixOnObservedFocus = _lastObservedFixOnFocus.Value;
+            var preLoginCamera = _lastPreLoginSceneCameraPosition.Value;
+            var preLoginLookAt = _lastPreLoginSceneCameraLookAt.Value;
+
+            if (!TitleBackgroundWorldCoordinateCorrespondenceLogic.IsAcceptableRun(
+                    worldRes.Eligible,
+                    worldRes.Source,
+                    runSource,
+                    runApplied,
+                    generationMatched,
+                    worldRes.AnchorCandidateId,
+                    active.Id,
+                    worldRes.SavedTerritoryTypeId,
+                    active.TerritoryId,
+                    runAnchorFrame,
+                    worldPosition,
+                    runTarget,
+                    fixOnObservedFocus,
+                    preLoginCamera,
+                    preLoginLookAt))
+            {
+                return false;
+            }
+
+            var sample = new TitleBackgroundWorldCoordinateSample(
+                _worldProbeState.SampleIndex++,
+                runId,
+                completedAt,
+                active.Id,
+                worldRes.SavedTerritoryTypeId,
+                active.TerritoryId,
+                worldPosition,
+                runTarget,
+                runSource,
+                runAnchorFrame,
+                runApplied,
+                fixOnObservedFocus,
+                preLoginCamera,
+                preLoginLookAt,
+                _fixOnExperimentSceneGeneration,
+                generationMatched,
+                _fixOnExperimentCaptureContext);
+            _worldProbeState.Samples.Add(sample);
+            PersistWorldCoordinateCorrespondenceReport();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MarkRuntimeError(ex, nameof(TryAddWorldCoordinateSampleFromRun));
+            return false;
+        }
+    }
+
+    public string BuildWorldCoordinateCorrespondenceReportText()
+    {
+        return string.Join(
+            Environment.NewLine,
+            TitleBackgroundWorldCoordinateCorrespondenceLogic.BuildReport(_worldProbeState.Samples));
+    }
+
+    public void ClearWorldCoordinateSamples()
+    {
+        _worldProbeState.Samples.Clear();
+        _worldProbeState.SampleIndex = 0;
+        try
+        {
+            var path = Path.Combine(
+                _configDirectory,
+                TitleBackgroundWorldCoordinateCorrespondenceLogic.ReportFileName);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "[XMU BG] Failed to delete world coordinate correspondence report.");
+        }
+    }
+
+    private void PersistWorldCoordinateCorrespondenceReport()
+    {
+        try
+        {
+            Directory.CreateDirectory(_configDirectory);
+            var text = BuildWorldCoordinateCorrespondenceReportText();
+            File.WriteAllText(
+                Path.Combine(_configDirectory, TitleBackgroundWorldCoordinateCorrespondenceLogic.ReportFileName),
+                text);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "[XMU BG] Failed to write world coordinate correspondence report.");
+        }
+    }
+
+    // Simple「現在地を保存（実験）」ボタンの押下可否。ログイン中・候補確定・territory 一致が条件。
+    internal TitleBackgroundStandingCaptureAvailability GetStandingPositionCaptureAvailability()
+    {
+        if (!_clientState.IsLoggedIn)
+        {
+            return TitleBackgroundStandingCaptureAvailability.NotLoggedIn;
+        }
+
+        var candidate = ResolveCurrentOverrideCandidate();
+        if (string.IsNullOrEmpty(TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(candidate.Id))
+            || candidate.TerritoryId == 0)
+        {
+            return TitleBackgroundStandingCaptureAvailability.NoCandidate;
+        }
+
+        if (_clientState.TerritoryType != candidate.TerritoryId)
+        {
+            return TitleBackgroundStandingCaptureAvailability.TerritoryMismatch;
+        }
+
+        return TitleBackgroundStandingCaptureAvailability.Available;
     }
 
     // capture ボタンの押下可否（UI が enable/無効理由に使う）。

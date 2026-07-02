@@ -33,18 +33,9 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundCharaSelectCameraAdapter _charaSelectCameraAdapter = new();
     private readonly TitleBackgroundTransitionDiagnosticRecorder _transitionDiagnostics = new();
     private TitleBackgroundQuickCheckState _quickCheckState = TitleBackgroundQuickCheckState.Idle;
-    private TitleBackgroundAutomaticCheckState _automaticCheckState = TitleBackgroundAutomaticCheckState.Idle;
-    private bool _automaticCheckRequested;
-    private DateTimeOffset? _automaticCheckCompletionDueAt;
-    private DateTimeOffset? _automaticCheckLoginObservedAt;
-    private string _automaticCheckStatus = "自動確認は未開始です。";
-    private string _lastAutomaticCheckReport = string.Empty;
-    private string _pendingAutomaticCheckClipboardText = string.Empty;
-    private bool _automaticCheckReportAvailabilityInitialized;
-    private bool _automaticCheckReportAvailable;
-    private TitleBackgroundAutomaticCheckSettingsSnapshot? _automaticCheckSettingsSnapshot;
-    private string _automaticCheckRunId = string.Empty;
-    private bool _automaticCheckSettingsRestored = true;
+    private readonly TitleBackgroundAutomaticCheckRuntimeState _automaticCheck = new();
+    // 問題4 Phase 0A/0C: セッション限定 world probe / world座標対応サンプル（プラグイン再起動で消える）。
+    private readonly TitleBackgroundWorldProbeRuntimeState _worldProbeState = new();
 
     private Hook<CreateSceneDelegate>? _createSceneHook;
     private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
@@ -480,6 +471,11 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     public void ApplyFromConfiguration()
     {
+        ApplyFromConfigurationCore(useKnownSignaturesForMissing: false);
+    }
+
+    private void ApplyFromConfigurationCore(bool useKnownSignaturesForMissing)
+    {
         NormalizeConfiguration();
         ConfigureCharaSelectCameraAdapter();
         RecordTransitionEvent("runtimeMode changed or observed", _configuration.TitleBackgroundRuntimeMode.ToString());
@@ -516,7 +512,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         if (ShouldCreateSceneHooks() && (!AreSceneHooksReady() || !IsHookSetAlignedWithConfiguration()))
         {
             DisposeHooks();
-            InitializeHooks();
+            InitializeHooks(useKnownSignaturesForMissing);
         }
 
         if (!AreSceneReady())
@@ -539,6 +535,16 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     public void ReloadNativeIntegration()
     {
+        ReloadNativeIntegrationCore(useKnownSignaturesForMissing: false);
+    }
+
+    private void ReloadNativeIntegrationForOneClick()
+    {
+        ReloadNativeIntegrationCore(useKnownSignaturesForMissing: true);
+    }
+
+    private void ReloadNativeIntegrationCore(bool useKnownSignaturesForMissing)
+    {
         RecordTransitionEvent("adapter stop requested", "ReloadNativeIntegration");
         _cameraApplyPending = false;
         _charaSelectCameraAdapter.ResetRuntimeCameraState();
@@ -547,8 +553,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         ResetSceneOverrideObservation();
         _loadingLobbyType = GameLobbyType.None;
         DisposeHooks();
-        InitializeHooks();
-        ApplyFromConfiguration();
+        InitializeHooks(useKnownSignaturesForMissing);
+        ApplyFromConfigurationCore(useKnownSignaturesForMissing);
     }
 
     public void ClearOverride()
@@ -1806,6 +1812,37 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         return (signature ?? string.Empty).Trim();
     }
 
+    // 問題4: world experimental の現在状態（保存/active candidate・territory・一致・gate・適用可否）。
+    // run-scoped 計測ではなく現在の config/probe 状態の記述（anchorFrame/anchorCandidate 等と同列）。
+    private void AddWorldExperimentalPlacementLines(List<string> lines)
+    {
+        var active = ResolveCurrentOverrideCandidate();
+        // 選択元・候補・territory・enabled・gate をすべて resolver の戻り値（同一源）から取る。
+        // useProbe を別途推測しないことで「適用元 config なのに表示 probe」の混在を防ぐ。
+        var resolved = ResolveExperimentalWorldPlacement(active);
+        var normalizedAnchorCandidate =
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(resolved.AnchorCandidateId);
+        var normalizedActive =
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(active.Id);
+        var candidateMatch = !string.IsNullOrEmpty(normalizedAnchorCandidate)
+            && string.Equals(normalizedAnchorCandidate, normalizedActive, StringComparison.Ordinal);
+        var territoryMatch = resolved.SavedTerritoryTypeId != 0
+            && active.TerritoryId != 0
+            && resolved.SavedTerritoryTypeId == active.TerritoryId;
+        lines.Add($"characterPlace.worldExperimentalSource={resolved.Source}");
+        lines.Add($"characterPlace.savedTerritoryTypeId={resolved.SavedTerritoryTypeId}");
+        lines.Add($"characterPlace.activeCandidateTerritoryId={active.TerritoryId}");
+        lines.Add($"characterPlace.candidateMatch={candidateMatch}");
+        lines.Add($"characterPlace.territoryMatch={territoryMatch}");
+        // worldExperimentalEnabled は gate と整合する「実効値」。設定の生値は別キーで併記し、
+        // リリースゲートで実効が落ちた場合も矛盾しない（configured=True / effective=False / gate=disabled）。
+        lines.Add($"characterPlace.worldExperimentalEnabled={resolved.ExperimentalEnabled}");
+        lines.Add($"characterPlace.worldExperimentalConfiguredEnabled={resolved.ConfiguredEnabled}");
+        lines.Add($"characterPlace.persistentApplyEnabled={TitleBackgroundExperimentalWorldPlacementLogic.PersistentApplyEnabled}");
+        lines.Add($"characterPlace.worldExperimentalGate={TitleBackgroundExperimentalWorldPlacementLogic.DescribeReason(resolved.Gate)}");
+        lines.Add($"characterPlace.worldExperimentalApplicable={resolved.Eligible}");
+    }
+
     private void AddCharacterPlacementPreLoginCaptureLines(List<string> lines)
     {
         var frames = _phase2MPlacementFrames.Keys.OrderBy(frame => frame).ToArray();
@@ -1848,6 +1885,10 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"characterPlace.anchorCandidate={FormatNone(_configuration.TitleBackgroundCharaSelectAnchorCandidateId)}");
         lines.Add($"characterPlace.anchorTarget={(_configuration.TitleBackgroundCharaSelectAnchorEnabled ? FormatVector(new Vector3(_configuration.TitleBackgroundCharaSelectAnchorX, _configuration.TitleBackgroundCharaSelectAnchorY, _configuration.TitleBackgroundCharaSelectAnchorZ)) : "none")}");
         lines.Add($"characterPlace.lastError={FormatNone(_charaSelectCharacterPlacementLastError)}");
+
+        // 問題4: world experimental の適用可否を1フローで判断できる config/eligibility 状態。
+        // probe 有効時は probe 値、それ以外は永続 config 値を出す（run 回数ではなく現在状態の記述）。
+        AddWorldExperimentalPlacementLines(lines);
 
         var environment = TitleBackgroundEnvironmentProbe.Capture();
         var brightness = TitleBackgroundBrightnessExplorationLogic.Evaluate(environment);

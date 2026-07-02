@@ -8,6 +8,10 @@ Set-StrictMode -Version Latest
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $project = Join-Path $root 'projects\XIV-Mini-Util\XivMiniUtil.csproj'
 $logicTests = Join-Path $root 'tools\CharaSelectLogicTests\CharaSelectLogicTests.csproj'
+$releaseBuild = Join-Path $root 'scripts\release-build.ps1'
+$releaseRoot = Join-Path $root 'projects\XIV-Mini-Util\bin\Release'
+$releaseZip = Join-Path $releaseRoot 'XivMiniUtil\latest.zip'
+$releaseManifest = Join-Path $releaseRoot 'XivMiniUtil.json'
 
 function Invoke-Step {
     param(
@@ -25,18 +29,24 @@ function Invoke-Step {
 
 Push-Location $root
 try {
+    Invoke-Step 'CharaSelect logic tests' {
+        dotnet run --project $logicTests
+    }
+
     Invoke-Step 'Debug build' {
         dotnet build $project -p:DevPluginOutputDir=
     }
 
     if (-not $SkipRelease) {
-        Invoke-Step 'Release build' {
-            dotnet build $project -c Release -p:DevPluginOutputDir=
+        Invoke-Step 'Windows Release package' {
+            & $releaseBuild
         }
-    }
 
-    Invoke-Step 'CharaSelect logic tests' {
-        dotnet run --project $logicTests
+        foreach ($artifact in @($releaseZip, $releaseManifest)) {
+            if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) {
+                throw "Release artifact was not generated: $artifact"
+            }
+        }
     }
 
     Invoke-Step 'Whitespace diff check' {

@@ -54,6 +54,12 @@ public sealed partial class Configuration
     // アンカー取得元のフレーム種別（world / lobby-native / chara-select-fallback / unknown）。
     // placement/カメラ挙動には影響しない診断用 provenance タグ。R 実験で座標系を判別するために保持する。
     public string TitleBackgroundCharaSelectAnchorFrame { get; set; } = string.Empty;
+    // 問題4: world アンカー保存時の TerritoryTypeId（実測 _clientState.TerritoryType）。
+    // experimental world placement の territory 照合に使う。0 のときは適用しない（fail-closed）。
+    public uint TitleBackgroundCharaSelectAnchorTerritoryTypeId { get; set; } = 0;
+    // world 座標を experimental にキャラ配置へ適用するか。既定 OFF で挙動不変。実機で陸上一致が
+    // 確認されるまで unverified 扱い（ground-verified へは昇格しない）。
+    public bool TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled { get; set; } = false;
     // 「今の見え方を保存」した CharaSelect カメラ（TitleEdit 方式）。FixOn で camera+focus+fov を
     // scene-local 絶対値で 1 回だけ上書きするための保存値。候補一致時のみ適用。既定 OFF で挙動不変。
     public bool TitleBackgroundCharaSelectViewEnabled { get; set; } = false;
@@ -94,14 +100,14 @@ public sealed partial class Configuration
     public byte TitleBackgroundWeatherId { get; set; } = 0;
     public ushort TitleBackgroundTimeOffset { get; set; } = 0;
     public string TitleBackgroundBgmPath { get; set; } = string.Empty;
-    public string TitleBackgroundCreateSceneSignature { get; set; } = "E8 ?? ?? ?? ?? 66 89 3D ?? ?? ?? ?? E9";
-    public string TitleBackgroundFixOnSignature { get; set; } = "C6 81 ?? ?? ?? ?? ?? 0F 28 CB 8B 02";
-    public string TitleBackgroundLobbyUpdateSignature { get; set; } = "E8 ?? ?? ?? ?? 80 BF ?? ?? ?? ?? ?? 48 8D 35";
-    public string TitleBackgroundLoadLobbySceneSignature { get; set; } = "48 89 5C 24 ?? 57 48 83 EC ?? 8B D9 E8";
-    public string TitleBackgroundLobbyCurrentMapSignature { get; set; } = "66 89 05 ?? ?? ?? ?? 66 89 05 ?? ?? ?? ?? 66 89 05 ?? ?? ?? ?? 48 8B 4B";
-    public string TitleBackgroundCalculateLobbyCameraLookAtYSignature { get; set; } = "48 83 EC ?? F3 41 0F 10 01 0F 28 D1";
-    public string TitleBackgroundSetCameraCurveMidPointSignature { get; set; } = "0F 57 C0 0F 2F C1 73 ?? F3 0F 11 89";
-    public string TitleBackgroundCalculateCameraCurveLowAndHighPointSignature { get; set; } = "F3 0F 10 81 ?? ?? ?? ?? F3 0F 11 89";
+    public string TitleBackgroundCreateSceneSignature { get; set; } = TitleBackgroundKnownSignatures.CreateScene;
+    public string TitleBackgroundFixOnSignature { get; set; } = TitleBackgroundKnownSignatures.FixOn;
+    public string TitleBackgroundLobbyUpdateSignature { get; set; } = TitleBackgroundKnownSignatures.LobbyUpdate;
+    public string TitleBackgroundLoadLobbySceneSignature { get; set; } = TitleBackgroundKnownSignatures.LoadLobbyScene;
+    public string TitleBackgroundLobbyCurrentMapSignature { get; set; } = TitleBackgroundKnownSignatures.LobbyCurrentMap;
+    public string TitleBackgroundCalculateLobbyCameraLookAtYSignature { get; set; } = TitleBackgroundKnownSignatures.CalculateLobbyCameraLookAtY;
+    public string TitleBackgroundSetCameraCurveMidPointSignature { get; set; } = TitleBackgroundKnownSignatures.SetCameraCurveMidPoint;
+    public string TitleBackgroundCalculateCameraCurveLowAndHighPointSignature { get; set; } = TitleBackgroundKnownSignatures.CalculateCameraCurveLowAndHighPoint;
     private void ApplyTitleBackgroundFrom(Configuration source)
     {
         TitleBackgroundOverrideEnabled = source.TitleBackgroundOverrideEnabled;
@@ -146,6 +152,8 @@ public sealed partial class Configuration
         TitleBackgroundCharaSelectAnchorZ = SanitizeCoordinate(source.TitleBackgroundCharaSelectAnchorZ);
         TitleBackgroundCharaSelectAnchorRotation = SanitizeCoordinate(source.TitleBackgroundCharaSelectAnchorRotation);
         TitleBackgroundCharaSelectAnchorFrame = NormalizeShortDiagnostic(source.TitleBackgroundCharaSelectAnchorFrame);
+        TitleBackgroundCharaSelectAnchorTerritoryTypeId = source.TitleBackgroundCharaSelectAnchorTerritoryTypeId;
+        TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled = source.TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled;
         TitleBackgroundCharaSelectViewEnabled = source.TitleBackgroundCharaSelectViewEnabled;
         TitleBackgroundCharaSelectViewCandidateId = NormalizeTitleBackgroundCharacterSelectOverrideCandidateId(source.TitleBackgroundCharaSelectViewCandidateId);
         TitleBackgroundCharaSelectViewCameraX = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewCameraX);
@@ -379,6 +387,21 @@ public sealed partial class Configuration
             TitleBackgroundCapturedLookAtX = normalizedCapturedLookAtX;
             TitleBackgroundCapturedLookAtY = normalizedCapturedLookAtY;
             TitleBackgroundCapturedLookAtZ = normalizedCapturedLookAtZ;
+            changed = true;
+        }
+
+        // World experimental anchor は厳格な前提を満たさない限り自動有効化しない（fail-closed）。
+        // 旧設定（territory 未保存）の昇格や、frame 不一致・候補空・非有限座標で enabled を残さない。
+        // 定数 TitleBackgroundCharaSelectAnchorFrame.World の値は "world"。
+        if (TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled
+            && (TitleBackgroundCharaSelectAnchorTerritoryTypeId == 0
+                || TitleBackgroundCharaSelectAnchorFrame != "world"
+                || string.IsNullOrEmpty(NormalizeTitleBackgroundCharacterSelectOverrideCandidateId(TitleBackgroundCharaSelectAnchorCandidateId))
+                || !float.IsFinite(TitleBackgroundCharaSelectAnchorX)
+                || !float.IsFinite(TitleBackgroundCharaSelectAnchorY)
+                || !float.IsFinite(TitleBackgroundCharaSelectAnchorZ)))
+        {
+            TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled = false;
             changed = true;
         }
 
