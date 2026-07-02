@@ -1,10 +1,10 @@
 # XIV Mini Util 現在実装・引き継ぎ資料
 
-- 更新日時: 2026-07-02 19:04 +09:00
+- 更新日時: 2026-07-02（R3の2責務目完了後）
 - 対象作業ツリー: `C:\Project\apps\XIV-Mini-Util`
 - 対象ブランチ: `main`
-- 現在HEAD: `5b2f9f6` (`Split Plugin, LogicTests, Shop, and Title Background responsibilities`)
-- Git状態: `origin/main` より ahead 8、作業ツリーclean（pushはユーザー判断で保留中）
+- 直近の主要commit: `5b2f9f6`（リファクタ一式＋R3の1責務目）、`34c89c3`（本資料の更新）
+- Git状態: pushはユーザー判断で保留中。最新のHEAD・ahead数・cleanさは必ず `git status --short --branch` で再確認すること
 - 用途: 別AIが過去の完了報告を信用せず、現在のコードと実機結果から安全に作業を継続するための引き継ぎ
 
 ## 1. この資料の読み方
@@ -70,16 +70,16 @@ b11a0e9 Clean up CharaSelect camera-aim dead code; report recognizes composited 
 
 ### 3.2 現在の規模
 
-計測方法は `git ls-files`（作業ツリーがcleanのため `rg --files` と同等）とPowerShellの `Get-Content(...).Count`。以下は2026-07-02 19:04（commit `5b2f9f6` 後）の再計測値。
+計測方法は `git ls-files` とPowerShellの `Get-Content(...).Count`。以下は2026-07-02（R3の2責務目完了後）の再計測値。
 
 | 領域 | 現在値 |
 |---|---:|
-| リポジトリ内ファイル | 229 |
-| C# | 171ファイル |
-| TitleBackground | 54ファイル / 18,384行 |
+| リポジトリ内ファイル | 230 |
+| C# | 172ファイル |
+| TitleBackground | 55ファイル / 18,431行 |
 | Shop | 29ファイル / 5,277行 |
 | CharaSelect | 17ファイル / 3,642行 |
-| `TitleScreenBackgroundService` partial群 | 9ファイル / 8,829行 |
+| `TitleScreenBackgroundService` partial群 | 9ファイル / 8,798行 |
 | `tools/CharaSelectLogicTests/Program.cs` | 5行 |
 | LogicTests | 439件 |
 
@@ -87,9 +87,9 @@ b11a0e9 Clean up CharaSelect camera-aim dead code; report recognizes composited 
 
 ### 3.3 `TitleScreenBackgroundService` の残存状態
 
-`TitleScreenBackgroundService.cs` のコンストラクタ前を行ベースで数えると、private field宣言は186、うちreadonly/const/static readonlyを除く可変field宣言は148（2026-07-02 19:04再計測）。
+`TitleScreenBackgroundService.cs` のコンストラクタ前を行ベースで数えると、private field宣言は157、うちreadonly/const/static readonlyを除く可変field宣言は118（2026-07-02 R3の2責務目完了後に再計測）。
 
-automatic check関連の12状態は `TitleBackgroundAutomaticCheckRuntimeState` に、world probe / 座標サンプルの7状態は `TitleBackgroundWorldProbeRuntimeState` に移動済みだが、保存view/camera、placement、timeline、hook lifecycle状態は依然として巨大service本体に多く残る。
+automatic check関連の12状態は `TitleBackgroundAutomaticCheckRuntimeState` に、world probe / 座標サンプルの7状態は `TitleBackgroundWorldProbeRuntimeState` に、FixOn観測 / focus・view override記録 / pre-login・post-FixOnカメラ観測の30状態は `TitleBackgroundCameraObservationRuntimeState` に移動済みだが、placement、timeline、hook lifecycle状態は依然として巨大service本体に多く残る。
 
 partial分割だけで責務分離完了とは扱わないこと。
 
@@ -261,9 +261,12 @@ tools/CharaSelectLogicTests/
 
 `TitleBackgroundWorldProbeRuntimeState` に、セッション限定world probeの5状態（Enabled / HasValue / CandidateId / Position / TerritoryTypeId）と座標対応サンプルの2状態（Samples / SampleIndex）を集約。capture / clear / サンプル採取のロジック（判定順序・例外処理）はservice側に残した。旧フィールド名をロックしていたソース文字列検査は契約意図を維持して更新（Test 385は非永続契約を新名称で維持、Test 384は `_worldProbeState` 全体を診断メソッドから排除する形で強化）。
 
+### 実装済み（2026-07-02、R3の2責務目）
+
+`TitleBackgroundCameraObservationRuntimeState` に、FixOn観測（observed camera/focus/fovY）、focus/view overrideの適用記録（回数・source・gate reason・適用generation）、FixOn発火時点のscene generation / capture context、pre-login CharaSelectカメラ観測、post-FixOnカメラcaptureの計30状態を集約。プロパティ名は旧フィールド名の先頭 `_` 除去＋先頭大文字化の機械的規則で、detour内はフィールド参照の置換のみ（hook装着・順序・ロジック不変）。Test 420/421は診断キー（`fixOn.exp.*`）と「FixOn発火時点のgenerationを保持する」契約を維持して新名称へ更新。
+
 ### 未実施
 
-- 保存view / camera observation state holder
 - character placement state holder
 - timeline / probe diagnostic state holder
 - hook lifecycle state holder
@@ -580,7 +583,7 @@ TitleBackgroundCharaSelectViewFovY
 
 次回scene generationのFixOnで、候補一致時にcamera+focus+FOVを1回だけ上書きする。
 
-`_lastViewOverrideAppliedGeneration` により、同一scene generationでの重複適用を抑止する。
+`_cameraObservation.LastViewOverrideAppliedGeneration` により、同一scene generationでの重複適用を抑止する。
 
 ### 重要なUI制約
 
@@ -846,7 +849,7 @@ DownloadLink=v0.3.7/XivMiniUtil.zip
 推奨順:
 
 1. ~~world probe / coordinate sample state~~ 実装済み（`TitleBackgroundWorldProbeRuntimeState`、commit `5b2f9f6`）
-2. 保存view / camera observation state
+2. ~~保存view / camera observation state~~ 実装済み（`TitleBackgroundCameraObservationRuntimeState`、2026-07-02）
 3. character placement state
 4. timeline diagnostic state
 5. hook lifecycle state
@@ -949,6 +952,7 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundCharaSelectAnchor.cs`
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundWorldCoordinateCorrespondence.cs`
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundWorldProbeRuntimeState.cs`
+- `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundCameraObservationRuntimeState.cs`
 - `projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundKnownSignatures.cs`
 - `projects/XIV-Mini-Util/Windows/Components/SettingsTab.TitleBackground.cs`
 - `projects/XIV-Mini-Util/Windows/Components/SettingsTab.TitleBackgroundDiagnostics.cs`
@@ -980,4 +984,5 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 - 背景差し替えと1クリック自動確認は実機成功。ユーザーは実機確認を「大体見た」とし、コード作業優先を指示。
 - character placementは実行済みだがground未確認。
 - 保存viewのコード経路は実装済み。目視はユーザー確認済みだが、診断値によるround-trip確認（view.enabled=True等）は未実施。
-- 次AIは、R3の2責務目（保存view / camera observation state）から1責務ずつ継続する。
+- R3の2責務目（`TitleBackgroundCameraObservationRuntimeState`、30状態）は2026-07-02に実装・検証済み（LogicTests 439件、Debug/Release build、release package、`git diff --check` すべて緑）。
+- 次AIは、R3の3責務目（character placement state）から1責務ずつ継続する。

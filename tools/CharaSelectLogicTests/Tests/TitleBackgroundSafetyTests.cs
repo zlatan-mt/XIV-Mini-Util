@@ -4846,9 +4846,9 @@ Test(420, "fixOn experiment generation and context are held at capture time, not
 
     // sceneGeneration / captureContext / charaSelectSession は発火時保持フィールド由来。
     // 報告時の active generation / IsLoggedIn / live session は charaSelectSession には使わない。
-    return summary.Contains("fixOn.exp.sceneGeneration={_fixOnExperimentSceneGeneration}", StringComparison.Ordinal)
-        && summary.Contains("fixOn.exp.captureContext={FormatNone(_fixOnExperimentCaptureContext)}", StringComparison.Ordinal)
-        && summary.Contains("fixOn.exp.charaSelectSession={_fixOnExperimentCharaSelectSession}", StringComparison.Ordinal)
+    return summary.Contains("fixOn.exp.sceneGeneration={_cameraObservation.FixOnExperimentSceneGeneration}", StringComparison.Ordinal)
+        && summary.Contains("fixOn.exp.captureContext={FormatNone(_cameraObservation.FixOnExperimentCaptureContext)}", StringComparison.Ordinal)
+        && summary.Contains("fixOn.exp.charaSelectSession={_cameraObservation.FixOnExperimentCharaSelectSession}", StringComparison.Ordinal)
         && !summary.Contains("fixOn.exp.charaSelectSession={_charaSelectTitleBackgroundSessionActive}", StringComparison.Ordinal)
         && !summary.Contains("fixOn.exp.sceneGeneration={_activeCharaSelectSceneGeneration}", StringComparison.Ordinal);
 });
@@ -4864,7 +4864,7 @@ Test(421, "pre-login camera captured per frame; load resets experiment snapshot;
     return update.Contains("CapturePreLoginCameraOnFrameworkUpdate()", StringComparison.Ordinal)
         && loadLobby.Contains("ResetFixOnExperimentSnapshot()", StringComparison.Ordinal)
         && detour.Contains("ComputeFixOnFocusOverrideGateReason()", StringComparison.Ordinal)
-        && detour.Contains("_fixOnExperimentSceneGeneration = _activeCharaSelectSceneGeneration", StringComparison.Ordinal);
+        && detour.Contains("_cameraObservation.FixOnExperimentSceneGeneration = _activeCharaSelectSceneGeneration", StringComparison.Ordinal);
 });
 
 Test(422, "pre-login camera capture gates on matching scene generation", () =>

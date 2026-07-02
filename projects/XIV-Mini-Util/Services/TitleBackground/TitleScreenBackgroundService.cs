@@ -36,6 +36,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundAutomaticCheckRuntimeState _automaticCheck = new();
     // 問題4 Phase 0A/0C: セッション限定 world probe / world座標対応サンプル（プラグイン再起動で消える）。
     private readonly TitleBackgroundWorldProbeRuntimeState _worldProbeState = new();
+    // FixOn観測・focus/view override記録・pre-login/post-FixOnカメラ観測のセッション限定状態（プラグイン再起動で消える）。
+    private readonly TitleBackgroundCameraObservationRuntimeState _cameraObservation = new();
 
     private Hook<CreateSceneDelegate>? _createSceneHook;
     private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
@@ -70,14 +72,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private string _lastHistoricalOverridePath = string.Empty;
     private string _sceneOverrideCleanupReason = "none";
     private bool _loggedInWorldTransitionRecorded;
-    private Vector3? _lastObservedFixOnCamera;
-    private Vector3? _lastObservedFixOnFocus;
-    private float? _lastObservedFixOnFovY;
-    private bool _lastCameraOverrideApplied;
-    private Vector3? _lastAppliedCamera;
-    private Vector3? _lastAppliedFocus;
-    private float? _lastAppliedFovY;
-    private string _lastFixOnInvocationMode = "not-run";
     private Vector3? _lastPreLoginCharacterDrawPosition;
     private float _lastPreLoginCharacterDrawRotation;
     private int _preLoginCharacterDrawObservedCount;
@@ -87,31 +81,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private string _lastCharaSelectCharacterPlacementSource = "none";
     // 直近の配置で使ったアンカーの frame（地面 provenance 判定に使う）。camera-focus 由来は Unknown。
     private string _lastCharaSelectCharacterPlacementAnchorFrame = TitleBackgroundCharaSelectAnchorFrame.Unknown;
-    private int _fixOnPassiveCallCount;
-    private int _fixOnFocusOverrideAppliedCount;
-    private string _lastFixOnFocusOverrideSource = "not-run";
-    private int _fixOnViewOverrideAppliedCount;
-    private string _lastFixOnViewOverrideSource = "not-run";
-    private int _lastViewOverrideAppliedGeneration;
-    private string _lastFixOnFocusOverrideGateReason = "not-run";
-    // FixOn 発火「時点」の scene generation / context を保持する（報告時の値では pre-login 実態を取り違えるため）。
-    private int _fixOnExperimentSceneGeneration;
-    private string _fixOnExperimentCaptureContext = "not-run";
-    private bool _fixOnExperimentCharaSelectSession;
-    // 同一 scene generation の整合フレームで保持する最後の pre-login CharaSelect カメラ。
-    // 「安定後」を名乗らず、generation 一致と captured frame を併記して読み手が settled 度を判断できるようにする。
-    private Vector3? _lastPreLoginSceneCameraPosition;
-    private Vector3? _lastPreLoginSceneCameraLookAt;
-    private float? _lastPreLoginSceneCameraDistance;
-    private float? _lastPreLoginSceneCameraFovY;
-    private int _lastPreLoginSceneCameraGeneration;
-    private int? _lastPreLoginSceneCameraFrame;
-    private string _lastPostFixOnCameraCaptureStatus = "not-run";
-    private string _lastPostFixOnCameraCaptureError = string.Empty;
-    private Vector3? _lastPostFixOnSceneCameraPosition;
-    private Vector3? _lastPostFixOnLookAtVector;
-    private float? _lastPostFixOnDistance;
-    private float? _lastPostFixOnFovY;
     private TitleBackgroundCameraCaptureResult _lastCameraCaptureResult = TitleBackgroundCameraCaptureResult.NotRun;
     private string _lastCharaSelectCameraRuntimeRecordStatus = "not-run";
     private string _lastCharaSelectCameraRuntimeRestoreStatus = "not-run";
@@ -327,7 +296,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         }
 
         _configuration.TitleBackgroundFixOnPassiveObservationEnabled = enabled;
-        _fixOnPassiveCallCount = 0;
+        _cameraObservation.FixOnPassiveCallCount = 0;
         _configuration.Save();
         RecordTransitionEvent("fixOnPassiveObservationEnabled changed", enabled ? "enabled" : "disabled");
         ReloadNativeIntegration();
@@ -343,9 +312,9 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         }
 
         _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled = enabled;
-        _fixOnFocusOverrideAppliedCount = 0;
-        _lastFixOnFocusOverrideSource = "not-run";
-        _lastFixOnFocusOverrideGateReason = "not-run";
+        _cameraObservation.FixOnFocusOverrideAppliedCount = 0;
+        _cameraObservation.LastFixOnFocusOverrideSource = "not-run";
+        _cameraObservation.LastFixOnFocusOverrideGateReason = "not-run";
         _configuration.Save();
         RecordTransitionEvent("fixOnFocusAnchorOverrideEnabled changed", enabled ? "enabled" : "disabled");
         ReloadNativeIntegration();
@@ -361,8 +330,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         }
 
         _configuration.TitleBackgroundCharaSelectViewEnabled = enabled;
-        _fixOnViewOverrideAppliedCount = 0;
-        _lastFixOnViewOverrideSource = "not-run";
+        _cameraObservation.FixOnViewOverrideAppliedCount = 0;
+        _cameraObservation.LastFixOnViewOverrideSource = "not-run";
         _configuration.Save();
         RecordTransitionEvent("fixOnViewOverrideEnabled changed", enabled ? "enabled" : "disabled");
         ReloadNativeIntegration();
@@ -1133,30 +1102,30 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     // post-FixOn / pre-login カメラ / 適用回数 / context を全消去する。FixOn が本ロードで発火すれば再populate。
     private void ResetFixOnExperimentSnapshot()
     {
-        _fixOnPassiveCallCount = 0;
-        _fixOnFocusOverrideAppliedCount = 0;
-        _lastFixOnFocusOverrideSource = "not-run";
-        _fixOnViewOverrideAppliedCount = 0;
-        _lastFixOnViewOverrideSource = "not-run";
-        _lastFixOnFocusOverrideGateReason = "not-run";
-        _lastObservedFixOnCamera = null;
-        _lastObservedFixOnFocus = null;
-        _lastObservedFixOnFovY = null;
-        _lastCameraOverrideApplied = false;
-        _lastAppliedCamera = null;
-        _lastAppliedFocus = null;
-        _lastAppliedFovY = null;
-        _lastFixOnInvocationMode = "not-run";
-        _fixOnExperimentSceneGeneration = 0;
-        _fixOnExperimentCaptureContext = "not-run";
-        _fixOnExperimentCharaSelectSession = false;
+        _cameraObservation.FixOnPassiveCallCount = 0;
+        _cameraObservation.FixOnFocusOverrideAppliedCount = 0;
+        _cameraObservation.LastFixOnFocusOverrideSource = "not-run";
+        _cameraObservation.FixOnViewOverrideAppliedCount = 0;
+        _cameraObservation.LastFixOnViewOverrideSource = "not-run";
+        _cameraObservation.LastFixOnFocusOverrideGateReason = "not-run";
+        _cameraObservation.LastObservedFixOnCamera = null;
+        _cameraObservation.LastObservedFixOnFocus = null;
+        _cameraObservation.LastObservedFixOnFovY = null;
+        _cameraObservation.LastCameraOverrideApplied = false;
+        _cameraObservation.LastAppliedCamera = null;
+        _cameraObservation.LastAppliedFocus = null;
+        _cameraObservation.LastAppliedFovY = null;
+        _cameraObservation.LastFixOnInvocationMode = "not-run";
+        _cameraObservation.FixOnExperimentSceneGeneration = 0;
+        _cameraObservation.FixOnExperimentCaptureContext = "not-run";
+        _cameraObservation.FixOnExperimentCharaSelectSession = false;
         ClearPostFixOnCameraObservation();
-        _lastPreLoginSceneCameraPosition = null;
-        _lastPreLoginSceneCameraLookAt = null;
-        _lastPreLoginSceneCameraDistance = null;
-        _lastPreLoginSceneCameraFovY = null;
-        _lastPreLoginSceneCameraGeneration = 0;
-        _lastPreLoginSceneCameraFrame = null;
+        _cameraObservation.LastPreLoginSceneCameraPosition = null;
+        _cameraObservation.LastPreLoginSceneCameraLookAt = null;
+        _cameraObservation.LastPreLoginSceneCameraDistance = null;
+        _cameraObservation.LastPreLoginSceneCameraFovY = null;
+        _cameraObservation.LastPreLoginSceneCameraGeneration = 0;
+        _cameraObservation.LastPreLoginSceneCameraFrame = null;
     }
 
     // detour が毎回記録する総合ゲート理由（feature-off / passive-precedence / 実行コンテキスト理由 / ready）。
@@ -1357,11 +1326,11 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     private void ResetCameraOverrideObservation()
     {
-        _lastCameraOverrideApplied = false;
-        _lastAppliedCamera = null;
-        _lastAppliedFocus = null;
-        _lastAppliedFovY = null;
-        _lastFixOnInvocationMode = "not-run";
+        _cameraObservation.LastCameraOverrideApplied = false;
+        _cameraObservation.LastAppliedCamera = null;
+        _cameraObservation.LastAppliedFocus = null;
+        _cameraObservation.LastAppliedFovY = null;
+        _cameraObservation.LastFixOnInvocationMode = "not-run";
         _lastCharaSelectCameraRuntimeRecordStatus = "not-run";
         _lastCharaSelectCameraRuntimeRestoreStatus = "not-run";
         _lastCharaSelectCameraRuntimeRecordError = string.Empty;
@@ -1400,7 +1369,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _phase2MPlacementFrames.Clear();
         ResetPhase2ECalculateLookAtYObservation();
         ClearPostFixOnCameraObservation();
-        _lastPostFixOnCameraCaptureStatus = "not-run";
+        _cameraObservation.LastPostFixOnCameraCaptureStatus = "not-run";
     }
 
     private void ResetSceneOverrideObservation()
@@ -1903,11 +1872,11 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         var fixOnInstalled = _cameraFixOnHook != null;
         lines.Add($"fixOn.passiveObservationEnabled={_configuration.TitleBackgroundFixOnPassiveObservationEnabled}");
         lines.Add($"fixOn.hookInstalled={fixOnInstalled}");
-        lines.Add($"fixOn.calls={(fixOnInstalled ? _fixOnPassiveCallCount.ToString() : "unavailable")}");
-        lines.Add($"fixOn.lastFocusArgs={(fixOnInstalled && _lastObservedFixOnFocus.HasValue ? FormatVector(_lastObservedFixOnFocus.Value) : "unavailable")}");
+        lines.Add($"fixOn.calls={(fixOnInstalled ? _cameraObservation.FixOnPassiveCallCount.ToString() : "unavailable")}");
+        lines.Add($"fixOn.lastFocusArgs={(fixOnInstalled && _cameraObservation.LastObservedFixOnFocus.HasValue ? FormatVector(_cameraObservation.LastObservedFixOnFocus.Value) : "unavailable")}");
         lines.Add($"fixOn.focusAnchorOverrideEnabled={_configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled}");
-        lines.Add($"fixOn.focusAnchorOverrideAppliedCount={(fixOnInstalled ? _fixOnFocusOverrideAppliedCount.ToString() : "unavailable")}");
-        lines.Add($"fixOn.focusAnchorOverrideLastSource={FormatNone(_lastFixOnFocusOverrideSource)}");
+        lines.Add($"fixOn.focusAnchorOverrideAppliedCount={(fixOnInstalled ? _cameraObservation.FixOnFocusOverrideAppliedCount.ToString() : "unavailable")}");
+        lines.Add($"fixOn.focusAnchorOverrideLastSource={FormatNone(_cameraObservation.LastFixOnFocusOverrideSource)}");
 
         // view override（TitleEdit 方式: camera+focus+fov を scene-local 絶対値で一括上書き）。
         lines.Add($"view.enabled={_configuration.TitleBackgroundCharaSelectViewEnabled}");
@@ -1915,8 +1884,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"view.camera={(_configuration.TitleBackgroundCharaSelectViewEnabled ? FormatVector(new Vector3(_configuration.TitleBackgroundCharaSelectViewCameraX, _configuration.TitleBackgroundCharaSelectViewCameraY, _configuration.TitleBackgroundCharaSelectViewCameraZ)) : "none")}");
         lines.Add($"view.focus={(_configuration.TitleBackgroundCharaSelectViewEnabled ? FormatVector(new Vector3(_configuration.TitleBackgroundCharaSelectViewFocusX, _configuration.TitleBackgroundCharaSelectViewFocusY, _configuration.TitleBackgroundCharaSelectViewFocusZ)) : "none")}");
         lines.Add($"view.fovY={(_configuration.TitleBackgroundCharaSelectViewEnabled ? _configuration.TitleBackgroundCharaSelectViewFovY.ToString("0.###") : "none")}");
-        lines.Add($"view.overrideAppliedCount={(fixOnInstalled ? _fixOnViewOverrideAppliedCount.ToString() : "unavailable")}");
-        lines.Add($"view.overrideLastSource={FormatNone(_lastFixOnViewOverrideSource)}");
+        lines.Add($"view.overrideAppliedCount={(fixOnInstalled ? _cameraObservation.FixOnViewOverrideAppliedCount.ToString() : "unavailable")}");
+        lines.Add($"view.overrideLastSource={FormatNone(_cameraObservation.LastFixOnViewOverrideSource)}");
 
         // R0/R1/R2 比較実験ブロック（read-only）。1キャプチャで原因弁別に必要な値を出す。
         // method は Phase1 では focus-only 固定（parallel は Phase2 で実装してから R3 で測る）。
@@ -1926,37 +1895,37 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
                 _configuration.TitleBackgroundCharaSelectAnchorY,
                 _configuration.TitleBackgroundCharaSelectAnchorZ)
             : null;
-        lines.Add($"fixOn.exp.gateReason={FormatNone(_lastFixOnFocusOverrideGateReason)}");
-        lines.Add($"fixOn.exp.applied={_fixOnFocusOverrideAppliedCount > 0}");
+        lines.Add($"fixOn.exp.gateReason={FormatNone(_cameraObservation.LastFixOnFocusOverrideGateReason)}");
+        lines.Add($"fixOn.exp.applied={_cameraObservation.FixOnFocusOverrideAppliedCount > 0}");
         lines.Add("fixOn.exp.method=focus-only");
         lines.Add($"fixOn.exp.anchorFrame={FormatNone(_configuration.TitleBackgroundCharaSelectAnchorFrame)}");
         lines.Add($"fixOn.exp.anchor={(anchorVec.HasValue ? FormatVector(anchorVec.Value) : "none")}");
-        lines.Add($"fixOn.exp.observedCamera={FormatVector(_lastObservedFixOnCamera)}");
-        lines.Add($"fixOn.exp.observedFocus={FormatVector(_lastObservedFixOnFocus)}");
-        lines.Add($"fixOn.exp.observedFovY={(_lastObservedFixOnFovY.HasValue ? _lastObservedFixOnFovY.Value.ToString("0.###") : "none")}");
-        lines.Add($"fixOn.exp.observedCameraToFocus={FormatVectorDelta(_lastObservedFixOnFocus, _lastObservedFixOnCamera)}");
+        lines.Add($"fixOn.exp.observedCamera={FormatVector(_cameraObservation.LastObservedFixOnCamera)}");
+        lines.Add($"fixOn.exp.observedFocus={FormatVector(_cameraObservation.LastObservedFixOnFocus)}");
+        lines.Add($"fixOn.exp.observedFovY={(_cameraObservation.LastObservedFixOnFovY.HasValue ? _cameraObservation.LastObservedFixOnFovY.Value.ToString("0.###") : "none")}");
+        lines.Add($"fixOn.exp.observedCameraToFocus={FormatVectorDelta(_cameraObservation.LastObservedFixOnFocus, _cameraObservation.LastObservedFixOnCamera)}");
         lines.Add("fixOn.exp.overrideCamera=passthrough");
-        lines.Add($"fixOn.exp.overrideFocus={(_fixOnFocusOverrideAppliedCount > 0 ? FormatVector(_lastAppliedFocus) : "passthrough")}");
-        lines.Add($"fixOn.exp.invocationMode={FormatNone(_lastFixOnInvocationMode)}");
-        lines.Add($"fixOn.exp.anchorToObservedFocus={FormatVectorDelta(_lastObservedFixOnFocus, anchorVec)}");
-        lines.Add($"fixOn.exp.postFixOnCamera={FormatVector(_lastPostFixOnSceneCameraPosition)}");
-        lines.Add($"fixOn.exp.postFixOnLookAt={FormatVector(_lastPostFixOnLookAtVector)}");
-        lines.Add($"fixOn.exp.postFixOnDistance={(_lastPostFixOnDistance.HasValue ? _lastPostFixOnDistance.Value.ToString("0.###") : "none")}");
-        lines.Add($"fixOn.exp.postFixOnFovY={(_lastPostFixOnFovY.HasValue ? _lastPostFixOnFovY.Value.ToString("0.###") : "none")}");
+        lines.Add($"fixOn.exp.overrideFocus={(_cameraObservation.FixOnFocusOverrideAppliedCount > 0 ? FormatVector(_cameraObservation.LastAppliedFocus) : "passthrough")}");
+        lines.Add($"fixOn.exp.invocationMode={FormatNone(_cameraObservation.LastFixOnInvocationMode)}");
+        lines.Add($"fixOn.exp.anchorToObservedFocus={FormatVectorDelta(_cameraObservation.LastObservedFixOnFocus, anchorVec)}");
+        lines.Add($"fixOn.exp.postFixOnCamera={FormatVector(_cameraObservation.LastPostFixOnSceneCameraPosition)}");
+        lines.Add($"fixOn.exp.postFixOnLookAt={FormatVector(_cameraObservation.LastPostFixOnLookAtVector)}");
+        lines.Add($"fixOn.exp.postFixOnDistance={(_cameraObservation.LastPostFixOnDistance.HasValue ? _cameraObservation.LastPostFixOnDistance.Value.ToString("0.###") : "none")}");
+        lines.Add($"fixOn.exp.postFixOnFovY={(_cameraObservation.LastPostFixOnFovY.HasValue ? _cameraObservation.LastPostFixOnFovY.Value.ToString("0.###") : "none")}");
         // 「安定後」は名乗らず最後の整合 pre-login カメラとして出す（generation 一致＋captured frame を併記）。
-        lines.Add($"fixOn.exp.preLoginCamera={FormatVector(_lastPreLoginSceneCameraPosition)}");
-        lines.Add($"fixOn.exp.preLoginLookAt={FormatVector(_lastPreLoginSceneCameraLookAt)}");
-        lines.Add($"fixOn.exp.preLoginDistance={(_lastPreLoginSceneCameraDistance.HasValue ? _lastPreLoginSceneCameraDistance.Value.ToString("0.###") : "none")}");
-        lines.Add($"fixOn.exp.preLoginFovY={(_lastPreLoginSceneCameraFovY.HasValue ? _lastPreLoginSceneCameraFovY.Value.ToString("0.###") : "none")}");
-        lines.Add($"fixOn.exp.preLoginCameraGeneration={_lastPreLoginSceneCameraGeneration}");
-        lines.Add($"fixOn.exp.preLoginCameraFrame={(_lastPreLoginSceneCameraFrame.HasValue ? _lastPreLoginSceneCameraFrame.Value.ToString() : "none")}");
-        lines.Add($"fixOn.exp.preLoginCameraGenerationMatchesFixOn={_lastPreLoginSceneCameraGeneration > 0 && _lastPreLoginSceneCameraGeneration == _fixOnExperimentSceneGeneration}");
-        lines.Add($"fixOn.exp.preLoginVsPostFixOnCamera={FormatVectorDelta(_lastPreLoginSceneCameraPosition, _lastPostFixOnSceneCameraPosition)}");
-        lines.Add($"fixOn.exp.preLoginVsPostFixOnLookAt={FormatVectorDelta(_lastPreLoginSceneCameraLookAt, _lastPostFixOnLookAtVector)}");
+        lines.Add($"fixOn.exp.preLoginCamera={FormatVector(_cameraObservation.LastPreLoginSceneCameraPosition)}");
+        lines.Add($"fixOn.exp.preLoginLookAt={FormatVector(_cameraObservation.LastPreLoginSceneCameraLookAt)}");
+        lines.Add($"fixOn.exp.preLoginDistance={(_cameraObservation.LastPreLoginSceneCameraDistance.HasValue ? _cameraObservation.LastPreLoginSceneCameraDistance.Value.ToString("0.###") : "none")}");
+        lines.Add($"fixOn.exp.preLoginFovY={(_cameraObservation.LastPreLoginSceneCameraFovY.HasValue ? _cameraObservation.LastPreLoginSceneCameraFovY.Value.ToString("0.###") : "none")}");
+        lines.Add($"fixOn.exp.preLoginCameraGeneration={_cameraObservation.LastPreLoginSceneCameraGeneration}");
+        lines.Add($"fixOn.exp.preLoginCameraFrame={(_cameraObservation.LastPreLoginSceneCameraFrame.HasValue ? _cameraObservation.LastPreLoginSceneCameraFrame.Value.ToString() : "none")}");
+        lines.Add($"fixOn.exp.preLoginCameraGenerationMatchesFixOn={_cameraObservation.LastPreLoginSceneCameraGeneration > 0 && _cameraObservation.LastPreLoginSceneCameraGeneration == _cameraObservation.FixOnExperimentSceneGeneration}");
+        lines.Add($"fixOn.exp.preLoginVsPostFixOnCamera={FormatVectorDelta(_cameraObservation.LastPreLoginSceneCameraPosition, _cameraObservation.LastPostFixOnSceneCameraPosition)}");
+        lines.Add($"fixOn.exp.preLoginVsPostFixOnLookAt={FormatVectorDelta(_cameraObservation.LastPreLoginSceneCameraLookAt, _cameraObservation.LastPostFixOnLookAtVector)}");
         // generation / context は FixOn 発火「時点」の保持値（報告時の post-login / generation=0 ではない）。
-        lines.Add($"fixOn.exp.sceneGeneration={_fixOnExperimentSceneGeneration}");
-        lines.Add($"fixOn.exp.captureContext={FormatNone(_fixOnExperimentCaptureContext)}");
-        lines.Add($"fixOn.exp.charaSelectSession={_fixOnExperimentCharaSelectSession}");
+        lines.Add($"fixOn.exp.sceneGeneration={_cameraObservation.FixOnExperimentSceneGeneration}");
+        lines.Add($"fixOn.exp.captureContext={FormatNone(_cameraObservation.FixOnExperimentCaptureContext)}");
+        lines.Add($"fixOn.exp.charaSelectSession={_cameraObservation.FixOnExperimentCharaSelectSession}");
         lines.Add($"fixOn.exp.reportContext={(_clientState.IsLoggedIn ? "post-login" : "pre-login")}");
         lines.Add($"fixOn.exp.reportCharaSelectSession={_charaSelectTitleBackgroundSessionActive}");
     }

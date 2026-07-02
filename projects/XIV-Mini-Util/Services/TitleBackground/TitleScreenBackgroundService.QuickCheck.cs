@@ -756,8 +756,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var currentDirH = hasLatestTimelineSample ? latestTimelineSample.LobbyDirH ?? latestTimelineSample.DirH : null;
         var currentDirV = hasLatestTimelineSample ? latestTimelineSample.LobbyDirV ?? latestTimelineSample.DirV : null;
         var currentDistance = hasLatestTimelineSample ? latestTimelineSample.LobbyDistance ?? latestTimelineSample.Distance : null;
-        var currentPosition = hasLatestTimelineSample ? latestTimelineSample.SceneCameraPosition : _lastPostFixOnSceneCameraPosition;
-        var currentLookAt = hasLatestTimelineSample ? latestTimelineSample.SceneCameraLookAtVector ?? latestTimelineSample.LobbyLastLookAtVector : _lastPostFixOnLookAtVector;
+        var currentPosition = hasLatestTimelineSample ? latestTimelineSample.SceneCameraPosition : _cameraObservation.LastPostFixOnSceneCameraPosition;
+        var currentLookAt = hasLatestTimelineSample ? latestTimelineSample.SceneCameraLookAtVector ?? latestTimelineSample.LobbyLastLookAtVector : _cameraObservation.LastPostFixOnLookAtVector;
         var runtimeHasProfilePose = _charaSelectCameraAdapter.RuntimeState.HasCameraPose;
         var visibleProfileAppliedState = BuildVisibleProfileAppliedState(cameraProfile, runtimeHasProfilePose, cameraFramingApplied);
         // 配置結果は run-scoped で判定する。前回 run の成功回数・source・frame を今回へ流用しない。

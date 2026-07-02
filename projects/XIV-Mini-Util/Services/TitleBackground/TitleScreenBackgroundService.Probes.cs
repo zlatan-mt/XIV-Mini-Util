@@ -212,17 +212,17 @@ public sealed unsafe partial class TitleScreenBackgroundService
             session?.BaselineFocus ?? default,
             session?.ProbeCamera ?? default,
             session?.ProbeFocus ?? default,
-            _lastAppliedCamera,
-            _lastPostFixOnSceneCameraPosition,
+            _cameraObservation.LastAppliedCamera,
+            _cameraObservation.LastPostFixOnSceneCameraPosition,
             stabilitySceneCameraPosition,
-            _lastAppliedFocus,
-            _lastPostFixOnLookAtVector,
+            _cameraObservation.LastAppliedFocus,
+            _cameraObservation.LastPostFixOnLookAtVector,
             stabilityLookAtVector);
         var result = TitleBackgroundCameraProbeReport.Evaluate(input);
         var timelineAnalysis = TitleBackgroundCameraProbeReport.AnalyzeTimeline(
             timelineSamples,
-            _lastPostFixOnSceneCameraPosition,
-            _lastPostFixOnLookAtVector);
+            _cameraObservation.LastPostFixOnSceneCameraPosition,
+            _cameraObservation.LastPostFixOnLookAtVector);
 
         var lines = new List<string>
         {
@@ -249,21 +249,21 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
         lines.AddRange(
         [
-            $"[CameraProbe] lastAppliedCamera={FormatVector(_lastAppliedCamera)}",
-            $"[CameraProbe] postFixOnSceneCameraPosition={FormatVector(_lastPostFixOnSceneCameraPosition)}",
+            $"[CameraProbe] lastAppliedCamera={FormatVector(_cameraObservation.LastAppliedCamera)}",
+            $"[CameraProbe] postFixOnSceneCameraPosition={FormatVector(_cameraObservation.LastPostFixOnSceneCameraPosition)}",
             $"[CameraProbe] currentSceneCameraPosition={FormatVector(reportTimeSceneCameraPosition)}",
-            $"[CameraProbe] lastAppliedFocus={FormatVector(_lastAppliedFocus)}",
-            $"[CameraProbe] postFixOnLookAtVector={FormatVector(_lastPostFixOnLookAtVector)}",
+            $"[CameraProbe] lastAppliedFocus={FormatVector(_cameraObservation.LastAppliedFocus)}",
+            $"[CameraProbe] postFixOnLookAtVector={FormatVector(_cameraObservation.LastPostFixOnLookAtVector)}",
             $"[CameraProbe] currentLookAtVector={FormatVector(reportTimeLookAtVector)}",
             $"[CameraProbe] stabilitySampleSource={stabilitySampleSource}",
             $"[CameraProbe] timelineStatus={_cameraProbeTimelineStatus}",
             $"[CameraProbe] timelineError={FormatNone(_cameraProbeTimelineError)}",
             $"[CameraProbe] currentCameraCaptureStatus={(currentCameraCaptured ? "success" : "failed")}",
             $"[CameraProbe] currentCameraCaptureError={FormatNone(currentCaptureError)}",
-            $"[CameraProbe] cameraY.appliedToPostFixOn.delta={FormatVectorAxisDelta(_lastPostFixOnSceneCameraPosition, _lastAppliedCamera, 1)}",
-            $"[CameraProbe] cameraY.postFixOnToStabilitySample.delta={FormatVectorAxisDelta(stabilitySceneCameraPosition, _lastPostFixOnSceneCameraPosition, 1)}",
-            $"[CameraProbe] focusY.appliedToPostFixOn.delta={FormatVectorAxisDelta(_lastPostFixOnLookAtVector, _lastAppliedFocus, 1)}",
-            $"[CameraProbe] focusY.postFixOnToStabilitySample.delta={FormatVectorAxisDelta(stabilityLookAtVector, _lastPostFixOnLookAtVector, 1)}",
+            $"[CameraProbe] cameraY.appliedToPostFixOn.delta={FormatVectorAxisDelta(_cameraObservation.LastPostFixOnSceneCameraPosition, _cameraObservation.LastAppliedCamera, 1)}",
+            $"[CameraProbe] cameraY.postFixOnToStabilitySample.delta={FormatVectorAxisDelta(stabilitySceneCameraPosition, _cameraObservation.LastPostFixOnSceneCameraPosition, 1)}",
+            $"[CameraProbe] focusY.appliedToPostFixOn.delta={FormatVectorAxisDelta(_cameraObservation.LastPostFixOnLookAtVector, _cameraObservation.LastAppliedFocus, 1)}",
+            $"[CameraProbe] focusY.postFixOnToStabilitySample.delta={FormatVectorAxisDelta(stabilityLookAtVector, _cameraObservation.LastPostFixOnLookAtVector, 1)}",
             "[CameraProbe] Timeline",
         ]);
 
@@ -276,8 +276,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].lookAt={FormatVector(sample.LookAtVector)}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].cameraY={FormatVectorAxis(sample.SceneCameraPosition, 1)}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].focusY={FormatVectorAxis(sample.LookAtVector, 1)}");
-            lines.Add($"[CameraProbe] timeline[{sample.Frame}].cameraYDeltaFromPostFixOn={FormatVectorAxisDelta(sample.SceneCameraPosition, _lastPostFixOnSceneCameraPosition, 1)}");
-            lines.Add($"[CameraProbe] timeline[{sample.Frame}].focusYDeltaFromPostFixOn={FormatVectorAxisDelta(sample.LookAtVector, _lastPostFixOnLookAtVector, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].cameraYDeltaFromPostFixOn={FormatVectorAxisDelta(sample.SceneCameraPosition, _cameraObservation.LastPostFixOnSceneCameraPosition, 1)}");
+            lines.Add($"[CameraProbe] timeline[{sample.Frame}].focusYDeltaFromPostFixOn={FormatVectorAxisDelta(sample.LookAtVector, _cameraObservation.LastPostFixOnLookAtVector, 1)}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].fixOnCalls={events.FixOnCalls}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].lobbyUpdateCalls={events.LobbyUpdateCalls}");
             lines.Add($"[CameraProbe] timeline[{sample.Frame}].loadLobbySceneCalls={events.LoadLobbySceneCalls}");
@@ -307,7 +307,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var focusDriftEvents = TitleBackgroundCameraProbeReport.DescribeFocusDriftEvents(
             timelineSamples,
             GetCameraProbeTimelineEventCountsInRange,
-            _lastPostFixOnLookAtVector);
+            _cameraObservation.LastPostFixOnLookAtVector);
 
         lines.AddRange(
         [
@@ -646,10 +646,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _cameraProbeTimelineError = string.Empty;
         _cameraProbeTimelineSnapshots.Clear();
         _cameraProbeTimelineSnapshots[0] = new TitleBackgroundCameraProbeTimelineSnapshot(
-            _lastPostFixOnSceneCameraPosition,
-            _lastPostFixOnLookAtVector,
-            _lastPostFixOnCameraCaptureStatus,
-            _lastPostFixOnCameraCaptureError);
+            _cameraObservation.LastPostFixOnSceneCameraPosition,
+            _cameraObservation.LastPostFixOnLookAtVector,
+            _cameraObservation.LastPostFixOnCameraCaptureStatus,
+            _cameraObservation.LastPostFixOnCameraCaptureError);
     }
 
     private void ResetCameraProbeTimelineObservation()

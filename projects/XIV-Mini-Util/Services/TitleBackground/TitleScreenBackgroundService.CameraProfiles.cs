@@ -92,8 +92,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var currentDirH = hasCurrent ? current.LobbyDirH ?? current.DirH : null;
         var currentDirV = hasCurrent ? current.LobbyDirV ?? current.DirV : null;
         var currentDistance = hasCurrent ? current.LobbyDistance ?? current.Distance : null;
-        var currentPosition = hasCurrent ? current.SceneCameraPosition : _lastPostFixOnSceneCameraPosition;
-        var currentLookAt = hasCurrent ? current.SceneCameraLookAtVector ?? current.LobbyLastLookAtVector : _lastPostFixOnLookAtVector;
+        var currentPosition = hasCurrent ? current.SceneCameraPosition : _cameraObservation.LastPostFixOnSceneCameraPosition;
+        var currentLookAt = hasCurrent ? current.SceneCameraLookAtVector ?? current.LobbyLastLookAtVector : _cameraObservation.LastPostFixOnLookAtVector;
         var legacyRoute = _charaSelectService?.GetLegacyCompositionRouteSnapshot()
             ?? CharaSelectCompositionRouteRuntimeSnapshot.Empty;
         var bridgeRoute = _charaSelectService?.GetTitleBackgroundBridgeRouteSnapshot()

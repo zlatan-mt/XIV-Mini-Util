@@ -1423,12 +1423,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
             return;
         }
 
-        _lastPreLoginSceneCameraPosition = snapshot.SceneCameraPosition;
-        _lastPreLoginSceneCameraLookAt = snapshot.LookAtVector;
-        _lastPreLoginSceneCameraDistance = snapshot.Distance;
-        _lastPreLoginSceneCameraFovY = snapshot.FovY;
-        _lastPreLoginSceneCameraGeneration = _activeCharaSelectSceneGeneration;
-        _lastPreLoginSceneCameraFrame = GetCurrentPhase2CFrame();
+        _cameraObservation.LastPreLoginSceneCameraPosition = snapshot.SceneCameraPosition;
+        _cameraObservation.LastPreLoginSceneCameraLookAt = snapshot.LookAtVector;
+        _cameraObservation.LastPreLoginSceneCameraDistance = snapshot.Distance;
+        _cameraObservation.LastPreLoginSceneCameraFovY = snapshot.FovY;
+        _cameraObservation.LastPreLoginSceneCameraGeneration = _activeCharaSelectSceneGeneration;
+        _cameraObservation.LastPreLoginSceneCameraFrame = GetCurrentPhase2CFrame();
     }
 
     private void CapturePostFixOnCameraState()
@@ -1440,12 +1440,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
             return;
         }
 
-        _lastPostFixOnSceneCameraPosition = snapshot.SceneCameraPosition;
-        _lastPostFixOnLookAtVector = snapshot.LookAtVector;
-        _lastPostFixOnDistance = snapshot.Distance;
-        _lastPostFixOnFovY = snapshot.FovY;
-        _lastPostFixOnCameraCaptureStatus = "success";
-        _lastPostFixOnCameraCaptureError = string.Empty;
+        _cameraObservation.LastPostFixOnSceneCameraPosition = snapshot.SceneCameraPosition;
+        _cameraObservation.LastPostFixOnLookAtVector = snapshot.LookAtVector;
+        _cameraObservation.LastPostFixOnDistance = snapshot.Distance;
+        _cameraObservation.LastPostFixOnFovY = snapshot.FovY;
+        _cameraObservation.LastPostFixOnCameraCaptureStatus = "success";
+        _cameraObservation.LastPostFixOnCameraCaptureError = string.Empty;
     }
 
     // B (independent compositing): place the character at the point the engine's
@@ -1744,9 +1744,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
     public void ClearCharaSelectView()
     {
         StoreCharaSelectView(TitleBackgroundCharaSelectView.None);
-        _fixOnViewOverrideAppliedCount = 0;
-        _lastFixOnViewOverrideSource = "not-run";
-        _lastViewOverrideAppliedGeneration = 0;
+        _cameraObservation.FixOnViewOverrideAppliedCount = 0;
+        _cameraObservation.LastFixOnViewOverrideSource = "not-run";
+        _cameraObservation.LastViewOverrideAppliedGeneration = 0;
         ReloadNativeIntegration();
     }
 
@@ -1966,22 +1966,22 @@ public sealed unsafe partial class TitleScreenBackgroundService
             var runSource = runApplied > 0 ? _lastCharaSelectCharacterPlacementSource : "none";
             var runTarget = _lastCharaSelectCharacterPlacementTarget ?? Vector3.Zero;
             var runAnchorFrame = runApplied > 0 ? _lastCharaSelectCharacterPlacementAnchorFrame : "none";
-            var generationMatched = _lastPreLoginSceneCameraGeneration > 0
-                && _lastPreLoginSceneCameraGeneration == _fixOnExperimentSceneGeneration;
+            var generationMatched = _cameraObservation.LastPreLoginSceneCameraGeneration > 0
+                && _cameraObservation.LastPreLoginSceneCameraGeneration == _cameraObservation.FixOnExperimentSceneGeneration;
 
             // 観測値が欠けている run は採用しない（zero 埋めで偽サンプルを作らない）。
-            if (!_lastObservedFixOnFocus.HasValue
-                || !_lastPreLoginSceneCameraPosition.HasValue
-                || !_lastPreLoginSceneCameraLookAt.HasValue)
+            if (!_cameraObservation.LastObservedFixOnFocus.HasValue
+                || !_cameraObservation.LastPreLoginSceneCameraPosition.HasValue
+                || !_cameraObservation.LastPreLoginSceneCameraLookAt.HasValue)
             {
                 return false;
             }
 
             // 検証済み world 座標は probe の生値ではなく resolver が gate を通した値を使う。
             var worldPosition = worldRes.Position;
-            var fixOnObservedFocus = _lastObservedFixOnFocus.Value;
-            var preLoginCamera = _lastPreLoginSceneCameraPosition.Value;
-            var preLoginLookAt = _lastPreLoginSceneCameraLookAt.Value;
+            var fixOnObservedFocus = _cameraObservation.LastObservedFixOnFocus.Value;
+            var preLoginCamera = _cameraObservation.LastPreLoginSceneCameraPosition.Value;
+            var preLoginLookAt = _cameraObservation.LastPreLoginSceneCameraLookAt.Value;
 
             if (!TitleBackgroundWorldCoordinateCorrespondenceLogic.IsAcceptableRun(
                     worldRes.Eligible,
@@ -2018,9 +2018,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 fixOnObservedFocus,
                 preLoginCamera,
                 preLoginLookAt,
-                _fixOnExperimentSceneGeneration,
+                _cameraObservation.FixOnExperimentSceneGeneration,
                 generationMatched,
-                _fixOnExperimentCaptureContext);
+                _cameraObservation.FixOnExperimentCaptureContext);
             _worldProbeState.Samples.Add(sample);
             PersistWorldCoordinateCorrespondenceReport();
             return true;
@@ -2188,17 +2188,17 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void MarkPostFixOnCameraCaptureFailed(string reason)
     {
-        _lastPostFixOnCameraCaptureStatus = "failed";
-        _lastPostFixOnCameraCaptureError = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
+        _cameraObservation.LastPostFixOnCameraCaptureStatus = "failed";
+        _cameraObservation.LastPostFixOnCameraCaptureError = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
     }
 
     private void ClearPostFixOnCameraObservation()
     {
-        _lastPostFixOnCameraCaptureStatus = "unavailable";
-        _lastPostFixOnCameraCaptureError = string.Empty;
-        _lastPostFixOnSceneCameraPosition = null;
-        _lastPostFixOnLookAtVector = null;
-        _lastPostFixOnDistance = null;
-        _lastPostFixOnFovY = null;
+        _cameraObservation.LastPostFixOnCameraCaptureStatus = "unavailable";
+        _cameraObservation.LastPostFixOnCameraCaptureError = string.Empty;
+        _cameraObservation.LastPostFixOnSceneCameraPosition = null;
+        _cameraObservation.LastPostFixOnLookAtVector = null;
+        _cameraObservation.LastPostFixOnDistance = null;
+        _cameraObservation.LastPostFixOnFovY = null;
     }
 }

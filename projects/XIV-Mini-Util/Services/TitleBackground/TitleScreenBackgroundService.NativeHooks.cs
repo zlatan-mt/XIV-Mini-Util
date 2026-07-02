@@ -305,12 +305,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)
     {
-        _fixOnPassiveCallCount++;
+        _cameraObservation.FixOnPassiveCallCount++;
         // FixOn 発火「時点」の generation / context を保持する（報告は post-login で行われ active
         // generation は終了処理で 0、context は post-login になるため、その時の値では取り違える）。
-        _fixOnExperimentSceneGeneration = _activeCharaSelectSceneGeneration;
-        _fixOnExperimentCaptureContext = _clientState.IsLoggedIn ? "post-login" : "pre-login";
-        _fixOnExperimentCharaSelectSession = _charaSelectTitleBackgroundSessionActive;
+        _cameraObservation.FixOnExperimentSceneGeneration = _activeCharaSelectSceneGeneration;
+        _cameraObservation.FixOnExperimentCaptureContext = _clientState.IsLoggedIn ? "post-login" : "pre-login";
+        _cameraObservation.FixOnExperimentCharaSelectSession = _charaSelectTitleBackgroundSessionActive;
         RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.FixOn);
         float[]? cameraOverride = null;
         float[]? focusOverride = null;
@@ -318,9 +318,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(false);
         try
         {
-            _lastObservedFixOnCamera = TryReadVector(cameraPos);
-            _lastObservedFixOnFocus = TryReadVector(focusPos);
-            _lastObservedFixOnFovY = fovY;
+            _cameraObservation.LastObservedFixOnCamera = TryReadVector(cameraPos);
+            _cameraObservation.LastObservedFixOnFocus = TryReadVector(focusPos);
+            _cameraObservation.LastObservedFixOnFovY = fovY;
             // passive 観測モードでは、将来 ShouldOverrideCamera() が復活しても絶対に
             // override せず passthrough を強制する（観測専用フックの不変条件）。
             if (!_configuration.TitleBackgroundFixOnPassiveObservationEnabled && ShouldOverrideCamera())
@@ -340,11 +340,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     plan.Focus.Z,
                 ];
                 overrideFovY = plan.FovY;
-                _lastCameraOverrideApplied = true;
+                _cameraObservation.LastCameraOverrideApplied = true;
                 invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(true);
-                _lastAppliedCamera = plan.Camera;
-                _lastAppliedFocus = plan.Focus;
-                _lastAppliedFovY = plan.FovY;
+                _cameraObservation.LastAppliedCamera = plan.Camera;
+                _cameraObservation.LastAppliedFocus = plan.Focus;
+                _cameraObservation.LastAppliedFovY = plan.FovY;
                 _log.Information(
                     "[XMU BG] Camera override applied. camera={Camera}, focus={Focus}, fovY={FovY}",
                     FormatVector(plan.Camera),
@@ -353,16 +353,16 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
 
             // 診断（read-only）: 適用可否の総合理由を毎回記録する。"ready" のときだけ下の override が走る。
-            _lastFixOnFocusOverrideGateReason = ComputeFixOnFocusOverrideGateReason();
+            _cameraObservation.LastFixOnFocusOverrideGateReason = ComputeFixOnFocusOverrideGateReason();
 
             // view override（TitleEdit 方式）: 「今の見え方を保存」した camera+focus+fov を scene-local
             // 絶対値で「まとめて」上書きする。passive 観測 ON は最優先 passthrough、実行コンテキストは
             // 焦点 override と同じ FixOn 専用ゲート、候補一致時のみ。焦点だけの anchor override より優先する。
-            // 同一 scene generation での再発火は _lastViewOverrideAppliedGeneration で弾き、ネイティブ FixOn
+            // 同一 scene generation での再発火は _cameraObservation.LastViewOverrideAppliedGeneration で弾き、ネイティブ FixOn
             // への適用を generation あたり 1 回に制限する（再呼び出しの冪等性は保証されないため）。
             if (cameraOverride == null
                 && focusOverride == null
-                && _lastViewOverrideAppliedGeneration != _activeCharaSelectSceneGeneration
+                && _cameraObservation.LastViewOverrideAppliedGeneration != _activeCharaSelectSceneGeneration
                 && TitleBackgroundFixOnFocusOverrideLogic.ShouldConsiderFocusOverride(
                     _configuration.TitleBackgroundFixOnPassiveObservationEnabled,
                     _configuration.TitleBackgroundCharaSelectViewEnabled)
@@ -372,10 +372,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     _configuration.TitleBackgroundCharaSelectViewEnabled,
                     BuildCharaSelectView(),
                     ResolveCurrentOverrideCandidate().Id,
-                    _lastObservedFixOnCamera ?? Vector3.Zero,
-                    _lastObservedFixOnFocus ?? Vector3.Zero,
+                    _cameraObservation.LastObservedFixOnCamera ?? Vector3.Zero,
+                    _cameraObservation.LastObservedFixOnFocus ?? Vector3.Zero,
                     fovY);
-                _lastFixOnViewOverrideSource = viewResolution.Source;
+                _cameraObservation.LastFixOnViewOverrideSource = viewResolution.Source;
                 if (viewResolution.ShouldOverride)
                 {
                     cameraOverride =
@@ -391,12 +391,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
                         viewResolution.Focus.Z,
                     ];
                     overrideFovY = viewResolution.FovY;
-                    _lastCameraOverrideApplied = true;
-                    _lastAppliedCamera = viewResolution.Camera;
-                    _lastAppliedFocus = viewResolution.Focus;
-                    _lastAppliedFovY = viewResolution.FovY;
-                    _fixOnViewOverrideAppliedCount++;
-                    _lastViewOverrideAppliedGeneration = _activeCharaSelectSceneGeneration;
+                    _cameraObservation.LastCameraOverrideApplied = true;
+                    _cameraObservation.LastAppliedCamera = viewResolution.Camera;
+                    _cameraObservation.LastAppliedFocus = viewResolution.Focus;
+                    _cameraObservation.LastAppliedFovY = viewResolution.FovY;
+                    _cameraObservation.FixOnViewOverrideAppliedCount++;
+                    _cameraObservation.LastViewOverrideAppliedGeneration = _activeCharaSelectSceneGeneration;
                     invocationMode = "view-override";
                     _log.Information(
                         "[XMU BG] FixOn view override applied. camera={Camera}, focus={Focus}, fovY={FovY}",
@@ -422,9 +422,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled,
                     BuildFixOnFocusAnchor(),
                     ResolveCurrentOverrideCandidate().Id,
-                    _lastObservedFixOnFocus ?? Vector3.Zero,
+                    _cameraObservation.LastObservedFixOnFocus ?? Vector3.Zero,
                     CharaSelectCharacterFocusBodyDrop);
-                _lastFixOnFocusOverrideSource = focusResolution.Source;
+                _cameraObservation.LastFixOnFocusOverrideSource = focusResolution.Source;
                 if (focusResolution.ShouldOverride)
                 {
                     focusOverride =
@@ -433,9 +433,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
                         focusResolution.Focus.Y,
                         focusResolution.Focus.Z,
                     ];
-                    _lastCameraOverrideApplied = true;
-                    _lastAppliedFocus = focusResolution.Focus;
-                    _fixOnFocusOverrideAppliedCount++;
+                    _cameraObservation.LastCameraOverrideApplied = true;
+                    _cameraObservation.LastAppliedFocus = focusResolution.Focus;
+                    _cameraObservation.FixOnFocusOverrideAppliedCount++;
                     invocationMode = "anchor-focus-override";
                     _log.Information(
                         "[XMU BG] FixOn focus anchor override applied. focus={Focus}",
@@ -452,7 +452,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(false);
         }
 
-        _lastFixOnInvocationMode = invocationMode;
+        _cameraObservation.LastFixOnInvocationMode = invocationMode;
         nint result;
         if (cameraOverride != null || focusOverride != null)
         {
