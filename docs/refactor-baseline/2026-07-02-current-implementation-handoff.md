@@ -4,7 +4,7 @@
 - 対象作業ツリー: `C:\Project\apps\XIV-Mini-Util`
 - 対象ブランチ: `main`
 - 直近の主要commit: `5b2f9f6`（リファクタ一式＋R3の1責務目）、`34c89c3`（本資料の更新）
-- Git状態: pushはユーザー判断で保留中。最新のHEAD・ahead数・cleanさは必ず `git status --short --branch` で再確認すること
+- Git状態: 2026-07-02に `origin/main` へpush済み（`1a3fcb7..151128c`）。リリース（タグ・pluginmaster更新）は未実施。最新のHEAD・ahead数・cleanさは必ず `git status --short --branch` で再確認すること
 - 用途: 別AIが過去の完了報告を信用せず、現在のコードと実機結果から安全に作業を継続するための引き継ぎ
 
 ## 1. この資料の読み方
