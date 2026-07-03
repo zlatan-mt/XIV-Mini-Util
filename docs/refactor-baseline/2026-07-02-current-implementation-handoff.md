@@ -909,6 +909,28 @@ view.overrideLastSource=view
 
 ただしユーザーへ診断キー手動検索を要求しない。必要なら自動レポート経路へ含める。
 
+### 12.2b 【未解決バグ・最優先】保存viewがキャラ選択画面で再現されない（2026-07-03夜時点）
+
+**症状**: 「現在の構図を保存」は成功し設定へ永続化されるが、次回のキャラ選択画面でマウスなしの構図再現が起きない。yield修正（`13ebc4f`）適用後も実機で再現されないことをユーザーが確認済み。
+
+**確定している事実**:
+1. 保存は成功している。実機configの実測値: `TitleBackgroundCharaSelectViewEnabled=True` / camera=(-505.5245, 70.91505, 520.33856) / focus=(-508.7725, 70.62913, 519.8297) / fovY=0.78 / candidate=custom:n4f4（world恒等座標系なので値も妥当）。
+2. 再生機構は過去に一度実機で機能した証拠がある: 2026-07-03昼の「上空カメラ事件」で `view.overrideAppliedCount=1` / `view.overrideLastSource=view` が観測され、カメラが実際にviewへ乗っ取られた。**ただしそれは確認run中**（runは `ReloadNativeIntegrationForOneClick` でruntime camera stateがリセットされた直後）だった。
+3. 既知の上書き経路1つは修正済み: `RestoreCharaSelectRuntimeCameraStateAfterSceneLoad` がyaw/pitch/distanceを書いてview構図を消していた → view使用可能＋candidate一致時は `yielded-to-saved-view` で譲るようにした（`13ebc4f`、Test 448〜452）。**それでも直っていない**。
+
+**再生の仕組み（現状实装）**: `LobbyCameraFixOnDetour`（`TitleScreenBackgroundService.NativeHooks.cs` 360〜407行付近）が、scene generationあたり1回だけ camera+focus+fovY をFixOn引数へ差し替える。ゲート: `cameraOverride==null && focusOverride==null`、`_cameraObservation.LastViewOverrideAppliedGeneration != _activeCharaSelectSceneGeneration`、`ShouldConsiderFocusOverride(passive設定, view設定)`、`IsFixOnFocusOverrideContextActive()`、`TitleBackgroundFixOnViewOverrideLogic.Resolve(...).ShouldOverride`。
+
+**次AIが最初にやるべき切り分け**（コードを書く前に）:
+1. ユーザーに「view保存済みの状態で確認runを1回」実行してもらい、自動コピーされたレポートの次のキーを読む:
+   - `view.overrideAppliedCount`（**0なら FixOn 側ゲートのどれかが通常経路で不成立** → 仮説A）
+   - `view.overrideLastSource`
+   - `fixOn.calls`（FixOn自体が発火しているか）
+   - runtime restore系status（`yielded-to-saved-view` になっているか。診断出力は `TitleScreenBackgroundService.Diagnostics.cs` 695/712/720行付近のキー）
+2. **仮説A（有力）**: FixOnはシーン読み込みの最中に発火し、その時点で `IsFixOnFocusOverrideContextActive()` の要求（bridge/composition active・session active・scene generation一致・Ready）のどれかが通常ログアウト経路では揃っていない。特に「上空カメラ事件」ではrun直後のreloadでタイミングが変わっていた可能性が高い。ゲートの各条件の成否をFixOn発火時点で記録する診断（`fixOn.exp.gateReason` 相当のview版。現在viewゲートの失敗理由は記録されない）を足すと一発で確定する。
+3. **仮説B**: FixOnのview overrideは成立しているが、`13ebc4f` で塞いだ経路以外にまだ上書きがある。候補: curve系（`ApplyCharaSelectCameraCurveAfterSceneLoad` のtilt/low/mid/high、`CalculateLobbyCameraLookAtY` の継続補正 — 注視点Yを毎フレーム引き戻す）。上空カメラ事件ではviewが「効いたまま」だったので可能性は低いが、当時と通常経路でcurve適用条件が違う可能性はある。
+4. 修正時の境界: §2遵守。FixOn detour内のview override本体（勝ち手）は実績があるので、動かすなら「ゲートの緩和 or 発火タイミングの追加」を検討する（例: FixOnを待たずscene ready後にviewを直接適用する経路の追加 — ただしTryApplyRuntimeCameraPoseはyaw/pitch/distance形式なので、position+lookAt形式のviewを直接書くには別の書込手段が必要。TitleEditは `LobbyCamera` へ直接FixOn呼び出しする命令的経路を持っていた=docs/archive参照）。
+5. テスト448〜452が現在の譲歩挙動をロックしている。挙動を変える場合は契約意図を保って更新。
+
 ### 12.3 world/lobby対応の複数標高サンプル（実機作業時）
 
 現在の1クリックフローだけで異なる標高の地点を測る。手動probe操作を追加しない。
@@ -1041,4 +1063,6 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 - **（2026-07-03 実装済み・実機確認待ち）** (a) 陸上配置解禁: `PersistentApplyEnabled=true`＋確認run成功時のprobe anchor自動永続化（§6.5参照、commit `beae693`）。(b) 明るさ補正: `TitleBackgroundEnvironmentNoonEnabled`（既定true）で背景セッション中のみ毎フレーム `EnvManager.DayTimeSeconds=43200`（正午）へ上書き。ゲートは「config有効＋**未ログイン**＋背景セッション中＋Ready」の4条件で、ログインした瞬間に書込停止（post-loginリークなし）。天候・露出は不変。noon書込失敗はservice状態を汚さずfail-soft。Developer診断にトグルあり、通常UIは操作数4のまま。テストは439→443件（Test 439〜442追加）。
 - **（2026-07-03夜 実機確認済み）** 通常ログアウトで陸上の保存地点に立つ／正午＋晴天override各7,408フレーム適用／**黒テクスチャ・黒い空も晴天固定で解消**（雨アセットと強制正午の不整合が原因だった）。ユーザー評価「かなり良くなった！ほぼ完ぺき」。
 - 追加修正（2026-07-03夜）: 保存viewが永続化されるのに再現されないバグを修正（`13ebc4f`）。原因はFixOnのview override（勝ち手）を `RestoreCharaSelectRuntimeCameraStateAfterSceneLoad` のyaw/pitch/distance書込が上書きしていたこと。使える保存viewがcandidate一致で存在する場合、runtime restoreは `yielded-to-saved-view` で譲る（判定はFixOn側Resolveと同一条件を共有、Test 448〜452）。**view再現の実機確認は未実施**。
-- 次AIの残タスク: (a) 保存view再現の実機確認、(b) run中のview抑止/サンプル汚染ガード、(c) report builderのservice private stateからの完全分離、(d) リリース判断（source 0.3.8 vs stable 0.3.7、テストは452件に増加）。
+- **保存view再現は `13ebc4f` 適用後も実機で失敗**（2026-07-03夜、ユーザー確認）。調査状況と切り分け手順は**§12.2bに集約**（次AIはここから開始）。
+- 次AIの残タスク: (a) §12.2bの保存view再現バグの切り分けと修正（最優先）、(b) run中のview抑止/サンプル汚染ガード、(c) report builderのservice private stateからの完全分離、(d) リリース判断（source 0.3.8 vs stable 0.3.7、テストは452件に増加）。
+- 実機で完了確認済みの機能（2026-07-03）: 陸上配置の永続化＋通常ログアウトでの再現、正午固定、晴天固定（黒テクスチャ/黒空も解消）。ユーザー評価「ほぼ完ぺき」— 残るはview再現のみ。
