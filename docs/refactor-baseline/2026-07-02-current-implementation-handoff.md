@@ -930,7 +930,9 @@ zOffsetConstant=True meanZOffset=0
 yFixedOffsetCandidate=True meanYOffset=0.834（slope=1）
 ```
 
-X/Zオフセットは完全に0、Y差0.834はFixOn焦点の胴体高さオフセット（bodyDrop相当）であり座標系差ではない。**world→lobby変換は恒等（CharaSelectシーンは同一地形ファイルを同一座標系で読む）という強い証拠**。旧H-B仮説（フレーム不一致）は、キャラ未配置時代の自然焦点(0,14,0)を座標系差と誤読していた。residual未検証（2点）のため確定扱いにはせず、3点目のサンプルと実機目視レビューを経てから `PersistentApplyEnabled` 再レビュー（通常経路の陸上配置解禁）を判断する。
+X/Zオフセットは完全に0、Y差0.834はFixOn焦点の胴体高さオフセット（bodyDrop相当）であり座標系差ではない。**world→lobby変換は恒等（CharaSelectシーンは同一地形ファイルを同一座標系で読む）という強い証拠**。旧H-B仮説（フレーム不一致）は、キャラ未配置時代の自然焦点(0,14,0)を座標系差と誤読していた。
+
+**（同日 3点目で残差検証済み）** 標高48.7 / 71.2 / 69.8mの3点で `residualComputed=True` / `maxResidual=0.002` / `yLinearSlope=1.0001` / `yLinearIntercept=0.829`。ユーザーの実機目視でも全runでキャラは正しい場所に立った。**恒等変換はデータ・目視の両面で確認完了**。これで `PersistentApplyEnabled` 再レビュー（通常経路の陸上配置解禁）の前提材料が揃った。解禁実装時も「即時の自動昇格はしない」原則に従い、設計レビューを経ること。
 
 **運用上の注意（2026-07-03に実機で確認した罠）**:
 - 座標サンプルはセッション限定（ゲーム再起動で消える）。複数標高の収集は同一セッション内で行い、途中で「初期状態に戻す」を押さない（サンプルもクリアされるため）。
@@ -1038,4 +1040,6 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 - 旧設定の空signatureで通常経路のresolverが全滅する実機バグを発見・修正済み（正規化で既知既定値へ補完、`5011582`）。通常経路（イル・メグ）でも背景＋キャラ表示が動くことを実機確認済み（キャラは湖中心フォールバック位置＝既知の仕様限界）。
 - 保存viewのround-trip診断値（§12.2）は実機観測済み: `view.enabled=True` / `view.overrideAppliedCount=1` / `view.overrideLastSource=view`。機構は動作する。ただし**view有効のまま確認runを回すとカメラが乗っ取られ上空に置かれる**実機事象あり（§12.3の注意参照）。
 - world/lobby座標対応は**標高差22.6mの2点で `fixed-offset-candidate`（X/Z=0、Y=0.834=焦点高さ）＝恒等変換の強い証拠**を取得（§12.3の実測結果参照）。3点目のresidual検証と実機目視レビューが残る。
-- 次AIの残タスク: (a) 3点目サンプル＋目視レビュー → `PersistentApplyEnabled` 再レビュー（通常経路の陸上配置解禁の設計・実装）、(b) run中のview抑止/サンプル汚染ガードの設計改善、(c) report builderのservice private stateからの完全分離。
+- 座標対応は3点・残差0.002で恒等変換を確認済み（§12.3）。ユーザー目視も全run一致。
+- ユーザーの新規要望（2026-07-03）: **ログイン画面が全体的に暗すぎるので明るくしたい**。素材: config `TitleBackgroundWeatherId` / `TitleBackgroundTimeOffset` は存在するが**未配線**（capture draftでのみ参照）。`TitleBackgroundCharacterSelectLightingMode` のPreferBright*/EnvironmentOverrideExperimental等も未実装の予約値。EnvManagerはread-only probeのみ実装済み。時刻上書き（TitleEdit方式のDayTimeSeconds書込）はunsafe writeのため、pre-login＋session限定ゲート＋post-loginリーク防止の設計レビュー必須。
+- 次AIの残タスク: (a) `PersistentApplyEnabled` 再レビューと通常経路の陸上配置解禁の設計・実装、(b) ログイン画面の明るさ補正（時刻/天候override）の設計・実装、(c) run中のview抑止/サンプル汚染ガード、(d) report builderのservice private stateからの完全分離。
