@@ -1039,5 +1039,6 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 - 座標対応は3点・残差0.002で恒等変換を確認済み（§12.3）。ユーザー目視も全run一致。
 - ユーザーの新規要望（2026-07-03）: **ログイン画面が全体的に暗すぎるので明るくしたい**。素材: config `TitleBackgroundWeatherId` / `TitleBackgroundTimeOffset` は存在するが**未配線**（capture draftでのみ参照）。`TitleBackgroundCharacterSelectLightingMode` のPreferBright*/EnvironmentOverrideExperimental等も未実装の予約値。EnvManagerはread-only probeのみ実装済み。時刻上書き（TitleEdit方式のDayTimeSeconds書込）はunsafe writeのため、pre-login＋session限定ゲート＋post-loginリーク防止の設計レビュー必須。
 - **（2026-07-03 実装済み・実機確認待ち）** (a) 陸上配置解禁: `PersistentApplyEnabled=true`＋確認run成功時のprobe anchor自動永続化（§6.5参照、commit `beae693`）。(b) 明るさ補正: `TitleBackgroundEnvironmentNoonEnabled`（既定true）で背景セッション中のみ毎フレーム `EnvManager.DayTimeSeconds=43200`（正午）へ上書き。ゲートは「config有効＋**未ログイン**＋背景セッション中＋Ready」の4条件で、ログインした瞬間に書込停止（post-loginリークなし）。天候・露出は不変。noon書込失敗はservice状態を汚さずfail-soft。Developer診断にトグルあり、通常UIは操作数4のまま。テストは439→443件（Test 439〜442追加）。
-- 実機確認の残り: 通常ログアウトで「陸上の保存地点に立つ＋正午の明るさ」の目視、およびpost-loginで時刻が正常なこと。
-- 次AIの残タスク: (a) 上記実機確認、(b) run中のview抑止/サンプル汚染ガード、(c) report builderのservice private stateからの完全分離、(d) リリース判断（source 0.3.8 vs stable 0.3.7）。
+- **（2026-07-03夜 実機確認済み）** 通常ログアウトで陸上の保存地点に立つ／正午＋晴天override各7,408フレーム適用／**黒テクスチャ・黒い空も晴天固定で解消**（雨アセットと強制正午の不整合が原因だった）。ユーザー評価「かなり良くなった！ほぼ完ぺき」。
+- 追加修正（2026-07-03夜）: 保存viewが永続化されるのに再現されないバグを修正（`13ebc4f`）。原因はFixOnのview override（勝ち手）を `RestoreCharaSelectRuntimeCameraStateAfterSceneLoad` のyaw/pitch/distance書込が上書きしていたこと。使える保存viewがcandidate一致で存在する場合、runtime restoreは `yielded-to-saved-view` で譲る（判定はFixOn側Resolveと同一条件を共有、Test 448〜452）。**view再現の実機確認は未実施**。
+- 次AIの残タスク: (a) 保存view再現の実機確認、(b) run中のview抑止/サンプル汚染ガード、(c) report builderのservice private stateからの完全分離、(d) リリース判断（source 0.3.8 vs stable 0.3.7、テストは452件に増加）。
