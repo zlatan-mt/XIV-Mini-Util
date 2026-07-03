@@ -4967,5 +4967,37 @@ Test(432, "layer step increments and decrements with zero floor", () =>
         && TitleBackgroundLayerStepLogic.Step(7, 0) == 7;
 });
 
+Test(440, "environment noon override gate requires logged-out chara select session and ready hook state", () =>
+{
+    var root = FindRepositoryRoot();
+    var timelineText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.TimelineDiagnostics.cs"));
+    var body = ExtractMethodBody(timelineText, "private void MaintainCharaSelectEnvironmentNoon()");
+    return body.Contains("TitleBackgroundEnvironmentNoonEnabled", StringComparison.Ordinal)
+        && body.Contains("|| _clientState.IsLoggedIn", StringComparison.Ordinal)
+        && body.Contains("_charaSelectTitleBackgroundSessionActive", StringComparison.Ordinal)
+        && body.Contains("_hookLifecycle.State != TitleBackgroundServiceState.Ready", StringComparison.Ordinal)
+        && body.Contains("TitleBackgroundEnvironmentNoonWriter.TryApplyNoon()", StringComparison.Ordinal);
+});
+
+Test(441, "environment noon toggle is absent from the normal title background screen", () =>
+{
+    var root = FindRepositoryRoot();
+    var normalText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackground.cs"));
+    var diagnosticsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackgroundDiagnostics.cs"));
+    return !normalText.Contains("TitleBackgroundEnvironmentNoonEnabled", StringComparison.Ordinal)
+        && diagnosticsText.Contains("TitleBackgroundEnvironmentNoonEnabled", StringComparison.Ordinal);
+});
+
+Test(442, "environment noon writer only writes DayTimeSeconds to the noon constant", () =>
+{
+    var root = FindRepositoryRoot();
+    var writerText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundEnvironmentNoonWriter.cs"));
+    var body = ExtractMethodBody(writerText, "public static bool TryApplyNoon()");
+    return body.Contains("manager->DayTimeSeconds = NoonDayTimeSeconds", StringComparison.Ordinal)
+        && !body.Contains("ActiveWeather", StringComparison.Ordinal)
+        && !body.Contains("EnvState", StringComparison.Ordinal)
+        && !body.Contains("Exposure", StringComparison.Ordinal);
+});
+
     }
 }

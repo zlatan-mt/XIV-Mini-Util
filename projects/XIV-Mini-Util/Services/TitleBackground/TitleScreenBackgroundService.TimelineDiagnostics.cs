@@ -1517,6 +1517,40 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private const float CharaSelectCharacterFocusBodyDrop = 0.9f;
 
+    // ログイン画面（Title Background）が実時刻・天候をそのまま反映して暗くなる問題への対策。
+    // 背景セッション中（pre-login + CharaSelectセッション中 + hook Ready）に限り、EnvManager の
+    // 時刻を毎フレームエオルゼア正午へ上書きする。IsLoggedIn は最重要ゲート：ログイン中は絶対に
+    // 書き込まない（ログインした瞬間にゲートが外れ、post-login へは書込がリークしない）。
+    // 天候・露出・環境光には一切触れない（このメソッドの唯一の責務は時刻上書き）。
+    private void MaintainCharaSelectEnvironmentNoon()
+    {
+        if (!_configuration.TitleBackgroundEnvironmentNoonEnabled
+            || _clientState.IsLoggedIn
+            || !_charaSelectTitleBackgroundSessionActive
+            || _hookLifecycle.State != TitleBackgroundServiceState.Ready)
+        {
+            return;
+        }
+
+        try
+        {
+            if (TitleBackgroundEnvironmentNoonWriter.TryApplyNoon())
+            {
+                _environmentNoon.AppliedFrameCount++;
+                _environmentNoon.LastStatus = "applied";
+            }
+            else
+            {
+                _environmentNoon.LastStatus = "env-manager-unavailable";
+            }
+        }
+        catch (Exception ex)
+        {
+            _environmentNoon.LastStatus = ex.GetType().Name;
+            _log.Warning(ex, "TitleBackground environment noon override failed.");
+        }
+    }
+
     // placement-supported（LobbyNative / CharaSelectFallback）frame のときだけ有効なアンカー。
     // World 実験座標はここでは決して有効化しない（World は別 gate の experimental 経路だけが扱う）。
     private TitleBackgroundCharaSelectAnchor BuildSupportedFrameAnchor()

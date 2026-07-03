@@ -15,6 +15,15 @@ public sealed partial class SettingsTab
         ImGui.TextDisabled(
             $"座標対応サンプル: {_titleScreenBackgroundService.WorldCoordinateSampleCount}件");
 
+        // 背景セッション中（pre-login）のみ環境時刻を正午へ固定する。ログイン中には適用されない
+        // （IsLoggedIn ゲートで遮断）。通常画面には出さない開発者向けトグル。既定 ON。
+        var noonEnabled = _configuration.TitleBackgroundEnvironmentNoonEnabled;
+        if (ImGui.Checkbox("ログイン画面の時刻を正午に固定##TitleBackgroundEnvironmentNoon", ref noonEnabled))
+        {
+            _configuration.TitleBackgroundEnvironmentNoonEnabled = noonEnabled;
+            _configuration.Save();
+        }
+
         if (ImGui.Button("現在の診断レポートをコピー##TitleBackgroundDiagnosticCopy"))
         {
             var lines = _titleScreenBackgroundService.RunBulkDiagnostic();

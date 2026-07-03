@@ -358,5 +358,22 @@ Test(433, "configuration fixOn passive observation flag persists as top-level js
         && restored!.TitleBackgroundFixOnPassiveObservationEnabled;
 });
 
+Test(439, "configuration environment noon override flag defaults true and persists as top-level json", () =>
+{
+    var defaultConfiguration = new Configuration();
+    var configuration = new Configuration
+    {
+        TitleBackgroundEnvironmentNoonEnabled = false,
+    };
+
+    var json = JsonSerializer.Serialize(configuration);
+    var restored = JsonSerializer.Deserialize<Configuration>(json);
+
+    return defaultConfiguration.TitleBackgroundEnvironmentNoonEnabled
+        && json.Contains("\"TitleBackgroundEnvironmentNoonEnabled\"", StringComparison.Ordinal)
+        && restored != null
+        && !restored.TitleBackgroundEnvironmentNoonEnabled;
+});
+
     }
 }

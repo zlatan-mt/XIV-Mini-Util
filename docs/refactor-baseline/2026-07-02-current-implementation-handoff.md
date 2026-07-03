@@ -1038,4 +1038,6 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 - world/lobby座標対応は**標高差22.6mの2点で `fixed-offset-candidate`（X/Z=0、Y=0.834=焦点高さ）＝恒等変換の強い証拠**を取得（§12.3の実測結果参照）。3点目のresidual検証と実機目視レビューが残る。
 - 座標対応は3点・残差0.002で恒等変換を確認済み（§12.3）。ユーザー目視も全run一致。
 - ユーザーの新規要望（2026-07-03）: **ログイン画面が全体的に暗すぎるので明るくしたい**。素材: config `TitleBackgroundWeatherId` / `TitleBackgroundTimeOffset` は存在するが**未配線**（capture draftでのみ参照）。`TitleBackgroundCharacterSelectLightingMode` のPreferBright*/EnvironmentOverrideExperimental等も未実装の予約値。EnvManagerはread-only probeのみ実装済み。時刻上書き（TitleEdit方式のDayTimeSeconds書込）はunsafe writeのため、pre-login＋session限定ゲート＋post-loginリーク防止の設計レビュー必須。
-- 次AIの残タスク: (a) `PersistentApplyEnabled` 再レビューと通常経路の陸上配置解禁の設計・実装、(b) ログイン画面の明るさ補正（時刻/天候override）の設計・実装、(c) run中のview抑止/サンプル汚染ガード、(d) report builderのservice private stateからの完全分離。
+- **（2026-07-03 実装済み・実機確認待ち）** (a) 陸上配置解禁: `PersistentApplyEnabled=true`＋確認run成功時のprobe anchor自動永続化（§6.5参照、commit `beae693`）。(b) 明るさ補正: `TitleBackgroundEnvironmentNoonEnabled`（既定true）で背景セッション中のみ毎フレーム `EnvManager.DayTimeSeconds=43200`（正午）へ上書き。ゲートは「config有効＋**未ログイン**＋背景セッション中＋Ready」の4条件で、ログインした瞬間に書込停止（post-loginリークなし）。天候・露出は不変。noon書込失敗はservice状態を汚さずfail-soft。Developer診断にトグルあり、通常UIは操作数4のまま。テストは439→443件（Test 439〜442追加）。
+- 実機確認の残り: 通常ログアウトで「陸上の保存地点に立つ＋正午の明るさ」の目視、およびpost-loginで時刻が正常なこと。
+- 次AIの残タスク: (a) 上記実機確認、(b) run中のview抑止/サンプル汚染ガード、(c) report builderのservice private stateからの完全分離、(d) リリース判断（source 0.3.8 vs stable 0.3.7）。
