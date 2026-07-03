@@ -402,14 +402,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var cameraHookReady = AreCameraHookReady();
         var cameraHookRequired = IsCameraHookRequired();
         var hooksReady = sceneHooksReady && (!cameraHookRequired || cameraHookReady);
-        var hooksEnabled = IsHookEnabled(_createSceneHook)
-            || IsHookEnabled(_lobbyUpdateHook)
-            || IsHookEnabled(_loadLobbySceneHook)
-            || IsHookEnabled(_lobbySceneLoadedHook)
-            || IsHookEnabled(_cameraFixOnHook)
-            || IsHookEnabled(_calculateLobbyCameraLookAtYHook)
-            || IsHookEnabled(_setCameraCurveMidPointHook)
-            || IsHookEnabled(_calculateCameraCurveLowAndHighPointHook);
+        var hooksEnabled = IsHookEnabled(_hookLifecycle.CreateSceneHook)
+            || IsHookEnabled(_hookLifecycle.LobbyUpdateHook)
+            || IsHookEnabled(_hookLifecycle.LoadLobbySceneHook)
+            || IsHookEnabled(_hookLifecycle.LobbySceneLoadedHook)
+            || IsHookEnabled(_hookLifecycle.CameraFixOnHook)
+            || IsHookEnabled(_hookLifecycle.CalculateLobbyCameraLookAtYHook)
+            || IsHookEnabled(_hookLifecycle.SetCameraCurveMidPointHook)
+            || IsHookEnabled(_hookLifecycle.CalculateCameraCurveLowAndHighPointHook);
         var capturePreset = _cameraRestoreCurve.LastCameraCaptureResult.Preset;
         var currentCameraCaptured = TryCaptureActiveCameraSnapshot(out var currentCamera, out var currentCaptureError);
         var currentCaptureStatus = currentCameraCaptured ? "success" : "failed";
@@ -549,9 +549,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
             return
             [
                 $"hooksEnabled={hooksEnabled}",
-                $"calculateLobbyCameraLookAtYHookEnabled={IsHookEnabled(_calculateLobbyCameraLookAtYHook)}",
-                $"setCameraCurveMidPointHookEnabled={IsHookEnabled(_setCameraCurveMidPointHook)}",
-                $"calculateCameraCurveLowAndHighPointHookEnabled={IsHookEnabled(_calculateCameraCurveLowAndHighPointHook)}",
+                $"calculateLobbyCameraLookAtYHookEnabled={IsHookEnabled(_hookLifecycle.CalculateLobbyCameraLookAtYHook)}",
+                $"setCameraCurveMidPointHookEnabled={IsHookEnabled(_hookLifecycle.SetCameraCurveMidPointHook)}",
+                $"calculateCameraCurveLowAndHighPointHookEnabled={IsHookEnabled(_hookLifecycle.CalculateCameraCurveLowAndHighPointHook)}",
                 $"sceneReadySignal.acceptedCount={_cameraRestoreCurve.SceneReadySignalAcceptedCount}",
                 $"phase2E.calculateLobbyCameraLookAtY.callCount={_phaseRecording.Phase2ECalculateLookAtYCallCount}",
                 $"phase2E.calculateLobbyCameraLookAtY.lastError={FormatNone(_phaseRecording.Phase2ECalculateLookAtYLastError)}",
@@ -662,10 +662,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
             $"sceneHooksReady={sceneHooksReady}",
             $"cameraHookReady={cameraHookReady}",
             $"cameraHookRequired={cameraHookRequired}",
-            $"cameraHookEnabled={IsHookEnabled(_cameraFixOnHook)}",
-            $"calculateLobbyCameraLookAtYHookEnabled={IsHookEnabled(_calculateLobbyCameraLookAtYHook)}",
-            $"setCameraCurveMidPointHookEnabled={IsHookEnabled(_setCameraCurveMidPointHook)}",
-            $"calculateCameraCurveLowAndHighPointHookEnabled={IsHookEnabled(_calculateCameraCurveLowAndHighPointHook)}",
+            $"cameraHookEnabled={IsHookEnabled(_hookLifecycle.CameraFixOnHook)}",
+            $"calculateLobbyCameraLookAtYHookEnabled={IsHookEnabled(_hookLifecycle.CalculateLobbyCameraLookAtYHook)}",
+            $"setCameraCurveMidPointHookEnabled={IsHookEnabled(_hookLifecycle.SetCameraCurveMidPointHook)}",
+            $"calculateCameraCurveLowAndHighPointHookEnabled={IsHookEnabled(_hookLifecycle.CalculateCameraCurveLowAndHighPointHook)}",
             "fixOnHookPolicy=disabled-in-phase1",
             "calculateLobbyCameraLookAtYHookPolicy=read-only-probe",
             "setCameraCurveMidPointHookPolicy=phase2g-post-original-generation-override",

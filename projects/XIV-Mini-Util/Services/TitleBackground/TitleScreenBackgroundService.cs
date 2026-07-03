@@ -46,17 +46,9 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundCameraRestoreCurveRuntimeState _cameraRestoreCurve = new();
     // phase2M placement / phase2E lookAtY / phase2F generated curve / phase2G generation overrideのセッション限定記録状態（プラグイン再起動で消える）。
     private readonly TitleBackgroundPhaseRecordingRuntimeState _phaseRecording = new();
+    // native hookインスタンスとservice状態機械（hook装着可否・dispose状態）のライフサイクル状態。
+    private readonly TitleBackgroundHookLifecycleRuntimeState _hookLifecycle = new();
 
-    private Hook<CreateSceneDelegate>? _createSceneHook;
-    private Hook<LobbyUpdateDelegate>? _lobbyUpdateHook;
-    private Hook<LoadLobbySceneDelegate>? _loadLobbySceneHook;
-    private Hook<LobbySceneLoadedDelegate>? _lobbySceneLoadedHook;
-    private Hook<LobbyCameraFixOnDelegate>? _cameraFixOnHook;
-    private Hook<CalculateLobbyCameraLookAtYDelegate>? _calculateLobbyCameraLookAtYHook;
-    private Hook<SetCameraCurveMidPointDelegate>? _setCameraCurveMidPointHook;
-    private Hook<CalculateCameraCurveLowAndHighPointDelegate>? _calculateCameraCurveLowAndHighPointHook;
-    private TitleBackgroundServiceState _state = TitleBackgroundServiceState.Disabled;
-    private string _stateReason = "無効";
     private string _validatedTerritoryPath = string.Empty;
     private string _validationError = string.Empty;
     private GameLobbyType _lastLobbyUpdateMapId = GameLobbyType.None;
@@ -64,7 +56,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private bool _cameraApplyPending;
     private bool _currentMapWriteAttempted;
     private bool _lastCurrentMapWriteSucceeded;
-    private bool _disposed;
     private string _lastObservedCreateScenePath = string.Empty;
     private bool _lastOverrideApplied;
     private GameLobbyType _lastOverrideLobbyType = GameLobbyType.None;
@@ -375,8 +366,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         {
             DisposeHooks();
             _cameraApplyPending = false;
-            _state = TitleBackgroundServiceState.Disabled;
-            _stateReason = "resolver-only";
+            _hookLifecycle.State = TitleBackgroundServiceState.Disabled;
+            _hookLifecycle.StateReason = "resolver-only";
             return;
         }
 
@@ -385,16 +376,16 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         {
             DisposeHooks();
             _cameraApplyPending = false;
-            _state = TitleBackgroundServiceState.Disabled;
-            _stateReason = "無効";
+            _hookLifecycle.State = TitleBackgroundServiceState.Disabled;
+            _hookLifecycle.StateReason = "無効";
             return;
         }
 
         if (ShouldValidateSceneOverrideConfiguration() && !ValidateCurrentConfiguration(out var errorMessage))
         {
             DisposeHooks();
-            _state = TitleBackgroundServiceState.InvalidConfiguration;
-            _stateReason = errorMessage;
+            _hookLifecycle.State = TitleBackgroundServiceState.InvalidConfiguration;
+            _hookLifecycle.StateReason = errorMessage;
             _cameraApplyPending = false;
             return;
         }
@@ -407,20 +398,20 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
         if (!AreSceneReady())
         {
-            _state = TitleBackgroundServiceState.HookCreateFailed;
-            _stateReason = "scene hook unavailable";
+            _hookLifecycle.State = TitleBackgroundServiceState.HookCreateFailed;
+            _hookLifecycle.StateReason = "scene hook unavailable";
             return;
         }
 
         if (IsCameraHookRequired() && !AreCameraHookReady())
         {
-            _state = TitleBackgroundServiceState.HookCreateFailed;
-            _stateReason = "camera hook unavailable";
+            _hookLifecycle.State = TitleBackgroundServiceState.HookCreateFailed;
+            _hookLifecycle.StateReason = "camera hook unavailable";
             return;
         }
 
-        _state = TitleBackgroundServiceState.Ready;
-        _stateReason = "準備完了";
+        _hookLifecycle.State = TitleBackgroundServiceState.Ready;
+        _hookLifecycle.StateReason = "準備完了";
     }
 
     public void ReloadNativeIntegration()
@@ -457,22 +448,22 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         ResetCameraOverrideObservation();
         ResetSceneOverrideObservation();
         DisposeHooks();
-        _state = TitleBackgroundServiceState.Disabled;
-        _stateReason = "無効";
+        _hookLifecycle.State = TitleBackgroundServiceState.Disabled;
+        _hookLifecycle.StateReason = "無効";
     }
 
     public string GetStatusText()
     {
-        return _state switch
+        return _hookLifecycle.State switch
         {
             TitleBackgroundServiceState.Disabled => $"状態: 無効 ({(_configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly ? "resolve-only" : "hook ready")})",
             TitleBackgroundServiceState.Ready => $"状態: 有効 - {_validatedTerritoryPath}",
-            TitleBackgroundServiceState.InvalidConfiguration => $"状態: 設定エラー - {_stateReason}",
-            TitleBackgroundServiceState.AddressResolveFailed => $"状態: address解決失敗 - {_stateReason}",
-            TitleBackgroundServiceState.HookCreateFailed => $"状態: hook作成失敗 - {_stateReason}",
-            TitleBackgroundServiceState.HookEnableFailed => $"状態: hook有効化失敗 - {_stateReason}",
-            TitleBackgroundServiceState.RuntimeError => $"状態: runtime error - {_stateReason}",
-            _ => $"状態: {_state} - {_stateReason}",
+            TitleBackgroundServiceState.InvalidConfiguration => $"状態: 設定エラー - {_hookLifecycle.StateReason}",
+            TitleBackgroundServiceState.AddressResolveFailed => $"状態: address解決失敗 - {_hookLifecycle.StateReason}",
+            TitleBackgroundServiceState.HookCreateFailed => $"状態: hook作成失敗 - {_hookLifecycle.StateReason}",
+            TitleBackgroundServiceState.HookEnableFailed => $"状態: hook有効化失敗 - {_hookLifecycle.StateReason}",
+            TitleBackgroundServiceState.RuntimeError => $"状態: runtime error - {_hookLifecycle.StateReason}",
+            _ => $"状態: {_hookLifecycle.State} - {_hookLifecycle.StateReason}",
         };
     }
 
@@ -512,12 +503,12 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        if (_hookLifecycle.Disposed)
         {
             return;
         }
 
-        _disposed = true;
+        _hookLifecycle.Disposed = true;
         _framework.Update -= OnFrameworkUpdate;
         RestoreAutomaticCheckSettingsOnce("service-dispose", reloadNativeIntegration: false);
         RestoreCameraProbeSettingsOnDispose();
@@ -538,7 +529,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     private bool ShouldResetCurrentMapForReload(GameLobbyType nextMap)
     {
-        return _state == TitleBackgroundServiceState.Ready
+        return _hookLifecycle.State == TitleBackgroundServiceState.Ready
             && !IsHookProbeMode()
             && _configuration.TitleBackgroundOverrideEnabled
             && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
@@ -594,7 +585,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     private bool ShouldRecordCharaSelectRuntimeCameraState(GameLobbyType mapId)
     {
-        return _state == TitleBackgroundServiceState.Ready
+        return _hookLifecycle.State == TitleBackgroundServiceState.Ready
             && !IsHookProbeMode()
             && TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(mapId)
             && _charaSelectCameraAdapter.IsArmed;
@@ -698,7 +689,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         GameLobbyType map)
     {
         return TitleBackgroundCharaSelectCameraLogic.ShouldHandleSceneReadySignal(
-            _state == TitleBackgroundServiceState.Ready,
+            _hookLifecycle.State == TitleBackgroundServiceState.Ready,
             IsHookProbeMode(),
             _charaSelectCameraAdapter.IsArmed,
             stateBeforeHandle,
@@ -915,7 +906,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     private bool IsOverrideMutationBranchArmed()
     {
-        return _state == TitleBackgroundServiceState.Ready
+        return _hookLifecycle.State == TitleBackgroundServiceState.Ready
             && !IsHookProbeMode()
             && _configuration.TitleBackgroundOverrideEnabled
             && _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
@@ -937,7 +928,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             _configuration.TitleBackgroundCameraOverrideEnabled,
             IsHookProbeMode(),
             _cameraApplyPending,
-            _state == TitleBackgroundServiceState.Ready,
+            _hookLifecycle.State == TitleBackgroundServiceState.Ready,
             currentMapAvailable,
             currentMap);
     }
@@ -948,7 +939,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     {
         if (_clientState.IsLoggedIn
             || !_configuration.TitleBackgroundCameraOverrideEnabled
-            || _state != TitleBackgroundServiceState.Ready)
+            || _hookLifecycle.State != TitleBackgroundServiceState.Ready)
         {
             return false;
         }
@@ -982,7 +973,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             return "logged-in";
         }
 
-        if (_state != TitleBackgroundServiceState.Ready)
+        if (_hookLifecycle.State != TitleBackgroundServiceState.Ready)
         {
             return "service-not-ready";
         }
@@ -1151,14 +1142,14 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         }
 
         return TitleBackgroundRuntimeModeHelper.AreSceneHooksReady(
-            _createSceneHook != null,
-            _lobbyUpdateHook != null,
-            _loadLobbySceneHook != null);
+            _hookLifecycle.CreateSceneHook != null,
+            _hookLifecycle.LobbyUpdateHook != null,
+            _hookLifecycle.LoadLobbySceneHook != null);
     }
 
     private bool AreCameraHookReady()
     {
-        return _cameraFixOnHook != null;
+        return _hookLifecycle.CameraFixOnHook != null;
     }
 
     private bool IsCameraHookRequired()
@@ -1217,7 +1208,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private bool IsHookSetAlignedWithConfiguration()
     {
         // 装着済み状態が「設定上あるべき状態」と一致していれば整合（不整合だと毎フレーム再init される）。
-        return (_cameraFixOnHook != null) == ShouldInstallFixOnHook();
+        return (_hookLifecycle.CameraFixOnHook != null) == ShouldInstallFixOnHook();
     }
 
     private void ConfigureCharaSelectCameraAdapter()
@@ -1233,13 +1224,13 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     private void MarkRuntimeError(Exception ex, string hookName)
     {
-        _state = TitleBackgroundServiceState.RuntimeError;
-        _stateReason = $"{hookName}: {ex.Message}";
+        _hookLifecycle.State = TitleBackgroundServiceState.RuntimeError;
+        _hookLifecycle.StateReason = $"{hookName}: {ex.Message}";
         _cameraApplyPending = false;
         if (_probeTimeline.ActiveProbeSession != null)
         {
             _probeTimeline.ActiveProbeSession.RuntimeErrorOccurred = true;
-            _probeTimeline.ActiveProbeSession.LastError = _stateReason;
+            _probeTimeline.ActiveProbeSession.LastError = _hookLifecycle.StateReason;
         }
 
         _log.Warning(ex, "TitleBackground runtime error in {HookName}.", hookName);
@@ -1376,22 +1367,22 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private void DisposeHooks()
     {
         var hadEnabledHooks = AreAnyHooksEnabled();
-        DisposeHook(_cameraFixOnHook, nameof(_cameraFixOnHook));
-        DisposeHook(_calculateLobbyCameraLookAtYHook, nameof(_calculateLobbyCameraLookAtYHook));
-        DisposeHook(_setCameraCurveMidPointHook, nameof(_setCameraCurveMidPointHook));
-        DisposeHook(_calculateCameraCurveLowAndHighPointHook, nameof(_calculateCameraCurveLowAndHighPointHook));
-        DisposeHook(_lobbySceneLoadedHook, nameof(_lobbySceneLoadedHook));
-        DisposeHook(_loadLobbySceneHook, nameof(_loadLobbySceneHook));
-        DisposeHook(_lobbyUpdateHook, nameof(_lobbyUpdateHook));
-        DisposeHook(_createSceneHook, nameof(_createSceneHook));
-        _cameraFixOnHook = null;
-        _calculateLobbyCameraLookAtYHook = null;
-        _setCameraCurveMidPointHook = null;
-        _calculateCameraCurveLowAndHighPointHook = null;
-        _lobbySceneLoadedHook = null;
-        _loadLobbySceneHook = null;
-        _lobbyUpdateHook = null;
-        _createSceneHook = null;
+        DisposeHook(_hookLifecycle.CameraFixOnHook, nameof(_hookLifecycle.CameraFixOnHook));
+        DisposeHook(_hookLifecycle.CalculateLobbyCameraLookAtYHook, nameof(_hookLifecycle.CalculateLobbyCameraLookAtYHook));
+        DisposeHook(_hookLifecycle.SetCameraCurveMidPointHook, nameof(_hookLifecycle.SetCameraCurveMidPointHook));
+        DisposeHook(_hookLifecycle.CalculateCameraCurveLowAndHighPointHook, nameof(_hookLifecycle.CalculateCameraCurveLowAndHighPointHook));
+        DisposeHook(_hookLifecycle.LobbySceneLoadedHook, nameof(_hookLifecycle.LobbySceneLoadedHook));
+        DisposeHook(_hookLifecycle.LoadLobbySceneHook, nameof(_hookLifecycle.LoadLobbySceneHook));
+        DisposeHook(_hookLifecycle.LobbyUpdateHook, nameof(_hookLifecycle.LobbyUpdateHook));
+        DisposeHook(_hookLifecycle.CreateSceneHook, nameof(_hookLifecycle.CreateSceneHook));
+        _hookLifecycle.CameraFixOnHook = null;
+        _hookLifecycle.CalculateLobbyCameraLookAtYHook = null;
+        _hookLifecycle.SetCameraCurveMidPointHook = null;
+        _hookLifecycle.CalculateCameraCurveLowAndHighPointHook = null;
+        _hookLifecycle.LobbySceneLoadedHook = null;
+        _hookLifecycle.LoadLobbySceneHook = null;
+        _hookLifecycle.LobbyUpdateHook = null;
+        _hookLifecycle.CreateSceneHook = null;
         if (hadEnabledHooks)
         {
             RecordTransitionEvent("hooks disabled", "DisposeHooks");
@@ -1790,7 +1781,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"environment.brightnessHint={FormatNone(brightness.BrightnessHint)}");
         lines.Add($"environment.explorationHint={FormatNone(brightness.ExplorationHint)}");
 
-        var fixOnInstalled = _cameraFixOnHook != null;
+        var fixOnInstalled = _hookLifecycle.CameraFixOnHook != null;
         lines.Add($"fixOn.passiveObservationEnabled={_configuration.TitleBackgroundFixOnPassiveObservationEnabled}");
         lines.Add($"fixOn.hookInstalled={fixOnInstalled}");
         lines.Add($"fixOn.calls={(fixOnInstalled ? _cameraObservation.FixOnPassiveCallCount.ToString() : "unavailable")}");

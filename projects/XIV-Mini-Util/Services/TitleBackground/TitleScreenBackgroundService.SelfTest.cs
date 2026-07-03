@@ -49,7 +49,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private string RequestCharaSelectReload(bool startedBySelfTest)
     {
-        if (_state != TitleBackgroundServiceState.Ready
+        if (_hookLifecycle.State != TitleBackgroundServiceState.Ready
             || !IsSceneOverrideEnabled()
             || !TryReadCurrentLobbyMap(out var currentMap)
             || !TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(currentMap))

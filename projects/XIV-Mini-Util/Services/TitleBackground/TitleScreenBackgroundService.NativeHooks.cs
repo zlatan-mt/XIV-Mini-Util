@@ -21,45 +21,45 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     _configuration,
                     useKnownSignaturesForMissing))
             {
-                _state = TitleBackgroundServiceState.AddressResolveFailed;
-                _stateReason = _addressResolver.LastError;
+                _hookLifecycle.State = TitleBackgroundServiceState.AddressResolveFailed;
+                _hookLifecycle.StateReason = _addressResolver.LastError;
                 return;
             }
 
             if (!ShouldCreateSceneHooks())
             {
-                _state = TitleBackgroundServiceState.Disabled;
-                _stateReason = _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly
+                _hookLifecycle.State = TitleBackgroundServiceState.Disabled;
+                _hookLifecycle.StateReason = _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly
                     ? "resolver-only"
                     : "無効";
                 return;
             }
 
-            _createSceneHook = _gameInteropProvider.HookFromAddress<CreateSceneDelegate>(_addressResolver.CreateScene, CreateSceneDetour);
-            _lobbyUpdateHook = _gameInteropProvider.HookFromAddress<LobbyUpdateDelegate>(_addressResolver.LobbyUpdate, LobbyUpdateDetour);
-            _loadLobbySceneHook = _gameInteropProvider.HookFromAddress<LoadLobbySceneDelegate>(_addressResolver.LoadLobbyScene, LoadLobbySceneDetour);
+            _hookLifecycle.CreateSceneHook = _gameInteropProvider.HookFromAddress<CreateSceneDelegate>(_addressResolver.CreateScene, CreateSceneDetour);
+            _hookLifecycle.LobbyUpdateHook = _gameInteropProvider.HookFromAddress<LobbyUpdateDelegate>(_addressResolver.LobbyUpdate, LobbyUpdateDetour);
+            _hookLifecycle.LoadLobbySceneHook = _gameInteropProvider.HookFromAddress<LoadLobbySceneDelegate>(_addressResolver.LoadLobbyScene, LoadLobbySceneDetour);
             if (_addressResolver.UpdateLobbyUIStage != nint.Zero)
             {
-                _lobbySceneLoadedHook = _gameInteropProvider.HookFromAddress<LobbySceneLoadedDelegate>(_addressResolver.UpdateLobbyUIStage, LobbySceneLoadedDetour);
+                _hookLifecycle.LobbySceneLoadedHook = _gameInteropProvider.HookFromAddress<LobbySceneLoadedDelegate>(_addressResolver.UpdateLobbyUIStage, LobbySceneLoadedDetour);
             }
 
             if (_addressResolver.CalculateLobbyCameraLookAtY != nint.Zero)
             {
-                _calculateLobbyCameraLookAtYHook = _gameInteropProvider.HookFromAddress<CalculateLobbyCameraLookAtYDelegate>(
+                _hookLifecycle.CalculateLobbyCameraLookAtYHook = _gameInteropProvider.HookFromAddress<CalculateLobbyCameraLookAtYDelegate>(
                     _addressResolver.CalculateLobbyCameraLookAtY,
                     CalculateLobbyCameraLookAtYDetour);
             }
 
             if (_addressResolver.SetCameraCurveMidPoint != nint.Zero)
             {
-                _setCameraCurveMidPointHook = _gameInteropProvider.HookFromAddress<SetCameraCurveMidPointDelegate>(
+                _hookLifecycle.SetCameraCurveMidPointHook = _gameInteropProvider.HookFromAddress<SetCameraCurveMidPointDelegate>(
                     _addressResolver.SetCameraCurveMidPoint,
                     SetCameraCurveMidPointDetour);
             }
 
             if (_addressResolver.CalculateCameraCurveLowAndHighPoint != nint.Zero)
             {
-                _calculateCameraCurveLowAndHighPointHook = _gameInteropProvider.HookFromAddress<CalculateCameraCurveLowAndHighPointDelegate>(
+                _hookLifecycle.CalculateCameraCurveLowAndHighPointHook = _gameInteropProvider.HookFromAddress<CalculateCameraCurveLowAndHighPointDelegate>(
                     _addressResolver.CalculateCameraCurveLowAndHighPoint,
                     CalculateCameraCurveLowAndHighPointDetour);
             }
@@ -69,28 +69,28 @@ public sealed unsafe partial class TitleScreenBackgroundService
             // focus override は候補一致時のみ焦点だけを陸上アンカーへ差し替える。
             if (ShouldInstallFixOnHook())
             {
-                _cameraFixOnHook = _gameInteropProvider.HookFromAddress<LobbyCameraFixOnDelegate>(
+                _hookLifecycle.CameraFixOnHook = _gameInteropProvider.HookFromAddress<LobbyCameraFixOnDelegate>(
                     _addressResolver.FixOn,
                     LobbyCameraFixOnDetour);
             }
 
-            _createSceneHook.Enable();
-            _lobbyUpdateHook.Enable();
-            _loadLobbySceneHook.Enable();
-            _lobbySceneLoadedHook?.Enable();
-            _calculateLobbyCameraLookAtYHook?.Enable();
-            _setCameraCurveMidPointHook?.Enable();
-            _calculateCameraCurveLowAndHighPointHook?.Enable();
-            _cameraFixOnHook?.Enable();
+            _hookLifecycle.CreateSceneHook.Enable();
+            _hookLifecycle.LobbyUpdateHook.Enable();
+            _hookLifecycle.LoadLobbySceneHook.Enable();
+            _hookLifecycle.LobbySceneLoadedHook?.Enable();
+            _hookLifecycle.CalculateLobbyCameraLookAtYHook?.Enable();
+            _hookLifecycle.SetCameraCurveMidPointHook?.Enable();
+            _hookLifecycle.CalculateCameraCurveLowAndHighPointHook?.Enable();
+            _hookLifecycle.CameraFixOnHook?.Enable();
             RecordTransitionEvent("hooks enabled", "InitializeHooks");
 
-            _state = TitleBackgroundServiceState.Disabled;
-            _stateReason = "無効";
+            _hookLifecycle.State = TitleBackgroundServiceState.Disabled;
+            _hookLifecycle.StateReason = "無効";
         }
         catch (Exception ex)
         {
-            _state = _createSceneHook == null ? TitleBackgroundServiceState.HookCreateFailed : TitleBackgroundServiceState.HookEnableFailed;
-            _stateReason = ex.Message;
+            _hookLifecycle.State = _hookLifecycle.CreateSceneHook == null ? TitleBackgroundServiceState.HookCreateFailed : TitleBackgroundServiceState.HookEnableFailed;
+            _hookLifecycle.StateReason = ex.Message;
             _log.Warning(ex, "TitleBackground: native integration failed.");
             DisposeHooks();
         }
@@ -121,13 +121,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
         RecordTransitionEvent("scene generation incremented", $"generation={_charaSelectCameraAdapter.RuntimeState.SceneGeneration}");
         RecordProbeLoadLobbyScene(mapId);
         _log.Debug("[XMU BG] LoadLobbyScene mapId={MapId}", mapId);
-        _loadLobbySceneHook?.Original(mapId);
+        _hookLifecycle.LoadLobbySceneHook?.Original(mapId);
         RecordTransitionEvent("LoadLobbySceneDetour original called", mapId.ToString());
     }
 
     private void LobbySceneLoadedDetour(nint thisPtr)
     {
-        _lobbySceneLoadedHook?.Original(thisPtr);
+        _hookLifecycle.LobbySceneLoadedHook?.Original(thisPtr);
 
         try
         {
@@ -196,7 +196,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             if (IsHookProbeMode())
             {
                 RecordTransitionEvent("CreateSceneDetour original path observed", "hook-probe");
-                return _createSceneHook?.Original(territoryPath, territoryId, p3, layerFilterKey, festivals, p6, contentFinderConditionId) ?? 0;
+                return _hookLifecycle.CreateSceneHook?.Original(territoryPath, territoryId, p3, layerFilterKey, festivals, p6, contentFinderConditionId) ?? 0;
             }
 
             if (ShouldOverrideCharaSelect(lobbyType))
@@ -253,11 +253,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
         {
             fixed (byte* overridePath = overrideBytes)
             {
-                return _createSceneHook?.Original(overridePath, territoryId, p3, layerFilterKey, festivals, p6, contentFinderConditionId) ?? 0;
+                return _hookLifecycle.CreateSceneHook?.Original(overridePath, territoryId, p3, layerFilterKey, festivals, p6, contentFinderConditionId) ?? 0;
             }
         }
 
-        return _createSceneHook?.Original(territoryPath, territoryId, p3, layerFilterKey, festivals, p6, contentFinderConditionId) ?? 0;
+        return _hookLifecycle.CreateSceneHook?.Original(territoryPath, territoryId, p3, layerFilterKey, festivals, p6, contentFinderConditionId) ?? 0;
     }
 
     private byte LobbyUpdateDetour(GameLobbyType mapId, int time)
@@ -298,7 +298,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
 
         CaptureCameraProbeLobbyUpdateState(frame, beforeOriginal: true);
-        var result = _lobbyUpdateHook?.Original(mapId, time) ?? 0;
+        var result = _hookLifecycle.LobbyUpdateHook?.Original(mapId, time) ?? 0;
         CaptureCameraProbeLobbyUpdateState(frame, beforeOriginal: false);
         return result;
     }
@@ -462,12 +462,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
             {
                 var cameraPointer = cameraOverride != null ? cameraOverridePointer : cameraPos;
                 var focusPointer = focusOverride != null ? focusOverridePointer : focusPos;
-                result = _cameraFixOnHook?.Original(self, cameraPointer, focusPointer, overrideFovY) ?? nint.Zero;
+                result = _hookLifecycle.CameraFixOnHook?.Original(self, cameraPointer, focusPointer, overrideFovY) ?? nint.Zero;
             }
         }
         else
         {
-            result = _cameraFixOnHook?.Original(self, cameraPos, focusPos, fovY) ?? nint.Zero;
+            result = _hookLifecycle.CameraFixOnHook?.Original(self, cameraPos, focusPos, fovY) ?? nint.Zero;
         }
 
         CapturePostFixOnCameraState();
@@ -494,7 +494,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         float returnValue;
         try
         {
-            returnValue = _calculateLobbyCameraLookAtYHook?.Original(self, distance, lowPoint, midPoint, highPoint) ?? 0f;
+            returnValue = _hookLifecycle.CalculateLobbyCameraLookAtYHook?.Original(self, distance, lowPoint, midPoint, highPoint) ?? 0f;
         }
         catch (Exception ex)
         {
@@ -548,7 +548,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         string phase2GError;
         try
         {
-            _setCameraCurveMidPointHook?.Original(self, value);
+            _hookLifecycle.SetCameraCurveMidPointHook?.Original(self, value);
             TryApplyPhase2GSetCameraCurveMidPointOverride(self, frame, out phase2GStatus, out phase2GError);
         }
         catch (Exception ex)
@@ -584,7 +584,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         string phase2GError;
         try
         {
-            _calculateCameraCurveLowAndHighPointHook?.Original(self, value);
+            _hookLifecycle.CalculateCameraCurveLowAndHighPointHook?.Original(self, value);
             TryApplyPhase2GLowHighCurveOverride(self, frame, out phase2GStatus, out phase2GError);
         }
         catch (Exception ex)
@@ -706,7 +706,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var currentMapAvailable = TryReadCurrentLobbyMap(out var currentMap);
         var resolvedMap = ResolveSceneReadySignalLobbyMap();
         if (!TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
-                _state == TitleBackgroundServiceState.Ready,
+                _hookLifecycle.State == TitleBackgroundServiceState.Ready,
                 IsHookProbeMode(),
                 IsSceneOverrideEnabled(),
                 _charaSelectCameraAdapter.IsArmed,
@@ -736,7 +736,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private string BuildPhase2GGenerationOverrideSkippedReason()
     {
-        if (_state != TitleBackgroundServiceState.Ready)
+        if (_hookLifecycle.State != TitleBackgroundServiceState.Ready)
         {
             return "service-not-ready";
         }
@@ -820,7 +820,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void OnFrameworkUpdate(IFramework _)
     {
-        if (_disposed)
+        if (_hookLifecycle.Disposed)
         {
             return;
         }

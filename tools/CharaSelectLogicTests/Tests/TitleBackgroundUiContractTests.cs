@@ -219,7 +219,7 @@ Test(396, "one-click retries native init once before declaring hook-not-ready", 
     var body = ReadServiceMethodBody("TitleScreenBackgroundService.OneClickVerification.cs", "public IReadOnlyList<string> StartOneClickTitleBackgroundVerification()");
     return CountOccurrences(body, "ReloadNativeIntegrationForOneClick()") == 2
         && body.Contains("hook-not-ready", StringComparison.Ordinal)
-        && body.Contains("_state != TitleBackgroundServiceState.Ready", StringComparison.Ordinal);
+        && body.Contains("_hookLifecycle.State != TitleBackgroundServiceState.Ready", StringComparison.Ordinal);
 });
 
 Test(397, "one-click failure report is auto-copied (no extra action required)", () =>

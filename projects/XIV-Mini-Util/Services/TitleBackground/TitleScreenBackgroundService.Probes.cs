@@ -377,7 +377,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
     {
         var useAutomaticCounters = _probeTimeline.AutomaticProbeCountersEnabled;
         var hooksEnabled = isActive || session == null ? AreAnyHooksEnabled() : session.HookEnabledAtEnd;
-        var runtimeError = (isActive || session == null) && _state == TitleBackgroundServiceState.RuntimeError;
+        var runtimeError = (isActive || session == null) && _hookLifecycle.State == TitleBackgroundServiceState.RuntimeError;
         if (session != null)
         {
             runtimeError |= session.RuntimeErrorOccurred;
@@ -469,7 +469,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
     private IReadOnlyList<string> GetProbeReportLines(TitleBackgroundProbeSession session, bool isActive)
     {
         var hooksEnabled = isActive ? AreAnyHooksEnabled() : session.HookEnabledAtEnd;
-        var runtimeError = session.RuntimeErrorOccurred || (isActive && _state == TitleBackgroundServiceState.RuntimeError);
+        var runtimeError = session.RuntimeErrorOccurred || (isActive && _hookLifecycle.State == TitleBackgroundServiceState.RuntimeError);
         var observedAnyDetour = session.CreateSceneCallCount > 0 || session.LobbyUpdateCallCount > 0;
         var result = !hooksEnabled || runtimeError
             ? "Failure"
@@ -577,14 +577,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private bool AreAnyHooksEnabled()
     {
-        return IsHookEnabled(_createSceneHook)
-            || IsHookEnabled(_lobbyUpdateHook)
-            || IsHookEnabled(_loadLobbySceneHook)
-            || IsHookEnabled(_lobbySceneLoadedHook)
-            || IsHookEnabled(_cameraFixOnHook)
-            || IsHookEnabled(_calculateLobbyCameraLookAtYHook)
-            || IsHookEnabled(_setCameraCurveMidPointHook)
-            || IsHookEnabled(_calculateCameraCurveLowAndHighPointHook);
+        return IsHookEnabled(_hookLifecycle.CreateSceneHook)
+            || IsHookEnabled(_hookLifecycle.LobbyUpdateHook)
+            || IsHookEnabled(_hookLifecycle.LoadLobbySceneHook)
+            || IsHookEnabled(_hookLifecycle.LobbySceneLoadedHook)
+            || IsHookEnabled(_hookLifecycle.CameraFixOnHook)
+            || IsHookEnabled(_hookLifecycle.CalculateLobbyCameraLookAtYHook)
+            || IsHookEnabled(_hookLifecycle.SetCameraCurveMidPointHook)
+            || IsHookEnabled(_hookLifecycle.CalculateCameraCurveLowAndHighPointHook);
     }
 
     private void CaptureCameraProbeTimelineOnFrameworkUpdate()

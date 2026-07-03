@@ -68,16 +68,16 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
             // hook readiness を再初期化。未準備なら安全な再初期化を1回試して再評価。
             ReloadNativeIntegrationForOneClick();
-            if (_state != TitleBackgroundServiceState.Ready)
+            if (_hookLifecycle.State != TitleBackgroundServiceState.Ready)
             {
                 ReloadNativeIntegrationForOneClick();
             }
 
-            if (_state != TitleBackgroundServiceState.Ready)
+            if (_hookLifecycle.State != TitleBackgroundServiceState.Ready)
             {
                 return FailOneClickWithReport(
                     "hook-not-ready",
-                    _stateReason,
+                    _hookLifecycle.StateReason,
                     "失敗：レポートをコピーしました");
             }
 
@@ -173,14 +173,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 "result=FAILED",
                 $"reason={reason}",
                 $"detail={(string.IsNullOrWhiteSpace(detail) ? "none" : detail)}",
-                $"serviceState={_state}",
-                $"serviceStateReason={FormatNone(_stateReason)}",
-                $"hookReady={_state == TitleBackgroundServiceState.Ready}",
+                $"serviceState={_hookLifecycle.State}",
+                $"serviceStateReason={FormatNone(_hookLifecycle.StateReason)}",
+                $"hookReady={_hookLifecycle.State == TitleBackgroundServiceState.Ready}",
                 $"candidate={candidate.Id}",
                 $"activeCandidateTerritory={candidate.TerritoryId}",
                 $"savedTerritory={_worldProbeState.TerritoryTypeId}",
                 $"currentTerritory={(_clientState.IsLoggedIn ? _clientState.TerritoryType.ToString() : "not-logged-in")}",
-                $"reinitResult={(_state == TitleBackgroundServiceState.Ready ? "recovered" : "still-not-ready")}",
+                $"reinitResult={(_hookLifecycle.State == TitleBackgroundServiceState.Ready ? "recovered" : "still-not-ready")}",
             };
 
             var diagnosticLines = TitleBackgroundAutomaticCheckDiagnosticSelector.Select(

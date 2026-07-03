@@ -459,7 +459,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
         }
 
-        if (reloadNativeIntegration && !_disposed)
+        if (reloadNativeIntegration && !_hookLifecycle.Disposed)
         {
             try
             {
@@ -715,7 +715,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _transitionDiagnostics.Phase2GAppliedAfterLogin,
             _transitionDiagnostics.LastPhase2GAppliedAfterLoginEventSeq,
             _quickCheckState.TransitionEventSeqStart);
-        var pluginOrHookError = _state is TitleBackgroundServiceState.InvalidConfiguration
+        var pluginOrHookError = _hookLifecycle.State is TitleBackgroundServiceState.InvalidConfiguration
             or TitleBackgroundServiceState.AddressResolveFailed
             or TitleBackgroundServiceState.HookCreateFailed
             or TitleBackgroundServiceState.HookEnableFailed
@@ -726,7 +726,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             && candidate.TerritoryId != 0
             && candidate.LayerFilterKey != 0;
 
-        var serviceReady = _state == TitleBackgroundServiceState.Ready;
+        var serviceReady = _hookLifecycle.State == TitleBackgroundServiceState.Ready;
         // Derive shouldArmAdapter from reason so both fields are always consistent.
         // ShouldArmAdapter(3 params) is kept for actual adapter arming in ConfigureCharaSelectCameraAdapter;
         // the QuickCheck diagnostic must reflect ALL conditions including integrated composition.
@@ -791,7 +791,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             overrideAppliedCount,
             phase2GApplyCount,
             pluginOrHookError,
-            _stateReason,
+            _hookLifecycle.StateReason,
             _clientState.IsLoggedIn,
             currentLobbyMapName,
             currentLobbyMapRemainedAfterLogin,
