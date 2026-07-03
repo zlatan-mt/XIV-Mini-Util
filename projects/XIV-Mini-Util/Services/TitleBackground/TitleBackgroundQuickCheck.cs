@@ -140,7 +140,32 @@ internal static class TitleBackgroundAutomaticCheckLogic
     {
         return runScoped ? freshDetected : historicalDetected || freshDetected;
     }
+
+    // 確認 run 成功時、実際に使われた world probe anchor を通常セッション向けに永続化してよいか。
+    // fail-closed: run 中に world-experimental(probe) 配置が実際に適用され、かつ gate が Eligible を
+    // 返している場合のみ true。呼び出し側は gate 通過済みの Resolve 結果をそのまま渡す前提だが、
+    // ここでも Source/Eligible/placement 適用実績を独立に再検証する（二重チェック）。
+    public static bool ShouldPersistRunAnchor(
+        bool runScopedPlacementApplied,
+        string? runPlacementSource,
+        bool worldExperimentalEligible,
+        string worldExperimentalSource,
+        string worldExperimentalSourceProbeValue)
+    {
+        return runScopedPlacementApplied
+            && string.Equals(runPlacementSource, TitleBackgroundCharaSelectAnchorLogic.WorldExperimentalSource, StringComparison.Ordinal)
+            && worldExperimentalEligible
+            && string.Equals(worldExperimentalSource, worldExperimentalSourceProbeValue, StringComparison.Ordinal);
+    }
 }
+
+// 確認 run 完了時に実際に使われた world probe anchor（永続化候補）。
+// _configuration が finally の設定復元で run 開始前へ巻き戻る前に、run 中の値をこの不変レコードへ
+// キャプチャしておくための入れ物（config への書込みはしない、純粋なデータ保持のみ）。
+internal readonly record struct TitleBackgroundRunAnchorPersistenceCandidate(
+    string CandidateId,
+    System.Numerics.Vector3 Position,
+    uint TerritoryTypeId);
 
 internal static class TitleBackgroundAutomaticCheckReportBuilder
 {

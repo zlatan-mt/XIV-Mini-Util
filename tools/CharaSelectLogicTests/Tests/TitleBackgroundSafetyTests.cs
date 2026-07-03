@@ -4557,7 +4557,7 @@ Test(381, "auto-check diagnostic selector includes world experimental keys", () 
         "characterPlace.territoryMatch=True",
         "characterPlace.worldExperimentalEnabled=False",
         "characterPlace.worldExperimentalConfiguredEnabled=True",
-        "characterPlace.persistentApplyEnabled=False",
+        "characterPlace.persistentApplyEnabled=True",
         "characterPlace.worldExperimentalGate=disabled",
         "characterPlace.worldExperimentalApplicable=False",
         "characterPlace.unrelatedKey=should-drop",
@@ -4571,17 +4571,35 @@ Test(381, "auto-check diagnostic selector includes world experimental keys", () 
         && !selected.Any(line => line.StartsWith("characterPlace.unrelatedKey=", StringComparison.Ordinal));
 });
 
-Test(382, "world experimental persistent apply stays gated and standing button is not exposed", () =>
+Test(382, "world experimental persistent apply is unlocked and standing button stays hidden (auto-persist only)", () =>
 {
     var root = FindRepositoryRoot();
     var normal = ExtractMethodBody(
         string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText)),
         "private void DrawTitleBackgroundSettings()");
     var diagText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackgroundDiagnostics.cs"));
-    // 永続適用ゲートは既定 false。立ち位置保存(experimental)は通常・診断画面のどちらにも出さない。
-    return !TitleBackgroundExperimentalWorldPlacementLogic.PersistentApplyEnabled
+    var quickCheckText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.QuickCheck.cs"));
+    var completeBody = ExtractMethodBody(quickCheckText, "private void CompleteAutomaticQuickCheck(bool partial)");
+    // 2026-07-03: 実機3点検証(残差0.002、world/lobby恒等)を経て PersistentApplyEnabled は解禁(true)。
+    // Evaluate gate を通った場合のみ通常セッションでも適用される。手動の「立ち位置保存」ボタン(UI操作)は
+    // 依然として出さない(UI操作数4の契約維持)。永続化は run 成功時の自動保存のみが経路。
+    // 保存処理は settings snapshot 復元の後・reload の前に走ること、保存条件に run-scoped placement count と
+    // source 検証が含まれることをソース文字列検査でロックする。
+    return TitleBackgroundExperimentalWorldPlacementLogic.PersistentApplyEnabled
         && !normal.Contains("DrawTitleBackgroundSimpleStandingPositionButton", StringComparison.Ordinal)
-        && !diagText.Contains("DrawTitleBackgroundSimpleStandingPositionButton", StringComparison.Ordinal);
+        && !diagText.Contains("DrawTitleBackgroundSimpleStandingPositionButton", StringComparison.Ordinal)
+        && completeBody.Contains("afterRestoreBeforeReload: () =>", StringComparison.Ordinal)
+        && completeBody.Contains("persistedThisRun = TryPersistRunAnchorFromCandidate(persistenceCandidate)", StringComparison.Ordinal)
+        && completeBody.IndexOf("RestoreAutomaticCheckSettingsOnce(", StringComparison.Ordinal)
+            < completeBody.IndexOf("TryPersistRunAnchorFromCandidate(persistenceCandidate)", StringComparison.Ordinal)
+        // 保存条件(ShouldPersistRunAnchor 呼び出し)が run-scoped placement 適用実績と
+        // world-experimental(probe) source の両方を検証していることをソース文字列で確認する。
+        && quickCheckText.Contains("TitleBackgroundAutomaticCheckLogic.ShouldPersistRunAnchor(", StringComparison.Ordinal)
+        && quickCheckText.Contains("runPlacementApplied,", StringComparison.Ordinal)
+        && quickCheckText.Contains("_characterPlacement.LastCharaSelectCharacterPlacementSource,", StringComparison.Ordinal)
+        && quickCheckText.Contains("worldResolution.Eligible,", StringComparison.Ordinal)
+        && quickCheckText.Contains("worldResolution.Source,", StringComparison.Ordinal)
+        && quickCheckText.Contains("WorldExperimentalSourceProbe);", StringComparison.Ordinal);
 });
 
 Test(383, "simple reset clears session probe as well as config", () =>
@@ -4811,9 +4829,11 @@ Test(417, "phase 0C samples auto-added on completion and cleared by reset", () =
         && reset.Contains("ClearWorldCoordinateSamples()", StringComparison.Ordinal);
 });
 
-Test(418, "phase 0C keeps persistent apply gated, fixOn supported-only, world not ground verified", () =>
+Test(418, "phase 0C: persistent apply unlocked, fixOn stays supported-only, world still not ground verified", () =>
 {
-    return !TitleBackgroundExperimentalWorldPlacementLogic.PersistentApplyEnabled
+    // 2026-07-03: PersistentApplyEnabled は解禁(true)。fixOn の frame 対応判定と
+    // ground provenance 判定は Evaluate gate 同様に不変であることをロックする。
+    return TitleBackgroundExperimentalWorldPlacementLogic.PersistentApplyEnabled
         && !TitleBackgroundCharaSelectAnchorFrame.IsPlacementSupported(TitleBackgroundCharaSelectAnchorFrame.World)
         && !TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance("world")
         && !TitleBackgroundAutomaticCheckLogic.ResolveGroundPlacementVerified(true, "world-experimental", "world");

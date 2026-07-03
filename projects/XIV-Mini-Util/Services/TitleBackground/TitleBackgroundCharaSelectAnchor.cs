@@ -150,11 +150,12 @@ internal enum TitleBackgroundExperimentalWorldPlacementGate
 // すべて満たすときだけ Eligible を返す。camera/FixOn には一切関与せず、キャラ配置経路専用。
 internal static class TitleBackgroundExperimentalWorldPlacementLogic
 {
-    // Phase 0B（実機での陸上成立確認）が済むまでは false。
-    // Developer の非永続 probe（Phase 0A）だけを先行させ、Simple UI の公開と
-    // 永続 config の適用経路はこのフラグで一括ゲートする。陸上成立確認後に true へ切り替える。
+    // Phase 0B（実機での陸上成立確認）は 2026-07-03 に完了（3点・残差0.002、world/lobby は恒等変換、
+    // 実機目視も全run一致。詳細は docs/refactor-baseline/2026-07-02-current-implementation-handoff.md §12.3）。
+    // これにより永続 config 経路（Evaluate の fail-closed gate を通った場合のみ）を通常セッションでも
+    // 有効化する。Evaluate 自体・fail-closed 正規化・ground provenance 判定は本フラグでは変更しない。
     // static readonly にして「const による到達不能コード警告」を避ける。
-    public static readonly bool PersistentApplyEnabled = false;
+    public static readonly bool PersistentApplyEnabled = true;
 
     public static TitleBackgroundExperimentalWorldPlacementGate Evaluate(
         bool experimentalEnabled,

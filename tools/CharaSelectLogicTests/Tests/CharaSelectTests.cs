@@ -532,7 +532,9 @@ Test(405, "windows release script safely cleans staging and verifies package art
 
 Test(406, "simplification keeps safety boundaries intact", () =>
 {
-    return !TitleBackgroundExperimentalWorldPlacementLogic.PersistentApplyEnabled
+    // 2026-07-03: PersistentApplyEnabled は実機3点検証(残差0.002)を経て解禁(true)。
+    // Evaluate gate 自体・ground provenance 判定・placement 判定の安全境界は不変であることをロックする。
+    return TitleBackgroundExperimentalWorldPlacementLogic.PersistentApplyEnabled
         && !TitleBackgroundCharaSelectAnchorFrame.IsPlacementSupported(TitleBackgroundCharaSelectAnchorFrame.World)
         && !TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance("world")
         && !TitleBackgroundAutomaticCheckLogic.ResolveGroundPlacementVerified(true, "world-experimental", "world");

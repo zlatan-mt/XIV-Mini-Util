@@ -222,6 +222,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
     private void CompleteAutomaticQuickCheck(bool partial)
     {
         var restoreResult = AutomaticCheckRestoreResult.NotRequired;
+        // run 完了時点（設定復元より前）でキャプチャする、自動永続化の判定材料。
+        // _configuration は finally の RestoreAutomaticCheckSettingsOnce で run 開始前の値へ
+        // 巻き戻されるため、run 中に実際に使われた candidate/probe の値はここで確定させておく。
+        TitleBackgroundRunAnchorPersistenceCandidate? persistenceCandidate = null;
         try
         {
             // 1) QuickCheck 評価
@@ -234,6 +238,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
             TryAddWorldCoordinateSampleFromRun(
                 _automaticCheck.RunId,
                 result.CompletedAt.ToString("yyyy-MM-dd HH:mm:ss zzz"));
+            // 2.5) 通常セッションでの陸上配置解禁: 今回 run で実際に world-experimental(probe) 配置が
+            //      適用されていれば、その probe anchor を永続化候補としてキャプチャする（config 書込みは
+            //      finally の設定復元より後・reload より前で行う）。
+            persistenceCandidate = ResolveRunAnchorPersistenceCandidate();
             // 3) QuickCheck・主要診断・座標対応分析を 1 つのレポートへ統合（別ボタン操作を不要にする）。
             var quickCheckLines = TitleBackgroundQuickCheckEvaluator.BuildChatLines(result);
             var diagnosticLines = new List<string>(
@@ -268,11 +276,87 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _automaticCheck.Requested = false;
             _automaticCheck.CompletionDueAt = null;
             _automaticCheck.LoginObservedAt = null;
+            // 復元(ApplyTo+Save)の後・reload の前に自動永続化を書き込む。復元より前に書くと
+            // run 開始前スナップショットへの復元で上書き・消失し、reload より後だと新 config が
+            // native 側へ反映されない。afterRestoreBeforeReload はこの一箇所専用の差し込み点。
+            var persistedThisRun = false;
             restoreResult = RestoreAutomaticCheckSettingsOnce(
                 "automatic-check-complete",
-                reloadNativeIntegration: true);
-            FinalizeAutomaticCheckReport(restoreResult);
+                reloadNativeIntegration: true,
+                afterRestoreBeforeReload: () =>
+                {
+                    persistedThisRun = TryPersistRunAnchorFromCandidate(persistenceCandidate);
+                });
+            FinalizeAutomaticCheckReport(restoreResult, persistedThisRun, persistenceCandidate);
         }
+    }
+
+    // run 完了時点（設定復元より前）で、今回 run が world-experimental(probe) 配置を実際に適用したかを
+    // 判定し、適用済みなら永続化候補をキャプチャする。config は一切書かない（純粋な値の確定のみ）。
+    // ここで使う candidate/territory は _worldProbeState（config 非依存のセッション限定状態）由来なので、
+    // finally での _configuration 復元より前に呼んでも run 中止 candidate と一致する。
+    private TitleBackgroundRunAnchorPersistenceCandidate? ResolveRunAnchorPersistenceCandidate()
+    {
+        var runActive = IsRunScopedQuickCheckActive();
+        var runAppliedFrameCount = TitleBackgroundAutomaticCheckLogic.ResolveRunScopedPlacementCount(
+            runActive,
+            _characterPlacement.CharaSelectCharacterPlacementCount,
+            _quickCheckState.CharacterPlacementCountStart);
+        var runPlacementApplied = runAppliedFrameCount > 0;
+
+        var activeCandidate = ResolveCurrentOverrideCandidate();
+        var worldResolution = ResolveExperimentalWorldPlacement(activeCandidate);
+
+        var shouldPersist = TitleBackgroundAutomaticCheckLogic.ShouldPersistRunAnchor(
+            runPlacementApplied,
+            _characterPlacement.LastCharaSelectCharacterPlacementSource,
+            worldResolution.Eligible,
+            worldResolution.Source,
+            WorldExperimentalSourceProbe);
+        if (!shouldPersist)
+        {
+            return null;
+        }
+
+        // gate（Evaluate）は既に候補一致・territory 一致・有限値・frame=world を通っているが、
+        // 保存内容の取り違えを避けるため probe anchor 自体の基本条件も二重に確認する（fail-closed）。
+        if (!_worldProbeState.Enabled
+            || !_worldProbeState.HasValue
+            || string.IsNullOrEmpty(_worldProbeState.CandidateId)
+            || _worldProbeState.TerritoryTypeId == 0
+            || !TitleBackgroundCameraMath.IsFiniteVector(_worldProbeState.Position))
+        {
+            return null;
+        }
+
+        return new TitleBackgroundRunAnchorPersistenceCandidate(
+            _worldProbeState.CandidateId,
+            _worldProbeState.Position,
+            _worldProbeState.TerritoryTypeId);
+    }
+
+    // 設定復元(ApplyTo+Save)の直後・reload の前に呼ばれる。キャプチャ済みの永続化候補があれば
+    // 通常セッションの陸上配置を有効化する Configuration フィールドへ書き込み Save する。
+    // 候補が null（保存条件を満たさなかった run）なら何もしない。
+    private bool TryPersistRunAnchorFromCandidate(TitleBackgroundRunAnchorPersistenceCandidate? candidate)
+    {
+        if (!candidate.HasValue)
+        {
+            return false;
+        }
+
+        var value = candidate.Value;
+        _configuration.TitleBackgroundCharaSelectAnchorEnabled = true;
+        _configuration.TitleBackgroundCharaSelectAnchorCandidateId = value.CandidateId;
+        _configuration.TitleBackgroundCharaSelectAnchorX = value.Position.X;
+        _configuration.TitleBackgroundCharaSelectAnchorY = value.Position.Y;
+        _configuration.TitleBackgroundCharaSelectAnchorZ = value.Position.Z;
+        _configuration.TitleBackgroundCharaSelectAnchorFrame = TitleBackgroundCharaSelectAnchorFrame.World;
+        _configuration.TitleBackgroundCharaSelectAnchorTerritoryTypeId = value.TerritoryTypeId;
+        _configuration.TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled = true;
+        _configuration.Save();
+        RecordTransitionEvent("run anchor persisted from successful run", "automatic-check-complete");
+        return true;
     }
 
     internal void CancelAutomaticQuickCheck()
@@ -424,7 +508,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private AutomaticCheckRestoreResult RestoreAutomaticCheckSettingsOnce(
         string reason,
-        bool reloadNativeIntegration)
+        bool reloadNativeIntegration,
+        Action? afterRestoreBeforeReload = null)
     {
         if (_automaticCheck.SettingsRestored || _automaticCheck.SettingsSnapshot == null)
         {
@@ -459,6 +544,21 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
         }
 
+        // 復元(ApplyTo+Save)が成功した直後・reload(hook 再初期化)より前に呼ぶ差し込み点。
+        // 現状は run 完了時の自動永続化（世界座標アンカーの保存）専用。呼び出し元を指定しない限り
+        // 既定 null で従来どおり何もしない（他の呼び出し箇所は無変更）。
+        if (afterRestoreBeforeReload != null)
+        {
+            try
+            {
+                afterRestoreBeforeReload();
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "[XMU BG] afterRestoreBeforeReload callback failed. reason={Reason}", reason);
+            }
+        }
+
         if (reloadNativeIntegration && !_hookLifecycle.Disposed)
         {
             try
@@ -479,7 +579,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         return new AutomaticCheckRestoreResult(true, true);
     }
 
-    private void FinalizeAutomaticCheckReport(AutomaticCheckRestoreResult restoreResult)
+    private void FinalizeAutomaticCheckReport(
+        AutomaticCheckRestoreResult restoreResult,
+        bool persistedAnchorFromRun = false,
+        TitleBackgroundRunAnchorPersistenceCandidate? persistedCandidate = null)
     {
         if (string.IsNullOrWhiteSpace(_automaticCheck.LastReport))
         {
@@ -489,6 +592,17 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var report = $"{_automaticCheck.LastReport.TrimEnd()}{Environment.NewLine}"
             + $"[XIV Mini Util] settingsRestored={restoreResult.SettingsRestored}{Environment.NewLine}"
             + $"[XIV Mini Util] runtimeReloaded={restoreResult.RuntimeReloaded}{Environment.NewLine}";
+        // 既存診断キーは変更せず、run 成功時の自動永続化結果だけを新規キーとして追記する。
+        // 保存しなかった場合はキー自体を出さない（既存レポートを汚さない）。
+        if (persistedAnchorFromRun && persistedCandidate.HasValue)
+        {
+            var candidate = persistedCandidate.Value;
+            report += $"[XIV Mini Util] characterPlace.persistedAnchorFromRun={persistedAnchorFromRun}{Environment.NewLine}"
+                + $"[XIV Mini Util] characterPlace.persistedAnchorPosition={FormatVector(candidate.Position)}{Environment.NewLine}"
+                + $"[XIV Mini Util] characterPlace.persistedAnchorCandidateId={candidate.CandidateId}{Environment.NewLine}"
+                + $"[XIV Mini Util] characterPlace.persistedAnchorTerritoryTypeId={candidate.TerritoryTypeId}{Environment.NewLine}";
+        }
+
         PublishAutomaticCheckReport(report, "finalize");
     }
 

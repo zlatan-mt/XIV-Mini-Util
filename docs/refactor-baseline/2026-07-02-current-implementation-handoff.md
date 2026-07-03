@@ -486,13 +486,9 @@ TitleBackgroundCharaSelectAnchorTerritoryTypeId
 TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled
 ```
 
-ただし、永続config world座標の適用は次のstatic readonlyリリースゲートで停止している。
+永続config world座標の適用は、当初 `TitleBackgroundExperimentalWorldPlacementLogic.PersistentApplyEnabled = false` のリリースゲートで停止していた。
 
-```text
-TitleBackgroundExperimentalWorldPlacementLogic.PersistentApplyEnabled = false
-```
-
-この値をtrueにしてはいけない。
+**（2026-07-03 解禁）** 恒等変換の確証（3点・残差0.002・目視一致）とユーザー承認により `PersistentApplyEnabled = true` へ解除。あわせて、1クリック確認runが成功したとき（run-scoped placement適用済み＋source=probe＋Evaluate eligible＋probe値の二重fail-closedチェック）に限り、そのrunの検証済みprobe anchorを永続configへ自動保存する（settings snapshot復元の後・最終reloadの前に実行）。通常UIへのボタン追加はなし（操作数4の契約維持）。保存時はレポートに `characterPlace.persistedAnchorFromRun` 等の新キーが載る。Evaluateゲート・fail-closed正規化・ground provenance判定は不変。
 
 ### gate
 
@@ -807,7 +803,7 @@ fixOn.exp.applied=False
 - `delivery.deliveryVerdict=working-background-only` は、背景経路が成立していることを示す。
 - `character-placement-applied-unverified` は、配置処理は動いたがground検証が未完了という意味。
 - `runAnchorFrameGroundProvenance=False` は安全側の正しい状態。
-- `PersistentApplyEnabled=false` は未完成ではなく、解除してはいけないリリースゲート。
+- `PersistentApplyEnabled` は2026-07-03に恒等変換確証とユーザー承認を経てtrueへ解除済み（§6.5参照）。解除前の「trueにしてはいけない」制約は、証拠が揃うまでの安全装置として正しく機能した。
 
 ## 10. 現在の検証結果
 
