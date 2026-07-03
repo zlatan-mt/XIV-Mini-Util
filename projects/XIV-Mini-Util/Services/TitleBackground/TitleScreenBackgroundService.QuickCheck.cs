@@ -401,6 +401,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _configuration.TitleBackgroundFixOnPassiveObservationEnabled = false;
         _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled = false;
         _configuration.TitleBackgroundEnvironmentNoonEnabled = true;
+        _configuration.TitleBackgroundEnvironmentClearSkyEnabled = true;
         _configuration.TitleBackgroundCharaSelectAnchorEnabled = false;
         _configuration.TitleBackgroundCharaSelectAnchorCandidateId = string.Empty;
         _configuration.TitleBackgroundCharaSelectAnchorX = 0f;

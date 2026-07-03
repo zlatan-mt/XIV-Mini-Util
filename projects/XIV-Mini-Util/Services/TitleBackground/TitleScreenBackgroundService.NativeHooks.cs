@@ -835,6 +835,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         CapturePreLoginCameraOnFrameworkUpdate();
         MaintainCharaSelectCharacterPlacement();
         MaintainCharaSelectEnvironmentNoon();
+        MaintainCharaSelectEnvironmentClearSky();
         UpdateSelfTestOnFrameworkUpdate();
         UpdateAutomaticQuickCheck();
     }

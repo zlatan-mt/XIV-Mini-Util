@@ -4999,5 +4999,59 @@ Test(442, "environment noon writer only writes DayTimeSeconds to the noon consta
         && !body.Contains("Exposure", StringComparison.Ordinal);
 });
 
+Test(444, "environment clear-sky override gate requires logged-out chara select session and ready hook state", () =>
+{
+    var root = FindRepositoryRoot();
+    var timelineText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.TimelineDiagnostics.cs"));
+    var body = ExtractMethodBody(timelineText, "private void MaintainCharaSelectEnvironmentClearSky()");
+    return body.Contains("TitleBackgroundEnvironmentClearSkyEnabled", StringComparison.Ordinal)
+        && body.Contains("|| _clientState.IsLoggedIn", StringComparison.Ordinal)
+        && body.Contains("_charaSelectTitleBackgroundSessionActive", StringComparison.Ordinal)
+        && body.Contains("_hookLifecycle.State != TitleBackgroundServiceState.Ready", StringComparison.Ordinal)
+        && body.Contains("TitleBackgroundEnvironmentClearSkyWriter.TryApplyClearSky()", StringComparison.Ordinal);
+});
+
+Test(445, "environment clear-sky toggle is absent from the normal title background screen", () =>
+{
+    var root = FindRepositoryRoot();
+    var normalText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackground.cs"));
+    var diagnosticsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackgroundDiagnostics.cs"));
+    return !normalText.Contains("TitleBackgroundEnvironmentClearSkyEnabled", StringComparison.Ordinal)
+        && diagnosticsText.Contains("TitleBackgroundEnvironmentClearSkyEnabled", StringComparison.Ordinal);
+});
+
+Test(446, "environment clear-sky writer only writes ActiveWeather to the clear skies constant", () =>
+{
+    var root = FindRepositoryRoot();
+    var writerText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundEnvironmentClearSkyWriter.cs"));
+    var body = ExtractMethodBody(writerText, "public static bool TryApplyClearSky()");
+    return body.Contains("manager->ActiveWeather = ClearSkiesWeatherId", StringComparison.Ordinal)
+        && !body.Contains("DayTimeSeconds", StringComparison.Ordinal)
+        && !body.Contains("EnvState", StringComparison.Ordinal)
+        && !body.Contains("Exposure", StringComparison.Ordinal)
+        && !body.Contains("TransitionTime", StringComparison.Ordinal);
+});
+
+Test(447, "automatic diagnostic allowlist includes both noon and clear-sky environment override keys", () =>
+{
+    var selected = TitleBackgroundAutomaticCheckDiagnosticSelector.Select(
+    [
+        "environment.noonOverrideEnabled=True",
+        "environment.noonOverrideAppliedFrameCount=3",
+        "environment.noonOverrideLastStatus=applied",
+        "environment.clearSkyOverrideEnabled=True",
+        "environment.clearSkyOverrideAppliedFrameCount=3",
+        "environment.clearSkyOverrideLastStatus=applied",
+    ]);
+
+    return selected.Count == 6
+        && selected.Contains("environment.noonOverrideEnabled=True")
+        && selected.Contains("environment.noonOverrideAppliedFrameCount=3")
+        && selected.Contains("environment.noonOverrideLastStatus=applied")
+        && selected.Contains("environment.clearSkyOverrideEnabled=True")
+        && selected.Contains("environment.clearSkyOverrideAppliedFrameCount=3")
+        && selected.Contains("environment.clearSkyOverrideLastStatus=applied");
+});
+
     }
 }

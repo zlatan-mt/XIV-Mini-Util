@@ -375,5 +375,22 @@ Test(439, "configuration environment noon override flag defaults true and persis
         && !restored.TitleBackgroundEnvironmentNoonEnabled;
 });
 
+Test(443, "configuration environment clear-sky override flag defaults true and persists as top-level json", () =>
+{
+    var defaultConfiguration = new Configuration();
+    var configuration = new Configuration
+    {
+        TitleBackgroundEnvironmentClearSkyEnabled = false,
+    };
+
+    var json = JsonSerializer.Serialize(configuration);
+    var restored = JsonSerializer.Deserialize<Configuration>(json);
+
+    return defaultConfiguration.TitleBackgroundEnvironmentClearSkyEnabled
+        && json.Contains("\"TitleBackgroundEnvironmentClearSkyEnabled\"", StringComparison.Ordinal)
+        && restored != null
+        && !restored.TitleBackgroundEnvironmentClearSkyEnabled;
+});
+
     }
 }

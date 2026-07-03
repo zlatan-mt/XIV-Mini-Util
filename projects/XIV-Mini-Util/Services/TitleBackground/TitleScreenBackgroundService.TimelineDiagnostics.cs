@@ -1551,6 +1551,40 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
     }
 
+    // ログイン画面（Title Background）が実天候（雨など）をそのまま反映して暗い雨天スカイドーム・
+    // 濡れ表現になる問題への対策。背景セッション中（pre-login + CharaSelectセッション中 + hook Ready）
+    // に限り、EnvManager の天候を毎フレーム晴れ（Clear Skies）へ上書きする。IsLoggedIn は最重要ゲート：
+    // ログイン中は絶対に書き込まない（ログインした瞬間にゲートが外れ、post-login へは書込がリークしない）。
+    // 時刻・露出・環境光には一切触れない（このメソッドの唯一の責務は天候上書き）。
+    private void MaintainCharaSelectEnvironmentClearSky()
+    {
+        if (!_configuration.TitleBackgroundEnvironmentClearSkyEnabled
+            || _clientState.IsLoggedIn
+            || !_charaSelectTitleBackgroundSessionActive
+            || _hookLifecycle.State != TitleBackgroundServiceState.Ready)
+        {
+            return;
+        }
+
+        try
+        {
+            if (TitleBackgroundEnvironmentClearSkyWriter.TryApplyClearSky())
+            {
+                _environmentClearSky.AppliedFrameCount++;
+                _environmentClearSky.LastStatus = "applied";
+            }
+            else
+            {
+                _environmentClearSky.LastStatus = "env-manager-unavailable";
+            }
+        }
+        catch (Exception ex)
+        {
+            _environmentClearSky.LastStatus = ex.GetType().Name;
+            _log.Warning(ex, "TitleBackground environment clear-sky override failed.");
+        }
+    }
+
     // placement-supported（LobbyNative / CharaSelectFallback）frame のときだけ有効なアンカー。
     // World 実験座標はここでは決して有効化しない（World は別 gate の experimental 経路だけが扱う）。
     private TitleBackgroundCharaSelectAnchor BuildSupportedFrameAnchor()

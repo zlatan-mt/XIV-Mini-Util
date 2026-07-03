@@ -50,6 +50,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundHookLifecycleRuntimeState _hookLifecycle = new();
     // 背景セッション中の環境正午上書きのセッション限定診断状態（プラグイン再起動で消える）。
     private readonly TitleBackgroundEnvironmentNoonRuntimeState _environmentNoon = new();
+    // 背景セッション中の環境天候（晴れ）上書きのセッション限定診断状態（プラグイン再起動で消える）。
+    private readonly TitleBackgroundEnvironmentClearSkyRuntimeState _environmentClearSky = new();
 
     private string _validatedTerritoryPath = string.Empty;
     private string _validationError = string.Empty;
@@ -1786,6 +1788,10 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"environment.noonOverrideEnabled={_configuration.TitleBackgroundEnvironmentNoonEnabled}");
         lines.Add($"environment.noonOverrideAppliedFrameCount={_environmentNoon.AppliedFrameCount}");
         lines.Add($"environment.noonOverrideLastStatus={FormatNone(_environmentNoon.LastStatus)}");
+        // 背景セッション中の環境天候（晴れ）上書き（雨天時のログイン画面暗さ対策）。config値・適用回数・最終status。
+        lines.Add($"environment.clearSkyOverrideEnabled={_configuration.TitleBackgroundEnvironmentClearSkyEnabled}");
+        lines.Add($"environment.clearSkyOverrideAppliedFrameCount={_environmentClearSky.AppliedFrameCount}");
+        lines.Add($"environment.clearSkyOverrideLastStatus={FormatNone(_environmentClearSky.LastStatus)}");
 
         var fixOnInstalled = _hookLifecycle.CameraFixOnHook != null;
         lines.Add($"fixOn.passiveObservationEnabled={_configuration.TitleBackgroundFixOnPassiveObservationEnabled}");

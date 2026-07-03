@@ -80,6 +80,10 @@ public sealed partial class Configuration
     // 固定するか。ログイン画面が実時刻・天候により暗くなる問題への対策。ログイン中には絶対に
     // 適用しない（IsLoggedIn ゲートで遮断）。既定 true（ユーザー要望により明るさ優先）。
     public bool TitleBackgroundEnvironmentNoonEnabled { get; set; } = true;
+    // 背景セッション中（pre-login・CharaSelectのみ）に環境天候をClear Skiesへ毎フレーム固定するか。
+    // 雨天時にログイン画面が暗いスカイドーム・濡れ表現になる問題への対策。ログイン中には絶対に
+    // 適用しない（IsLoggedIn ゲートで遮断）。既定 true（ユーザー要望により明るさ優先）。
+    public bool TitleBackgroundEnvironmentClearSkyEnabled { get; set; } = true;
     // SavePluginConfig (Dalamud) は Newtonsoft.Json、ExportToBase64 は System.Text.Json を使うため両方の互換属性が必要
     [Newtonsoft.Json.JsonProperty("TitleBackgroundPhase2MExperimentalApplyMode")]
     [JsonPropertyName("TitleBackgroundPhase2MExperimentalApplyMode")]
@@ -170,6 +174,7 @@ public sealed partial class Configuration
         TitleBackgroundFixOnPassiveObservationEnabled = source.TitleBackgroundFixOnPassiveObservationEnabled;
         TitleBackgroundFixOnFocusAnchorOverrideEnabled = source.TitleBackgroundFixOnFocusAnchorOverrideEnabled;
         TitleBackgroundEnvironmentNoonEnabled = source.TitleBackgroundEnvironmentNoonEnabled;
+        TitleBackgroundEnvironmentClearSkyEnabled = source.TitleBackgroundEnvironmentClearSkyEnabled;
         TitleBackgroundCharacterPlacementExperimentalApplyMode = NormalizeTitleBackgroundCharacterPlacementExperimentalApplyMode(source.TitleBackgroundCharacterPlacementExperimentalApplyMode);
         TitleBackgroundCreateSceneResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundCreateSceneResolverMode);
         TitleBackgroundLobbyUpdateResolverMode = NormalizeTitleBackgroundResolverMode(source.TitleBackgroundLobbyUpdateResolverMode);

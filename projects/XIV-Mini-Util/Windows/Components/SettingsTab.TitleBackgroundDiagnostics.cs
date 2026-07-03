@@ -24,6 +24,15 @@ public sealed partial class SettingsTab
             _configuration.Save();
         }
 
+        // 背景セッション中（pre-login）のみ環境天候を晴れへ固定する。ログイン中には適用されない
+        // （IsLoggedIn ゲートで遮断）。通常画面には出さない開発者向けトグル。既定 ON。
+        var clearSkyEnabled = _configuration.TitleBackgroundEnvironmentClearSkyEnabled;
+        if (ImGui.Checkbox("ログイン画面の天候を晴れに固定##TitleBackgroundEnvironmentClearSky", ref clearSkyEnabled))
+        {
+            _configuration.TitleBackgroundEnvironmentClearSkyEnabled = clearSkyEnabled;
+            _configuration.Save();
+        }
+
         if (ImGui.Button("現在の診断レポートをコピー##TitleBackgroundDiagnosticCopy"))
         {
             var lines = _titleScreenBackgroundService.RunBulkDiagnostic();
