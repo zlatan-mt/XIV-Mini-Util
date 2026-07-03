@@ -921,6 +921,21 @@ view.overrideLastSource=view
 
 結果が出ても、即座に変換を適用したりground-verifiedへ昇格させない。まずレポートと実機目視をレビューする。
 
+**2026-07-03 実測結果（標高48.7m / 71.2mの2点、同一セッション、view無効のクリーンな条件）**:
+
+```text
+verdict=fixed-offset-candidate
+xOffsetConstant=True meanXOffset=0
+zOffsetConstant=True meanZOffset=0
+yFixedOffsetCandidate=True meanYOffset=0.834（slope=1）
+```
+
+X/Zオフセットは完全に0、Y差0.834はFixOn焦点の胴体高さオフセット（bodyDrop相当）であり座標系差ではない。**world→lobby変換は恒等（CharaSelectシーンは同一地形ファイルを同一座標系で読む）という強い証拠**。旧H-B仮説（フレーム不一致）は、キャラ未配置時代の自然焦点(0,14,0)を座標系差と誤読していた。residual未検証（2点）のため確定扱いにはせず、3点目のサンプルと実機目視レビューを経てから `PersistentApplyEnabled` 再レビュー（通常経路の陸上配置解禁）を判断する。
+
+**運用上の注意（2026-07-03に実機で確認した罠）**:
+- 座標サンプルはセッション限定（ゲーム再起動で消える）。複数標高の収集は同一セッション内で行い、途中で「初期状態に戻す」を押さない（サンプルもクリアされるため）。
+- 保存view（`view.enabled=True`）が有効なまま確認runを回すと、view overrideがカメラを乗っ取り座標サンプルが汚染される（camera-worldオフセットが巨大値になる）。サンプル収集前に「初期状態に戻す」でviewをクリアすること。run中のview抑止またはview有効時のサンプル採取拒否は設計改善候補。
+
 ## 13. 次AI向けの検証チェックリスト
 
 コードを変更した場合:
@@ -1020,6 +1035,7 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 - R3の2〜4責務目と5a/5b（camera observation 30 / character placement 8 / probe timeline 15 / camera restore curve 32 / phase recording 31状態）は2026-07-02に実装・検証済み（各回LogicTests 439件、Debug/Release build、release package、`git diff --check` すべて緑）。serviceの可変fieldは153→42。
 - hook lifecycle state（5責務目）は実機確認できるタイミングまで保留（ユーザー決定）。実施時は§13により自動検証だけで完了扱いにしないこと。
 - hook lifecycle分離（5責務目）は2026-07-03の実機runで確認済み・push済み（`a61b0d1`）。**R3の全5責務＋5a/5bが完了**。serviceの可変fieldは153→31。
-- world/lobby座標対応はsample 1件を取得済み（run 6460136a、標高47.989）。`insufficient-samples` のため**別標高でもう1〜2run必要**（§12.3）。
-- 保存viewのround-trip・診断値確認（§12.2）は未実施。
-- 次AIの残タスク: (a) 別標高でのサンプル追加取得とレビュー、(b) 保存view round-trip、(c) report builderのservice private stateからの完全分離。
+- 旧設定の空signatureで通常経路のresolverが全滅する実機バグを発見・修正済み（正規化で既知既定値へ補完、`5011582`）。通常経路（イル・メグ）でも背景＋キャラ表示が動くことを実機確認済み（キャラは湖中心フォールバック位置＝既知の仕様限界）。
+- 保存viewのround-trip診断値（§12.2）は実機観測済み: `view.enabled=True` / `view.overrideAppliedCount=1` / `view.overrideLastSource=view`。機構は動作する。ただし**view有効のまま確認runを回すとカメラが乗っ取られ上空に置かれる**実機事象あり（§12.3の注意参照）。
+- world/lobby座標対応は**標高差22.6mの2点で `fixed-offset-candidate`（X/Z=0、Y=0.834=焦点高さ）＝恒等変換の強い証拠**を取得（§12.3の実測結果参照）。3点目のresidual検証と実機目視レビューが残る。
+- 次AIの残タスク: (a) 3点目サンプル＋目視レビュー → `PersistentApplyEnabled` 再レビュー（通常経路の陸上配置解禁の設計・実装）、(b) run中のview抑止/サンプル汚染ガードの設計改善、(c) report builderのservice private stateからの完全分離。
