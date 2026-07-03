@@ -305,6 +305,27 @@ public sealed partial class Configuration : IPluginConfiguration
         return true;
     }
 
+    // 既定値=既知signatureという設計意図（TitleBackgroundKnownSignatures.*）を保つため、
+    // trim後に空となる値は「未設定」ではなく既知既定値へ補完する。旧バージョン由来の空文字列が
+    // 保存されていると通常経路（ReloadNativeIntegration, useKnownSignaturesForMissing=false）で
+    // resolverが「not-configured」として全て失敗するため、これを構造的に防ぐ。
+    private static bool NormalizeSignatureProperty(string signature, string fallback, Action<string> setValue)
+    {
+        var normalized = NormalizeSignature(signature);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            normalized = fallback;
+        }
+
+        if (signature == normalized)
+        {
+            return false;
+        }
+
+        setValue(normalized);
+        return true;
+    }
+
     private static bool DictionaryListEquals(Dictionary<ulong, List<uint>> left, Dictionary<ulong, List<uint>> right)
     {
         if (left.Count != right.Count)

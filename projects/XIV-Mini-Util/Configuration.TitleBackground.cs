@@ -458,14 +458,14 @@ public sealed partial class Configuration
             changed = true;
         }
 
-        changed |= NormalizeSignatureProperty(TitleBackgroundCreateSceneSignature, value => TitleBackgroundCreateSceneSignature = value);
-        changed |= NormalizeSignatureProperty(TitleBackgroundFixOnSignature, value => TitleBackgroundFixOnSignature = value);
-        changed |= NormalizeSignatureProperty(TitleBackgroundLobbyUpdateSignature, value => TitleBackgroundLobbyUpdateSignature = value);
-        changed |= NormalizeSignatureProperty(TitleBackgroundLoadLobbySceneSignature, value => TitleBackgroundLoadLobbySceneSignature = value);
-        changed |= NormalizeSignatureProperty(TitleBackgroundLobbyCurrentMapSignature, value => TitleBackgroundLobbyCurrentMapSignature = value);
-        changed |= NormalizeSignatureProperty(TitleBackgroundCalculateLobbyCameraLookAtYSignature, value => TitleBackgroundCalculateLobbyCameraLookAtYSignature = value);
-        changed |= NormalizeSignatureProperty(TitleBackgroundSetCameraCurveMidPointSignature, value => TitleBackgroundSetCameraCurveMidPointSignature = value);
-        changed |= NormalizeSignatureProperty(TitleBackgroundCalculateCameraCurveLowAndHighPointSignature, value => TitleBackgroundCalculateCameraCurveLowAndHighPointSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundCreateSceneSignature, TitleBackgroundKnownSignatures.CreateScene, value => TitleBackgroundCreateSceneSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundFixOnSignature, TitleBackgroundKnownSignatures.FixOn, value => TitleBackgroundFixOnSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundLobbyUpdateSignature, TitleBackgroundKnownSignatures.LobbyUpdate, value => TitleBackgroundLobbyUpdateSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundLoadLobbySceneSignature, TitleBackgroundKnownSignatures.LoadLobbyScene, value => TitleBackgroundLoadLobbySceneSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundLobbyCurrentMapSignature, TitleBackgroundKnownSignatures.LobbyCurrentMap, value => TitleBackgroundLobbyCurrentMapSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundCalculateLobbyCameraLookAtYSignature, TitleBackgroundKnownSignatures.CalculateLobbyCameraLookAtY, value => TitleBackgroundCalculateLobbyCameraLookAtYSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundSetCameraCurveMidPointSignature, TitleBackgroundKnownSignatures.SetCameraCurveMidPoint, value => TitleBackgroundSetCameraCurveMidPointSignature = value);
+        changed |= NormalizeSignatureProperty(TitleBackgroundCalculateCameraCurveLowAndHighPointSignature, TitleBackgroundKnownSignatures.CalculateCameraCurveLowAndHighPoint, value => TitleBackgroundCalculateCameraCurveLowAndHighPointSignature = value);
         changed |= TitleBackgroundPresetApplicator.ClearInvalidSelectedPreset(this);
 
         return changed;

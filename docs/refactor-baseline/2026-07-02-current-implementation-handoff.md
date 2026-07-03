@@ -641,6 +641,8 @@ TitleBackgroundCharaSelectAnchorWorldExperimentalEnabled = false
 
 normalizationはfail-closed。
 
+（2026-07-03 追加）Title Backgroundのsignature 8項目は、正規化時にtrim後空なら対応する `TitleBackgroundKnownSignatures.*` 既定値へ補完する。旧バージョン由来の空文字列が保存されていると通常経路（`ReloadNativeIntegration`、フォールバックなし）でresolverが全て失敗し「1クリック確認中しか背景が出ない・キャラ選択画面判定不能」となる実機バグを構造的に防ぐため（実機で確認・修正済み）。空は「未設定」であって有効な値ではないため、この補完はfail-closed方針と矛盾しない。
+
 次のいずれかならworld experimental enabledをfalseへ戻す。
 
 - territory IDが0

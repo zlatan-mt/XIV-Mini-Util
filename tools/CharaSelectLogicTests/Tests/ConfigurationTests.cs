@@ -148,6 +148,18 @@ Test(7, "configuration apply from preserves top-level feature settings and clamp
         DutyReadySoundDurationSeconds = 99,
         CharaSelectOverridePositionX = float.PositiveInfinity,
         CharaSelectSceneProfileId = " missing-profile ",
+        // 旧バージョン由来の空文字列signature（trim後も空白のみ）を模擬。
+        // 通常経路（ReloadNativeIntegration, useKnownSignaturesForMissing=false）でも
+        // resolverが「not-configured」で失敗しないよう、既知既定値へ補完される契約を固定する。
+        TitleBackgroundCreateSceneSignature = "   ",
+        TitleBackgroundFixOnSignature = string.Empty,
+        TitleBackgroundLobbyUpdateSignature = "   ",
+        TitleBackgroundLoadLobbySceneSignature = string.Empty,
+        TitleBackgroundLobbyCurrentMapSignature = "   ",
+        TitleBackgroundCalculateLobbyCameraLookAtYSignature = string.Empty,
+        // 非空のカスタム値はtrimのみで既知既定値へ上書きされないことも同じ契約内で確認する。
+        TitleBackgroundSetCameraCurveMidPointSignature = " custom-set-camera-curve-mid-point-sig ",
+        TitleBackgroundCalculateCameraCurveLowAndHighPointSignature = string.Empty,
     };
 
     target.ApplyFrom(source);
@@ -167,7 +179,15 @@ Test(7, "configuration apply from preserves top-level feature settings and clamp
         && target.NotificationRateLimitRetryMax == 10
         && target.DutyReadySoundDurationSeconds == 30
         && target.CharaSelectOverridePositionX == 0f
-        && target.CharaSelectSceneProfileId == "missing-profile";
+        && target.CharaSelectSceneProfileId == "missing-profile"
+        && target.TitleBackgroundCreateSceneSignature == TitleBackgroundKnownSignatures.CreateScene
+        && target.TitleBackgroundFixOnSignature == TitleBackgroundKnownSignatures.FixOn
+        && target.TitleBackgroundLobbyUpdateSignature == TitleBackgroundKnownSignatures.LobbyUpdate
+        && target.TitleBackgroundLoadLobbySceneSignature == TitleBackgroundKnownSignatures.LoadLobbyScene
+        && target.TitleBackgroundLobbyCurrentMapSignature == TitleBackgroundKnownSignatures.LobbyCurrentMap
+        && target.TitleBackgroundCalculateLobbyCameraLookAtYSignature == TitleBackgroundKnownSignatures.CalculateLobbyCameraLookAtY
+        && target.TitleBackgroundSetCameraCurveMidPointSignature == "custom-set-camera-curve-mid-point-sig"
+        && target.TitleBackgroundCalculateCameraCurveLowAndHighPointSignature == TitleBackgroundKnownSignatures.CalculateCameraCurveLowAndHighPoint;
 });
 
 Test(148, "title background preset applicator keeps configuration on invalid preset", () =>
