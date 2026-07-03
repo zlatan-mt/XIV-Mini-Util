@@ -704,6 +704,22 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     {
         _cameraRestoreCurve.RuntimeRestoreAttemptCount++;
         RecordTransitionEvent("runtime restore attempted", $"attempt={_cameraRestoreCurve.RuntimeRestoreAttemptCount}");
+
+        // 保存 view が使用可能かつ active candidate と一致する場合、FixOn 側の view override が
+        // 既にこの scene generation で保存構図を書き込んでいる（またはこれから書く）ので、
+        // runtime restore が yaw/pitch/distance を上書きして保存構図を消さないよう譲る。
+        // 判定条件は TitleBackgroundFixOnViewOverrideLogic.Resolve の成立条件と同一。
+        if (TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(
+                _configuration.TitleBackgroundCharaSelectViewEnabled,
+                BuildCharaSelectView(),
+                ResolveCurrentOverrideCandidate().Id))
+        {
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "yielded-to-saved-view";
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
+            RecordTransitionEvent("runtime restore failed", "yielded-to-saved-view");
+            return;
+        }
+
         if (!_charaSelectCameraAdapter.ShouldRestoreRuntimeCameraState())
         {
             _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "skipped";

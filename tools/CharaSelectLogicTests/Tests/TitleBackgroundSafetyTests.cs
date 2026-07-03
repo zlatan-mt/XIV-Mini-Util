@@ -5053,5 +5053,85 @@ Test(447, "automatic diagnostic allowlist includes both noon and clear-sky envir
         && selected.Contains("environment.clearSkyOverrideLastStatus=applied");
 });
 
+Test(448, "runtime camera pose yields to saved view when enabled and candidate matches", () =>
+{
+    var view = new TitleBackgroundCharaSelectView(
+        true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
+    return TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(true, view, "custom:n4f4");
+});
+
+Test(449, "runtime camera pose does not yield when view disabled, candidate mismatched, or view unusable", () =>
+{
+    var view = new TitleBackgroundCharaSelectView(
+        true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
+    var disabledView = view with { Enabled = false };
+    var nanView = new TitleBackgroundCharaSelectView(true, "custom:n4f4", new Vector3(float.NaN, 0f, 0f), new Vector3(0f, 0f, 0f), 45f);
+    var emptyIdView = new TitleBackgroundCharaSelectView(true, string.Empty, new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
+
+    return !TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(false, view, "custom:n4f4")
+        && !TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(true, view, "manual:slot1")
+        && !TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(true, disabledView, "custom:n4f4")
+        && !TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(true, nanView, "custom:n4f4")
+        && !TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(true, emptyIdView, "anything");
+});
+
+Test(450, "runtime camera pose yield decision matches FixOn view override success condition exactly", () =>
+{
+    // ShouldYieldCameraPoseToSavedView と Resolve の ShouldOverride は、同じ入力に対して
+    // 常に同じ真偽値を返さなければならない（非対称禁止）。複数パターンで突き合わせる。
+    var matchingView = new TitleBackgroundCharaSelectView(
+        true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
+    var observedCam = new Vector3(2f, 2f, 2f);
+    var observedFocus = new Vector3(0f, 14f, 0f);
+
+    bool Matches(bool enabled, TitleBackgroundCharaSelectView view, string? candidateId)
+    {
+        var yield = TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(enabled, view, candidateId);
+        var resolve = TitleBackgroundFixOnViewOverrideLogic.Resolve(enabled, view, candidateId, observedCam, observedFocus, 60f);
+        return yield == resolve.ShouldOverride;
+    }
+
+    return Matches(true, matchingView, "custom:n4f4")
+        && Matches(false, matchingView, "custom:n4f4")
+        && Matches(true, matchingView, "manual:slot1")
+        && Matches(true, matchingView with { Enabled = false }, "custom:n4f4")
+        && Matches(true, new TitleBackgroundCharaSelectView(true, string.Empty, matchingView.Camera, matchingView.Focus, matchingView.FovY), "anything");
+});
+
+Test(451, "runtime restore camera pose write path has yield check at the top before applying pose", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var body = ExtractMethodBody(serviceText, "private void RestoreCharaSelectRuntimeCameraStateAfterSceneLoad()");
+    var yieldIndex = body.IndexOf("TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView", StringComparison.Ordinal);
+    var applyIndex = body.IndexOf("TryApplyRuntimeCameraPose(", StringComparison.Ordinal);
+
+    // 譲歩判定は先頭近く（attempt カウント直後）にあり、実際の pose 書込みより必ず前に評価される。
+    return yieldIndex >= 0
+        && applyIndex >= 0
+        && yieldIndex < applyIndex
+        && body.Contains("_configuration.TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal)
+        && body.Contains("BuildCharaSelectView()", StringComparison.Ordinal)
+        && body.Contains("ResolveCurrentOverrideCandidate().Id", StringComparison.Ordinal)
+        && body.Contains("\"yielded-to-saved-view\"", StringComparison.Ordinal);
+});
+
+Test(452, "runtime restore yield check uses identical arguments as FixOn view override gate", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var restoreBody = ExtractMethodBody(serviceText, "private void RestoreCharaSelectRuntimeCameraStateAfterSceneLoad()");
+    var fixOnBody = ExtractMethodBody(hooksText, "private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)");
+
+    // 両経路とも同じ3要素（view有効フラグ / BuildCharaSelectView() / ResolveCurrentOverrideCandidate().Id）を使う。
+    return restoreBody.Contains("_configuration.TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal)
+        && restoreBody.Contains("BuildCharaSelectView()", StringComparison.Ordinal)
+        && restoreBody.Contains("ResolveCurrentOverrideCandidate().Id", StringComparison.Ordinal)
+        && fixOnBody.Contains("_configuration.TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal)
+        && fixOnBody.Contains("BuildCharaSelectView()", StringComparison.Ordinal)
+        && fixOnBody.Contains("ResolveCurrentOverrideCandidate().Id", StringComparison.Ordinal);
+});
+
     }
 }

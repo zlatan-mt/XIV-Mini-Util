@@ -316,6 +316,21 @@ internal static class TitleBackgroundFixOnViewOverrideLogic
             TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(activeCandidateId),
             StringComparison.Ordinal);
     }
+
+    // scene load 後にカメラ pose (yaw/pitch/distance 等) を書く経路向けの譲歩判定。
+    // FixOn 側の view override 成立条件（featureEnabled && view.HasUsableView && candidate 正規化一致）と
+    // 完全に同一の判定にすることで、「view override は勝ったのに runtime restore がまた上書きする」
+    // 非対称を作らない。保存 view が使用可能かつ active candidate と一致するときだけ true を返し、
+    // 呼び出し側はその scene generation でのカメラ pose 書込みをスキップする。
+    public static bool ShouldYieldCameraPoseToSavedView(
+        bool viewEnabled,
+        TitleBackgroundCharaSelectView view,
+        string? activeCandidateId)
+    {
+        return viewEnabled
+            && view.HasUsableView
+            && MatchesCandidateStrict(view.CandidateId, activeCandidateId);
+    }
 }
 
 internal static class TitleBackgroundFixOnFocusOverrideLogic
