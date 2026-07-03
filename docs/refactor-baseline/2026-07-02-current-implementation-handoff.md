@@ -281,11 +281,13 @@ tools/CharaSelectLogicTests/
 
 `TitleBackgroundPhaseRecordingRuntimeState` に、phase2M placement記録（frames辞書・capture generation/reason・skipカウント3種・experimental status/write/skip）、phase2E lookAtY呼び出し記録、phase2F generated curve呼び出し記録（calls/interesting calls×2系統・カウント・前回入力値・エラー）、phase2G generation override（attempt/appliedカウント×2系統・frame/generation/status/skip reason）の計31状態を集約。readonlyコレクション5つはget-onlyで可変性境界を維持。`phase2M.*` 旧alias含む診断キーは不変。テスト側のロックはなし。
 
-### 実装済み・実機確認待ち（2026-07-02、R3の5責務目=hook lifecycle）
+### 実装済み・実機確認済み（2026-07-02実装、2026-07-03実機確認、R3の5責務目=hook lifecycle）
+
+2026-07-03 14:05の実機run（runId=6460136a03014606afbd33d45e95149a）で `fixOn.hookInstalled=True` / `fixOn.calls=1` / `Background=applied` / `completion=complete` / `settingsRestored=True` を確認し、§13の完了条件を満たした。commit `a61b0d1` はpush済み。
 
 `TitleBackgroundHookLifecycleRuntimeState` に `Hook<T>` インスタンス8個と `State` / `StateReason` / `Disposed` を集約。InitializeHooksの作成・enable順序、Disposeの解除順序（FixOn→…→CreateScene）、各detourのOriginal呼び出し経路は不変。Test 396の契約は新名称で維持。Desynth/Materiaの同名 `_state` は非干渉を確認済み。既知の無害な変化: `DisposeHook` の `nameof` ラベルが `_cameraFixOnHook`→`CameraFixOnHook` 形式に変わる（警告ログの識別子のみ、診断キー非該当）。
 
-**§13により自動検証（LogicTests/build/package）だけでは完了扱いにしない。実機での1クリック確認（hookReady/fixOn.hookInstalled等）が完了条件。実機確認まではローカルcommitのみでpush保留。**
+（§13の実機確認要件は上記runで充足済み。）
 
 ### 未実施
 
@@ -871,7 +873,7 @@ DownloadLink=v0.3.7/XivMiniUtil.zip
 2. ~~保存view / camera observation state~~ 実装済み（`TitleBackgroundCameraObservationRuntimeState`、2026-07-02）
 3. ~~character placement state~~ 実装済み（`TitleBackgroundCharacterPlacementRuntimeState`、2026-07-02）
 4. ~~timeline diagnostic state~~ 実装済み（`TitleBackgroundProbeTimelineRuntimeState`、2026-07-02）
-5. ~~hook lifecycle state~~ 実装済み・**実機確認待ち**（`TitleBackgroundHookLifecycleRuntimeState`、2026-07-02。実機の1クリック確認が緑になるまで完了扱い・push禁止）
+5. ~~hook lifecycle state~~ 実装済み・実機確認済み（`TitleBackgroundHookLifecycleRuntimeState`、実装2026-07-02 / 実機確認2026-07-03、push済み `a61b0d1`）
 
 追加責務（4完了後に細分化）:
 
@@ -1015,6 +1017,7 @@ TitleBackgroundのhook、pointer、scene generation、diagnostic key生成、Fix
 - 保存viewのコード経路は実装済み。目視はユーザー確認済みだが、診断値によるround-trip確認（view.enabled=True等）は未実施。
 - R3の2〜4責務目と5a/5b（camera observation 30 / character placement 8 / probe timeline 15 / camera restore curve 32 / phase recording 31状態）は2026-07-02に実装・検証済み（各回LogicTests 439件、Debug/Release build、release package、`git diff --check` すべて緑）。serviceの可変fieldは153→42。
 - hook lifecycle state（5責務目）は実機確認できるタイミングまで保留（ユーザー決定）。実施時は§13により自動検証だけで完了扱いにしないこと。
-- hook lifecycle分離（5責務目）も2026-07-02に実装済み。自動検証は全て緑だが、**実機での1クリック確認が済むまで完了扱いにせずpushしない**（ローカルcommitのみ）。実機NG時はこのcommitをrevertする。
-- 実機確認の手順: イル・メグで「この場所で確認を開始」→ログアウト→キャラ選択目視→ログイン→自動コピーされたレポートで `hookReady` / `fixOn.hookInstalled=True` / `Background=applied` / `settingsRestored=True` を確認。あわせて複数標高サンプル（§12.3）と保存view診断値（§12.2）も同一セッションで回収予定。
-- 次AIの残タスク: (a) 上記実機確認の完了とpush、(b) report builderのservice private stateからの完全分離。
+- hook lifecycle分離（5責務目）は2026-07-03の実機runで確認済み・push済み（`a61b0d1`）。**R3の全5責務＋5a/5bが完了**。serviceの可変fieldは153→31。
+- world/lobby座標対応はsample 1件を取得済み（run 6460136a、標高47.989）。`insufficient-samples` のため**別標高でもう1〜2run必要**（§12.3）。
+- 保存viewのround-trip・診断値確認（§12.2）は未実施。
+- 次AIの残タスク: (a) 別標高でのサンプル追加取得とレビュー、(b) 保存view round-trip、(c) report builderのservice private stateからの完全分離。
