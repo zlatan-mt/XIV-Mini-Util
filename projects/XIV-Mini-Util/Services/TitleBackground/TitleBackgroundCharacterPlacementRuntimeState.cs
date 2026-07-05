@@ -24,4 +24,16 @@ internal sealed class TitleBackgroundCharacterPlacementRuntimeState
 
     // 直近の配置で使ったアンカーの frame（地面 provenance 判定に使う）。camera-focus 由来は Unknown。
     public string LastCharaSelectCharacterPlacementAnchorFrame { get; set; } = TitleBackgroundCharaSelectAnchorFrame.Unknown;
+
+    public bool FacingActive { get; set; }
+
+    public int FacingAppliedFrameCount { get; set; }
+
+    public float? FacingAppliedYaw { get; set; }
+
+    public float? FacingSavedDirH { get; set; }
+
+    public float? FacingReadBackRotation { get; set; }
+
+    public string FacingLastError { get; set; } = "none";
 }

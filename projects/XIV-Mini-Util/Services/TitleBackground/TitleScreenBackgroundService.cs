@@ -54,6 +54,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundEnvironmentClearSkyRuntimeState _environmentClearSky = new();
     // 保存view再現バグ診断: pose/FixOn適用直後〜後続フレームのカメラ実値trace（read-only、次のview関与loadまで保持）。
     private readonly TitleBackgroundViewReplayTraceRuntimeState _viewReplayTrace = new();
+    // FixOn後〜pre-login CharaSelect終了まで、curve original後に保存pose入力paramsだけを維持するbounded状態。
+    private readonly TitleBackgroundSavedViewPoseMaintainRuntimeState _savedViewPoseMaintain = new();
 
     private string _validatedTerritoryPath = string.Empty;
     private string _validationError = string.Empty;
@@ -708,9 +710,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         RecordTransitionEvent("runtime restore attempted", $"attempt={_cameraRestoreCurve.RuntimeRestoreAttemptCount}");
 
         // 保存 view が使用可能かつ active candidate と一致する場合の 3 値決定。
-        // - apply-saved-view-pose: pose 付き view は runtime state ではなく view の DirH/DirV/Distance/FovY を
-        //   1 回だけ適用する（本命修正。FixOn の camera 引数はエンジンの毎フレーム再導出に負けるため、
-        //   持続実績のある pose 形式で構図を復元する）。
+        // - defer-saved-view-pose-to-fixon: pose 付き view はscene-readyでは書かず、自然FixOnが配置キャラへ
+        //   焦点を確定した直後のone-shot pose適用へ委ねる。
         // - yield-no-pose: pose 無しの旧保存 view は従来どおり譲る（後方互換。再保存で pose 付きへ昇格）。
         // - proceed-runtime-restore: view 非成立、または自動確認 run 中の抑止 → 従来の runtime restore。
         // view 成立条件は TitleBackgroundFixOnViewOverrideLogic.Resolve の成立条件と同一。
@@ -720,9 +721,13 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             _configuration.TitleBackgroundCharaSelectViewEnabled,
             savedView,
             ResolveCurrentOverrideCandidate().Id);
-        if (restoreDecision == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionApplySavedViewPose)
+        if (restoreDecision == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionDeferSavedViewPoseToFixOn)
         {
-            ApplySavedViewCameraPoseAfterSceneLoad(savedView);
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "deferred-to-fixon-pose";
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
+            _cameraRestoreCurve.SavedViewPoseLastRestoreStatus = "deferred-to-fixon-pose";
+            _cameraRestoreCurve.SavedViewPoseLastRestoreSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+            RecordTransitionEvent("runtime restore succeeded", "deferred-to-fixon-pose");
             return;
         }
 
@@ -775,10 +780,10 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreSceneGeneration);
     }
 
-    // 保存 view の pose（DirH/DirV/Distance/FovY）を scene load 後に 1 回だけ LobbyCamera へ適用する。
+    // 保存 view の pose（DirH/DirV/Distance/FovY）を自然FixOn original直後に1回だけLobbyCameraへ適用する。
     // 書込コアは runtime restore と同一（TryApplyLobbyCameraPose）。失敗時は runtime restore へは
     // フォールバックしない（runtime state の pose を書くと保存構図がまた消されるため、譲って終える）。
-    private void ApplySavedViewCameraPoseAfterSceneLoad(TitleBackgroundCharaSelectView savedView)
+    private bool ApplySavedViewCameraPoseAfterFixOn(TitleBackgroundCharaSelectView savedView)
     {
         if (!TryApplyLobbyCameraPose(
                 savedView.DirH,
@@ -787,16 +792,16 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
                 savedView.FovY,
                 out var errorMessage))
         {
-            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "saved-view-pose-failed";
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "saved-view-pose-after-fixon-failed";
             _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreFailureReason = errorMessage;
-            _cameraRestoreCurve.SavedViewPoseLastRestoreStatus = "saved-view-pose-failed";
+            _cameraRestoreCurve.SavedViewPoseLastRestoreStatus = "saved-view-pose-after-fixon-failed";
             _cameraRestoreCurve.SavedViewPoseLastRestoreSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
-            RecordTransitionEvent("runtime restore failed", $"saved-view-pose-failed: {errorMessage}");
-            _log.Debug("[XMU BG] Saved view camera pose apply failed. reason={Reason}", errorMessage);
-            return;
+            RecordTransitionEvent("runtime restore failed", $"saved-view-pose-after-fixon-failed: {errorMessage}");
+            _log.Debug("[XMU BG] Saved view camera pose apply after FixOn failed. reason={Reason}", errorMessage);
+            return false;
         }
 
-        _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "applied-saved-view-pose";
+        _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "applied-saved-view-pose-after-fixon";
         _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
         _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
         _cameraRestoreCurve.SavedViewPoseAppliedCount++;
@@ -804,20 +809,22 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _cameraRestoreCurve.SavedViewPoseAppliedDirV = savedView.DirV;
         _cameraRestoreCurve.SavedViewPoseAppliedDistance = savedView.Distance;
         _cameraRestoreCurve.SavedViewPoseAppliedFovY = savedView.FovY;
-        _cameraRestoreCurve.SavedViewPoseLastRestoreStatus = "applied-saved-view-pose";
+        _cameraRestoreCurve.SavedViewPoseLastRestoreStatus = "applied-saved-view-pose-after-fixon";
         _cameraRestoreCurve.SavedViewPoseLastRestoreSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
         StartViewReplayTraceForSavedPose(savedView);
-        RecordTransitionEvent("runtime restore succeeded", "applied-saved-view-pose");
+        _savedViewPoseMaintain.Arm(savedView, _activeCharaSelectSceneGeneration);
+        RecordTransitionEvent("runtime restore succeeded", "applied-saved-view-pose-after-fixon");
         _log.Information(
-            "[XMU BG] Saved view camera pose applied. dirH={DirH}, dirV={DirV}, distance={Distance}, fovY={FovY}, generation={Generation}",
+            "[XMU BG] Saved view camera pose applied after FixOn. dirH={DirH}, dirV={DirV}, distance={Distance}, fovY={FovY}, generation={Generation}",
             savedView.DirH,
             savedView.DirV,
             savedView.Distance,
             savedView.FovY,
             _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreSceneGeneration);
+        return true;
     }
 
-    // 自動確認 run 中は保存 view（FixOn の view override / scene load 後の pose 適用の両方）を抑止する。
+    // 自動確認 run 中は保存 view（FixOn の旧絶対override / original後のpose適用の両方）を抑止する。
     // run 中はカメラを自然 FixOn（配置キャラ追従）に任せて確認場所を写し、view による座標サンプル汚染
     // （§12.3 の既知事象）も防ぐ。run はログアウト遷移を跨いで継続するため Requested フラグで判定し、
     // run の完了・失敗・キャンセル・リセットで必ず false へ戻る（run 外への漏れなし）。
@@ -955,8 +962,9 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     }
 
     // LobbyCamera への pose 書込コア（runtime restore と保存 view pose 復元の共通経路）。
-    // 書込フィールド・順序は従来の runtime restore と完全に同一。scene load 後に 1 回だけ呼ばれる
-    // one-shot 経路であり、Framework.Update からの毎フレーム書込には絶対に接続しないこと。
+    // 書込フィールド・順序は従来のruntime restoreと完全に同一。scene-ready runtime restore、
+    // FixOn直後one-shot、curve original後のbounded input-param維持だけから呼ぶ。
+    // Framework.UpdateやSceneCamera.Position書込には絶対に接続しないこと。
     private bool TryApplyLobbyCameraPose(
         float dirH,
         float dirV,
@@ -1119,6 +1127,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     // post-FixOn / pre-login カメラ / 適用回数 / context を全消去する。FixOn が本ロードで発火すれば再populate。
     private void ResetFixOnExperimentSnapshot()
     {
+        _savedViewPoseMaintain.Stop("scene-load-started");
         _cameraObservation.FixOnPassiveCallCount = 0;
         _cameraObservation.FixOnFocusOverrideAppliedCount = 0;
         _cameraObservation.LastFixOnFocusOverrideSource = "not-run";
@@ -1133,6 +1142,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _cameraObservation.LastAppliedFocus = null;
         _cameraObservation.LastAppliedFovY = null;
         _cameraObservation.LastFixOnInvocationMode = "not-run";
+        _cameraObservation.LastViewOverrideAppliedGeneration = 0;
         _cameraObservation.FixOnExperimentSceneGeneration = 0;
         _cameraObservation.FixOnExperimentCaptureContext = "not-run";
         _cameraObservation.FixOnExperimentCharaSelectSession = false;
@@ -1394,6 +1404,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     private void ResetSceneOverrideObservation()
     {
+        _characterPlacement.FacingActive = false;
+        _savedViewPoseMaintain.Stop("scene-observation-reset");
         _lastOverrideApplied = false;
         _lastOverrideLobbyType = GameLobbyType.None;
         _lastOverrideOriginalPath = string.Empty;
@@ -1431,6 +1443,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
     private void EndCharaSelectTitleBackgroundSession(string reason, string source)
     {
+        _characterPlacement.FacingActive = false;
+        _savedViewPoseMaintain.Stop(reason);
         _cameraApplyPending = false;
         _charaSelectTitleBackgroundSessionActive = false;
         _activeCharaSelectSceneGeneration = 0;
@@ -1855,6 +1869,12 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"characterPlace.lastSource={FormatNone(_characterPlacement.LastCharaSelectCharacterPlacementSource)}");
         lines.Add($"characterPlace.lastAnchorFrame={FormatNone(_characterPlacement.LastCharaSelectCharacterPlacementAnchorFrame)}");
         lines.Add($"characterPlace.lastAnchorFrameGroundProvenance={TitleBackgroundCharaSelectAnchorFrame.HasGroundProvenance(_characterPlacement.LastCharaSelectCharacterPlacementAnchorFrame)}");
+        lines.Add($"character.facing.active={_characterPlacement.FacingActive}");
+        lines.Add($"character.facing.appliedFrameCount={_characterPlacement.FacingAppliedFrameCount}");
+        lines.Add($"character.facing.appliedYaw={(_characterPlacement.FacingAppliedYaw.HasValue ? _characterPlacement.FacingAppliedYaw.Value.ToString("0.###") : "none")}");
+        lines.Add($"character.facing.savedDirH={(_characterPlacement.FacingSavedDirH.HasValue ? _characterPlacement.FacingSavedDirH.Value.ToString("0.###") : "none")}");
+        lines.Add($"character.facing.readBackRotation={(_characterPlacement.FacingReadBackRotation.HasValue ? _characterPlacement.FacingReadBackRotation.Value.ToString("0.###") : "none")}");
+        lines.Add($"character.facing.lastError={FormatNone(_characterPlacement.FacingLastError)}");
         // run-scoped 値（自動確認レポート用）。今回 run の配置回数と、その配置に対応する source/target/frame。
         // 今回 0 回なら過去 run の位置・source を出さず none にする（run-scoped QuickCheck と整合させる）。
         var runActive = IsRunScopedQuickCheckActive();
@@ -1920,8 +1940,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"view.poseDirH={(_configuration.TitleBackgroundCharaSelectViewPoseCaptured ? _configuration.TitleBackgroundCharaSelectViewDirH.ToString("0.###") : "none")}");
         lines.Add($"view.poseDirV={(_configuration.TitleBackgroundCharaSelectViewPoseCaptured ? _configuration.TitleBackgroundCharaSelectViewDirV.ToString("0.###") : "none")}");
         lines.Add($"view.poseDistance={(_configuration.TitleBackgroundCharaSelectViewPoseCaptured ? _configuration.TitleBackgroundCharaSelectViewDistance.ToString("0.###") : "none")}");
-        // scene load 後の pose 適用結果（applied-saved-view-pose / yielded-to-saved-view-no-pose /
-        // saved-view-pose-failed / それ以外は runtime restore の status）。
+        // 保存poseの復元結果（deferred-to-fixon-pose / applied-saved-view-pose-after-fixon /
+        // saved-view-pose-after-fixon-failed / yielded-to-saved-view-no-pose / runtime restore status）。
         lines.Add($"view.poseRestoreStatus={FormatNone(_cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus)}");
         lines.Add($"view.poseAppliedCount={_cameraRestoreCurve.SavedViewPoseAppliedCount}");
         lines.Add($"view.poseAppliedDirH={(_cameraRestoreCurve.SavedViewPoseAppliedDirH.HasValue ? _cameraRestoreCurve.SavedViewPoseAppliedDirH.Value.ToString("0.###") : "none")}");
@@ -1930,6 +1950,12 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"view.poseAppliedFovY={(_cameraRestoreCurve.SavedViewPoseAppliedFovY.HasValue ? _cameraRestoreCurve.SavedViewPoseAppliedFovY.Value.ToString("0.###") : "none")}");
         lines.Add($"view.poseLastRestoreStatus={FormatNone(_cameraRestoreCurve.SavedViewPoseLastRestoreStatus)}");
         lines.Add($"view.poseLastRestoreSceneGeneration={_cameraRestoreCurve.SavedViewPoseLastRestoreSceneGeneration}");
+        lines.Add($"view.poseMaintain.active={_savedViewPoseMaintain.Active}");
+        lines.Add($"view.poseMaintain.sceneGeneration={_savedViewPoseMaintain.SceneGeneration}");
+        lines.Add($"view.poseMaintain.appliedCallCount={_savedViewPoseMaintain.AppliedCallCount}");
+        lines.Add($"view.poseMaintain.appliedFrameCount={_savedViewPoseMaintain.AppliedFrameCount}");
+        lines.Add($"view.poseMaintain.lastFrame={(_savedViewPoseMaintain.LastAppliedFrame.HasValue ? _savedViewPoseMaintain.LastAppliedFrame.Value.ToString() : "none")}");
+        lines.Add($"view.poseMaintain.stopReason={FormatNone(_savedViewPoseMaintain.StopReason)}");
         // 自動確認 run 中は保存 view（FixOn override / pose 適用）を抑止する。レポートは run 中に生成される
         // ため、この行が True なら「view が発火しなかったのは run 抑止のため」と読める。
         lines.Add($"view.suppressedByRun={IsSavedViewSuppressedByAutomaticRun() && _configuration.TitleBackgroundCharaSelectViewEnabled}");

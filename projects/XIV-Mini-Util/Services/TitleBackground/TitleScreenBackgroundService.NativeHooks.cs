@@ -316,6 +316,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         float[]? focusOverride = null;
         var overrideFovY = fovY;
         var invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(false);
+        TitleBackgroundCharaSelectView? savedViewPoseToApply = null;
         // 保存view再現バグ診断: この呼び出しで view override が成立したかを一時保持する（catch で握り潰された
         // 場合は false のままなので trace は開始しない＝誤ったtarget値でtraceを走らせない安全側の挙動）。
         var viewOverrideAppliedThisInvocation = false;
@@ -380,9 +381,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 }
                 else
                 {
+                    var savedView = BuildCharaSelectView();
                     var viewResolution = TitleBackgroundFixOnViewOverrideLogic.Resolve(
                         _configuration.TitleBackgroundCharaSelectViewEnabled,
-                        BuildCharaSelectView(),
+                        savedView,
                         ResolveCurrentOverrideCandidate().Id,
                         _cameraObservation.LastObservedFixOnCamera ?? Vector3.Zero,
                         _cameraObservation.LastObservedFixOnFocus ?? Vector3.Zero,
@@ -390,32 +392,45 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     _cameraObservation.LastFixOnViewOverrideSource = viewResolution.Source;
                     if (viewResolution.ShouldOverride)
                     {
-                        cameraOverride =
-                        [
-                            viewResolution.Camera.X,
-                            viewResolution.Camera.Y,
-                            viewResolution.Camera.Z,
-                        ];
-                        focusOverride =
-                        [
-                            viewResolution.Focus.X,
-                            viewResolution.Focus.Y,
-                            viewResolution.Focus.Z,
-                        ];
-                        overrideFovY = viewResolution.FovY;
-                        _cameraObservation.LastCameraOverrideApplied = true;
-                        _cameraObservation.LastAppliedCamera = viewResolution.Camera;
-                        _cameraObservation.LastAppliedFocus = viewResolution.Focus;
-                        _cameraObservation.LastAppliedFovY = viewResolution.FovY;
-                        _cameraObservation.FixOnViewOverrideAppliedCount++;
-                        _cameraObservation.LastViewOverrideAppliedGeneration = _activeCharaSelectSceneGeneration;
-                        invocationMode = "view-override";
-                        viewOverrideAppliedThisInvocation = true;
-                        _log.Information(
-                            "[XMU BG] FixOn view override applied. camera={Camera}, focus={Focus}, fovY={FovY}",
-                            FormatVector(viewResolution.Camera),
-                            FormatVector(viewResolution.Focus),
-                            viewResolution.FovY);
+                        if (viewResolution.ApplicationMode == TitleBackgroundFixOnViewOverrideLogic.ApplicationModeDelayedPose)
+                        {
+                            // pose付きviewは絶対camera/focusを渡さない。自然FixOn originalに配置キャラの焦点を
+                            // 確定させ、その直後に相対poseだけをone-shot適用する。
+                            savedViewPoseToApply = savedView;
+                            _cameraObservation.LastViewOverrideAppliedGeneration = _activeCharaSelectSceneGeneration;
+                            _cameraObservation.LastFixOnViewOverrideSource = "saved-view-pose-after-fixon-pending";
+                            invocationMode = "saved-view-pose-after-fixon-pending";
+                        }
+                        else
+                        {
+                            // pose無しの旧保存viewは従来どおりscene-local絶対値をFixOnへ渡す。
+                            cameraOverride =
+                            [
+                                viewResolution.Camera.X,
+                                viewResolution.Camera.Y,
+                                viewResolution.Camera.Z,
+                            ];
+                            focusOverride =
+                            [
+                                viewResolution.Focus.X,
+                                viewResolution.Focus.Y,
+                                viewResolution.Focus.Z,
+                            ];
+                            overrideFovY = viewResolution.FovY;
+                            _cameraObservation.LastCameraOverrideApplied = true;
+                            _cameraObservation.LastAppliedCamera = viewResolution.Camera;
+                            _cameraObservation.LastAppliedFocus = viewResolution.Focus;
+                            _cameraObservation.LastAppliedFovY = viewResolution.FovY;
+                            _cameraObservation.FixOnViewOverrideAppliedCount++;
+                            _cameraObservation.LastViewOverrideAppliedGeneration = _activeCharaSelectSceneGeneration;
+                            invocationMode = "view-override";
+                            viewOverrideAppliedThisInvocation = true;
+                            _log.Information(
+                                "[XMU BG] FixOn legacy view override applied. camera={Camera}, focus={Focus}, fovY={FovY}",
+                                FormatVector(viewResolution.Camera),
+                                FormatVector(viewResolution.Focus),
+                                viewResolution.FovY);
+                        }
                     }
                 }
             }
@@ -427,6 +442,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             // 発火していない場合に限り焦点だけを置き換える（camera/fovY は不変）。
             if (cameraOverride == null
                 && focusOverride == null
+                && !savedViewPoseToApply.HasValue
                 && TitleBackgroundFixOnFocusOverrideLogic.ShouldConsiderFocusOverride(
                     _configuration.TitleBackgroundFixOnPassiveObservationEnabled,
                     _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled)
@@ -465,9 +481,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
             overrideFovY = fovY;
             invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(false);
             viewOverrideAppliedThisInvocation = false;
+            savedViewPoseToApply = null;
         }
 
-        _cameraObservation.LastFixOnInvocationMode = invocationMode;
         nint result;
         if (cameraOverride != null || focusOverride != null)
         {
@@ -485,8 +501,29 @@ public sealed unsafe partial class TitleScreenBackgroundService
             result = _hookLifecycle.CameraFixOnHook?.Original(self, cameraPos, focusPos, fovY) ?? nint.Zero;
         }
 
+        var savedViewPoseAppliedThisInvocation = false;
+        if (savedViewPoseToApply.HasValue)
+        {
+            savedViewPoseAppliedThisInvocation = ApplySavedViewCameraPoseAfterFixOn(savedViewPoseToApply.Value);
+            if (savedViewPoseAppliedThisInvocation)
+            {
+                _cameraObservation.LastCameraOverrideApplied = true;
+                _cameraObservation.LastAppliedFovY = savedViewPoseToApply.Value.FovY;
+                _cameraObservation.FixOnViewOverrideAppliedCount++;
+                _cameraObservation.LastFixOnViewOverrideSource = "saved-view-pose-after-fixon";
+                invocationMode = "saved-view-pose-after-fixon";
+            }
+            else
+            {
+                _cameraObservation.LastFixOnViewOverrideSource = "saved-view-pose-after-fixon-failed";
+                invocationMode = "saved-view-pose-after-fixon-failed";
+            }
+        }
+
+        _cameraObservation.LastFixOnInvocationMode = invocationMode;
         CapturePostFixOnCameraState();
-        ScheduleCameraProbeTimelineCapture(cameraOverride != null || focusOverride != null);
+        ScheduleCameraProbeTimelineCapture(
+            cameraOverride != null || focusOverride != null || savedViewPoseAppliedThisInvocation);
         // 保存view再現バグ診断（read-only）: view override が成立したFixOn呼び出し直後だけtraceを開始する。
         // カメラには一切書き込まず、CapturePostFixOnCameraState() が既に読み取った実値をframe 0として使う。
         StartViewReplayTraceIfApplicable(viewOverrideAppliedThisInvocation);
@@ -564,10 +601,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
             : (TitleBackgroundActiveCameraSnapshot?)null;
         string phase2GStatus;
         string phase2GError;
+        string poseMaintainStatus;
+        string poseMaintainError;
         try
         {
             _hookLifecycle.SetCameraCurveMidPointHook?.Original(self, value);
             TryApplyPhase2GSetCameraCurveMidPointOverride(self, frame, out phase2GStatus, out phase2GError);
+            TryMaintainSavedViewPoseAfterCurveOriginal(frame, out poseMaintainStatus, out poseMaintainError);
         }
         catch (Exception ex)
         {
@@ -583,7 +623,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
             : (TitleBackgroundActiveCameraSnapshot?)null;
         var status = beforeCaptured && afterCaptured ? "success" : "partial";
         status = string.IsNullOrWhiteSpace(phase2GStatus) ? status : $"{status}; phase2G={phase2GStatus}";
-        var error = JoinErrors(JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError), phase2GError);
+        status = string.IsNullOrWhiteSpace(poseMaintainStatus) ? status : $"{status}; poseMaintain={poseMaintainStatus}";
+        var error = JoinErrors(
+            JoinErrors(JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError), phase2GError),
+            poseMaintainError);
         _phaseRecording.Phase2FSetCameraCurveMidPointLastError = error;
         RecordPhase2FSetCameraCurveMidPointCall(
             BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
@@ -600,10 +643,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
             : (TitleBackgroundActiveCameraSnapshot?)null;
         string phase2GStatus;
         string phase2GError;
+        string poseMaintainStatus;
+        string poseMaintainError;
         try
         {
             _hookLifecycle.CalculateCameraCurveLowAndHighPointHook?.Original(self, value);
             TryApplyPhase2GLowHighCurveOverride(self, frame, out phase2GStatus, out phase2GError);
+            TryMaintainSavedViewPoseAfterCurveOriginal(frame, out poseMaintainStatus, out poseMaintainError);
         }
         catch (Exception ex)
         {
@@ -619,10 +665,139 @@ public sealed unsafe partial class TitleScreenBackgroundService
             : (TitleBackgroundActiveCameraSnapshot?)null;
         var status = beforeCaptured && afterCaptured ? "success" : "partial";
         status = string.IsNullOrWhiteSpace(phase2GStatus) ? status : $"{status}; phase2G={phase2GStatus}";
-        var error = JoinErrors(JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError), phase2GError);
+        status = string.IsNullOrWhiteSpace(poseMaintainStatus) ? status : $"{status}; poseMaintain={poseMaintainStatus}";
+        var error = JoinErrors(
+            JoinErrors(JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError), phase2GError),
+            poseMaintainError);
         _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointLastError = error;
         RecordPhase2FCalculateCameraCurveLowAndHighPointCall(
             BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
+    }
+
+    private bool TryMaintainSavedViewPoseAfterCurveOriginal(
+        int? frame,
+        out string status,
+        out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        if (!_savedViewPoseMaintain.Active)
+        {
+            status = "skipped:not-active";
+            return false;
+        }
+
+        if (!TryResolveSavedViewPoseMaintainTarget(out var savedView, out var stopReason))
+        {
+            _savedViewPoseMaintain.Stop(stopReason);
+            status = $"stopped:{stopReason}";
+            RecordTransitionEvent("saved view pose maintain stopped", stopReason);
+            return false;
+        }
+
+        if (!TryApplyLobbyCameraPose(
+                savedView.DirH,
+                savedView.DirV,
+                savedView.Distance,
+                savedView.FovY,
+                out errorMessage))
+        {
+            _savedViewPoseMaintain.Stop("apply-failed");
+            status = "failed";
+            RecordTransitionEvent("saved view pose maintain stopped", "apply-failed", errorMessage);
+            return false;
+        }
+
+        _savedViewPoseMaintain.MarkApplied(frame);
+        status = "applied-post-original";
+        return true;
+    }
+
+    private bool TryResolveSavedViewPoseMaintainTarget(
+        out TitleBackgroundCharaSelectView savedView,
+        out string stopReason)
+    {
+        savedView = TitleBackgroundCharaSelectView.None;
+        if (_clientState.IsLoggedIn)
+        {
+            stopReason = "logged-in";
+            return false;
+        }
+
+        if (_hookLifecycle.State != TitleBackgroundServiceState.Ready)
+        {
+            stopReason = "service-not-ready";
+            return false;
+        }
+
+        if (IsHookProbeMode())
+        {
+            stopReason = "hook-probe";
+            return false;
+        }
+
+        if (IsSavedViewSuppressedByAutomaticRun())
+        {
+            stopReason = "suppressed-by-run";
+            return false;
+        }
+
+        if (!_charaSelectTitleBackgroundSessionActive)
+        {
+            stopReason = "session-inactive";
+            return false;
+        }
+
+        if (_savedViewPoseMaintain.SceneGeneration <= 0
+            || _activeCharaSelectSceneGeneration != _savedViewPoseMaintain.SceneGeneration
+            || _charaSelectCameraAdapter.RuntimeState.SceneGeneration != _savedViewPoseMaintain.SceneGeneration)
+        {
+            stopReason = "scene-generation-mismatch";
+            return false;
+        }
+
+        var contextReason = GetFixOnFocusOverrideContextReason();
+        if (contextReason != TitleBackgroundFixOnFocusOverrideLogic.GateReady)
+        {
+            stopReason = contextReason;
+            return false;
+        }
+
+        var currentView = BuildCharaSelectView();
+        var resolution = TitleBackgroundFixOnViewOverrideLogic.Resolve(
+            _configuration.TitleBackgroundCharaSelectViewEnabled,
+            currentView,
+            ResolveCurrentOverrideCandidate().Id,
+            Vector3.Zero,
+            Vector3.Zero,
+            currentView.FovY);
+        if (!resolution.ShouldOverride
+            || resolution.ApplicationMode != TitleBackgroundFixOnViewOverrideLogic.ApplicationModeDelayedPose)
+        {
+            stopReason = "saved-view-unavailable";
+            return false;
+        }
+
+        if (currentView != _savedViewPoseMaintain.SavedView)
+        {
+            stopReason = "saved-view-changed";
+            return false;
+        }
+
+        savedView = currentView;
+        stopReason = string.Empty;
+        return true;
+    }
+
+    private void StopSavedViewPoseMaintainIfInvalid()
+    {
+        if (!_savedViewPoseMaintain.Active
+            || TryResolveSavedViewPoseMaintainTarget(out _, out var stopReason))
+        {
+            return;
+        }
+
+        _savedViewPoseMaintain.Stop(stopReason);
+        RecordTransitionEvent("saved view pose maintain stopped", stopReason);
     }
 
     private bool TryApplyPhase2GSetCameraCurveMidPointOverride(nint self, int? frame, out string status, out string errorMessage)
@@ -843,6 +1018,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
             return;
         }
 
+        // Framework.Updateでは停止判定だけを行う。pose書込はcurve original後に限定する。
+        StopSavedViewPoseMaintainIfInvalid();
         if (TryReadCurrentLobbyMap(out var currentMap))
         {
             EndCharaSelectTitleBackgroundSessionIfNeeded(currentMap, "framework-update");

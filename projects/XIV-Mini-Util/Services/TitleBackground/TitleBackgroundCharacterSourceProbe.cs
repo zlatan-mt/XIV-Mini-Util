@@ -196,6 +196,35 @@ internal static unsafe class TitleBackgroundCharacterSourceProbe
         }
     }
 
+    // Write-only facing: use GameObject.SetRotation(float) so the client updates its visual DrawObject
+    // rotation through the native actor path. DrawObject.Rotation is a quaternion and is intentionally
+    // not synthesized here. Caller must gate this to the existing pre-login placement slot.
+    public static bool TrySetCurrentCharacterDrawRotation(float yaw, out float readBackRotation)
+    {
+        readBackRotation = 0f;
+        try
+        {
+            if (!float.IsFinite(yaw))
+            {
+                return false;
+            }
+
+            var character = CharaSelectCharacterList.GetCurrentCharacter();
+            if (character == null || character->DrawObject == null)
+            {
+                return false;
+            }
+
+            character->SetRotation(yaw);
+            readBackRotation = character->Rotation;
+            return float.IsFinite(readBackRotation);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static TitleBackgroundCharacterSourceSnapshot Capture(int frame)
     {
         try

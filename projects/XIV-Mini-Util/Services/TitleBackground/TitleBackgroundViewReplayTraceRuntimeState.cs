@@ -92,7 +92,7 @@ internal sealed class TitleBackgroundViewReplayTraceRuntimeState
     public void PrepareForSceneLoad(int activeSceneGeneration)
     {
         // adapter reset後はgenerationが0から再採番される。同じ番号のtraceがload開始時点で残っていれば
-        // 同一loadではなく旧epochとの衝突なので破棄する（traceはscene-ready以降にしか開始されない）。
+        // 同一loadではなく旧epochとの衝突なので破棄する（traceはload開始後のFixOn以降にしか始まらない）。
         if (TraceSceneGeneration != 0 && TraceSceneGeneration == activeSceneGeneration)
         {
             Reset();

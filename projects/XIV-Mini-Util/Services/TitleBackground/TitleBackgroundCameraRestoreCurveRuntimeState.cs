@@ -38,7 +38,7 @@ internal sealed class TitleBackgroundCameraRestoreCurveRuntimeState
 
     public float? RuntimeRestoreLastRestoredFovY { get; set; }
 
-    // 保存 view の pose（DirH/DirV/Distance/FovY）を scene load 後に 1 回適用した記録（診断用）。
+    // 保存 view の pose（DirH/DirV/Distance/FovY）を自然FixOn直後に1回適用した記録（診断用）。
     public int SavedViewPoseAppliedCount { get; set; }
 
     public float? SavedViewPoseAppliedDirH { get; set; }

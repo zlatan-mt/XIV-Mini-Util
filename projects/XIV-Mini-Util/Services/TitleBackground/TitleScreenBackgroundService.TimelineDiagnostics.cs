@@ -1502,9 +1502,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 // World/probe 適用時に config frame と取り違えないことが provenance 判定の前提。
                 _characterPlacement.LastCharaSelectCharacterPlacementAnchorFrame = decision.EffectiveFrame;
                 _characterPlacement.CharaSelectCharacterPlacementLastError = "none";
+                ApplySavedViewCharacterFacing(activeCandidate);
             }
             else
             {
+                _characterPlacement.FacingActive = false;
                 _characterPlacement.CharaSelectCharacterPlacementLastError = "draw-position-write-failed";
             }
         }
@@ -1513,6 +1515,56 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _characterPlacement.CharaSelectCharacterPlacementLastError = ex.GetType().Name;
             MarkRuntimeError(ex, nameof(MaintainCharaSelectCharacterPlacement));
         }
+    }
+
+    private void ApplySavedViewCharacterFacing(TitleBackgroundCharacterSelectOverrideCandidate activeCandidate)
+    {
+        _characterPlacement.FacingActive = false;
+        if (_clientState.IsLoggedIn
+            || !_charaSelectTitleBackgroundSessionActive
+            || IsSavedViewSuppressedByAutomaticRun())
+        {
+            _characterPlacement.FacingLastError = IsSavedViewSuppressedByAutomaticRun()
+                ? "suppressed-by-run"
+                : "inactive-context";
+            return;
+        }
+
+        if (!_savedViewPoseMaintain.Active)
+        {
+            _characterPlacement.FacingLastError = "pose-maintain-inactive";
+            return;
+        }
+
+        var savedView = BuildCharaSelectView();
+        var resolution = TitleBackgroundFixOnViewOverrideLogic.Resolve(
+            _configuration.TitleBackgroundCharaSelectViewEnabled,
+            savedView,
+            activeCandidate.Id,
+            Vector3.Zero,
+            Vector3.Zero,
+            savedView.FovY);
+        if (!resolution.ShouldOverride
+            || resolution.ApplicationMode != TitleBackgroundFixOnViewOverrideLogic.ApplicationModeDelayedPose
+            || savedView != _savedViewPoseMaintain.SavedView)
+        {
+            _characterPlacement.FacingLastError = "saved-view-unavailable";
+            return;
+        }
+
+        var yaw = TitleBackgroundCharaSelectCharacterFacing.ComputeYaw(savedView.DirH);
+        if (!TitleBackgroundCharacterSourceProbe.TrySetCurrentCharacterDrawRotation(yaw, out var readBackRotation))
+        {
+            _characterPlacement.FacingLastError = "draw-rotation-write-failed";
+            return;
+        }
+
+        _characterPlacement.FacingActive = true;
+        _characterPlacement.FacingAppliedFrameCount++;
+        _characterPlacement.FacingAppliedYaw = yaw;
+        _characterPlacement.FacingSavedDirH = savedView.DirH;
+        _characterPlacement.FacingReadBackRotation = readBackRotation;
+        _characterPlacement.FacingLastError = "none";
     }
 
     private const float CharaSelectCharacterFocusBodyDrop = 0.9f;

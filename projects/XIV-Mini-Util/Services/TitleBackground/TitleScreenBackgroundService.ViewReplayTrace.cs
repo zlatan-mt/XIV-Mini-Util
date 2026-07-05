@@ -38,29 +38,21 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _viewReplayTrace.FixOnApplyAbsoluteFrame ??= absoluteFrame;
     }
 
-    // scene-ready 後の保存 pose 書込成功直後に開始する。target の pose 値と frame 0 の read-back を同時に残す。
+    // 自然FixOn original直後の保存pose書込成功時に開始する。絶対camera/focusは復元対象ではないため
+    // targetにせず、相対poseとFovYだけをframe 0以降のread-backと比較する。
     private void StartViewReplayTraceForSavedPose(TitleBackgroundCharaSelectView savedView)
     {
-        if (_viewReplayTrace.TraceSceneGeneration != _activeCharaSelectSceneGeneration)
-        {
-            InitializeViewReplayTrace(
-                "saved-view-pose",
-                savedView.Camera,
-                savedView.Focus,
-                savedView.FovY,
-                savedView.DirH,
-                savedView.DirV,
-                savedView.Distance);
-        }
-        else
-        {
-            _viewReplayTrace.Source = "fix-on-view-override+saved-view-pose";
-            _viewReplayTrace.TargetDirH = savedView.DirH;
-            _viewReplayTrace.TargetDirV = savedView.DirV;
-            _viewReplayTrace.TargetDistance = savedView.Distance;
-        }
-
-        _viewReplayTrace.PoseApplyAbsoluteFrame = GetCurrentPhase2CFrame();
+        InitializeViewReplayTrace(
+            "saved-view-pose-after-fixon",
+            null,
+            null,
+            savedView.FovY,
+            savedView.DirH,
+            savedView.DirV,
+            savedView.Distance);
+        var absoluteFrame = GetCurrentPhase2CFrame();
+        _viewReplayTrace.PoseApplyAbsoluteFrame = absoluteFrame;
+        _viewReplayTrace.FixOnApplyAbsoluteFrame = absoluteFrame;
     }
 
     private void InitializeViewReplayTrace(
@@ -176,6 +168,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _viewReplayTrace.TargetCamera,
             _viewReplayTrace.TargetFocus,
             _viewReplayTrace.TargetFovY,
+            _viewReplayTrace.TargetDirH,
+            _viewReplayTrace.TargetDirV,
+            _viewReplayTrace.TargetDistance,
             samples);
 
         lines.Add($"view.trace.status={FormatNone(_viewReplayTrace.Status)}");

@@ -14,6 +14,9 @@ internal enum TitleBackgroundViewReplayTraceComponent
     Camera,
     LookAt,
     FovY,
+    DirH,
+    DirV,
+    Distance,
 }
 
 // 1サンプルの読み取り結果（read-only）。相対フレーム番号は FixOn view override 適用時点を 0 とする。
@@ -81,6 +84,27 @@ internal static class TitleBackgroundViewReplayTraceLogic
         IReadOnlyList<TitleBackgroundViewReplayTraceSample> samples,
         float tolerance = DefaultTolerance)
     {
+        return EvaluateFirstDivergence(
+            targetCamera,
+            targetFocus,
+            targetFovY,
+            null,
+            null,
+            null,
+            samples,
+            tolerance);
+    }
+
+    public static TitleBackgroundViewReplayTraceDivergence EvaluateFirstDivergence(
+        Vector3? targetCamera,
+        Vector3? targetFocus,
+        float? targetFovY,
+        float? targetDirH,
+        float? targetDirV,
+        float? targetDistance,
+        IReadOnlyList<TitleBackgroundViewReplayTraceSample> samples,
+        float tolerance = DefaultTolerance)
+    {
         foreach (var sample in samples.OrderBy(sample => sample.RelativeFrame))
         {
             if (!sample.Captured)
@@ -92,6 +116,9 @@ internal static class TitleBackgroundViewReplayTraceLogic
                     targetCamera,
                     targetFocus,
                     targetFovY,
+                    targetDirH,
+                    targetDirV,
+                    targetDistance,
                     sample,
                     tolerance,
                     out var component,
@@ -108,6 +135,9 @@ internal static class TitleBackgroundViewReplayTraceLogic
         Vector3? targetCamera,
         Vector3? targetFocus,
         float? targetFovY,
+        float? targetDirH,
+        float? targetDirV,
+        float? targetDistance,
         TitleBackgroundViewReplayTraceSample sample,
         float tolerance,
         out TitleBackgroundViewReplayTraceComponent component,
@@ -142,9 +172,52 @@ internal static class TitleBackgroundViewReplayTraceLogic
             return true;
         }
 
+        if (targetDirH.HasValue
+            && sample.DirH.HasValue
+            && TryGetScalarDivergence(targetDirH.Value, sample.DirH.Value, tolerance, out var dirHDelta))
+        {
+            component = TitleBackgroundViewReplayTraceComponent.DirH;
+            magnitude = dirHDelta;
+            return true;
+        }
+
+        if (targetDirV.HasValue
+            && sample.DirV.HasValue
+            && TryGetScalarDivergence(targetDirV.Value, sample.DirV.Value, tolerance, out var dirVDelta))
+        {
+            component = TitleBackgroundViewReplayTraceComponent.DirV;
+            magnitude = dirVDelta;
+            return true;
+        }
+
+        if (targetDistance.HasValue
+            && sample.Distance.HasValue
+            && TryGetScalarDivergence(targetDistance.Value, sample.Distance.Value, tolerance, out var distanceDelta))
+        {
+            component = TitleBackgroundViewReplayTraceComponent.Distance;
+            magnitude = distanceDelta;
+            return true;
+        }
+
         component = TitleBackgroundViewReplayTraceComponent.None;
         magnitude = 0f;
         return false;
+    }
+
+    private static bool TryGetScalarDivergence(
+        float expected,
+        float actual,
+        float tolerance,
+        out float delta)
+    {
+        if (!float.IsFinite(expected) || !float.IsFinite(actual))
+        {
+            delta = 0f;
+            return false;
+        }
+
+        delta = Math.Abs(actual - expected);
+        return delta > tolerance;
     }
 
     private static bool TryGetMaxAxisDelta(Vector3 expected, Vector3 actual, out float maxDelta)

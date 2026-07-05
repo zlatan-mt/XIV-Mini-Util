@@ -1179,13 +1179,14 @@ Test(115, "title background native probe uses existing pipeline without object t
 
     // The pre-login diagnostic capture still flows through the existing pipeline
     // (stats computed before native candidate; gate before capture) and never uses
-    // a signature resolver. Character placement writes (the n4f4 compositing path) are
-    // intentionally allowed via the dedicated TrySetCurrentCharacterDrawPosition method.
+    // a signature resolver. Character placement/facing writes (the n4f4 compositing path) are
+    // intentionally allowed only via their dedicated source-probe methods.
     return statsIndex >= 0 && nativeIndex > statsIndex
         && gateIndex >= 0 && captureIndex > gateIndex
         && probe.Contains("CharaSelectCharacterList.GetCurrentCharacter()", StringComparison.Ordinal)
         && !probe.Contains("TitleBackgroundAddressResolver", StringComparison.Ordinal)
-        && probe.Contains("TrySetCurrentCharacterDrawPosition", StringComparison.Ordinal);
+        && probe.Contains("TrySetCurrentCharacterDrawPosition", StringComparison.Ordinal)
+        && probe.Contains("TrySetCurrentCharacterDrawRotation", StringComparison.Ordinal);
 });
 
 Test(116, "title background simple auto setup configures n4f4 recommended route", () =>
@@ -5053,11 +5054,9 @@ Test(447, "automatic diagnostic allowlist includes both noon and clear-sky envir
         && selected.Contains("environment.clearSkyOverrideLastStatus=applied");
 });
 
-Test(448, "runtime restore decision applies saved view pose when pose is captured and candidate matches", () =>
+Test(448, "runtime restore decision defers saved view pose to FixOn when pose is captured and candidate matches", () =>
 {
-    // 新契約（2026-07-04）: pose 付き view は yield ではなく pose 適用が勝ち手。
-    // FixOn の camera 引数はエンジンの毎フレーム再導出（DirH/DirV/Distance→位置）に負けるため（trace実測）、
-    // 持続実績のある pose 形式で復元する。
+    // trace実測: scene-readyでは焦点が原点のため書かず、自然FixOnが配置キャラへ焦点を確定した後へ委ねる。
     var poseView = new TitleBackgroundCharaSelectView(
         true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f,
         PoseCaptured: true, DirH: 1.2f, DirV: -0.3f, Distance: 3.3f);
@@ -5065,7 +5064,7 @@ Test(448, "runtime restore decision applies saved view pose when pose is capture
         true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
 
     return TitleBackgroundFixOnViewOverrideLogic.ResolveRuntimeCameraRestoreDecision(false, true, poseView, "custom:n4f4")
-            == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionApplySavedViewPose
+            == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionDeferSavedViewPoseToFixOn
         // pose 無しの旧保存 view は従来どおり譲る（後方互換。再保存で pose 付きへ昇格）。
         && TitleBackgroundFixOnViewOverrideLogic.ResolveRuntimeCameraRestoreDecision(false, true, noPoseView, "custom:n4f4")
             == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionYieldNoPose
@@ -5095,8 +5094,8 @@ Test(449, "runtime restore decision proceeds with runtime restore when view disa
         && Decide(false, true, emptyIdView, "anything") == Proceed
         // 自動確認 run 中の抑止は成立している view でも proceed（自然 FixOn でその場を写す）。
         && Decide(true, true, poseView, "custom:n4f4") == Proceed
-        // run 外（suppressed=false）では pose 適用が働く＝抑止が run の外へ漏れないことの裏面。
-        && Decide(false, true, poseView, "custom:n4f4") == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionApplySavedViewPose
+        // run 外（suppressed=false）では遅延poseが予約される＝抑止がrunの外へ漏れないことの裏面。
+        && Decide(false, true, poseView, "custom:n4f4") == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionDeferSavedViewPoseToFixOn
         // pose だけが壊れている view は yield へフォールバック（view 自体は成立している）。
         && Decide(false, true, nanPoseView, "custom:n4f4") == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionYieldNoPose
         && Decide(false, true, zeroDistancePoseView, "custom:n4f4") == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionYieldNoPose;
@@ -5128,22 +5127,23 @@ Test(450, "runtime restore view involvement matches FixOn view override success 
         && Matches(true, new TitleBackgroundCharaSelectView(true, string.Empty, matchingView.Camera, matchingView.Focus, matchingView.FovY), "anything");
 });
 
-Test(451, "runtime restore camera pose write path decides saved-view handling at the top before applying pose", () =>
+Test(451, "runtime restore defers saved pose before runtime restore without writing at scene-ready", () =>
 {
     var root = FindRepositoryRoot();
     var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
     var body = ExtractMethodBody(serviceText, "private void RestoreCharaSelectRuntimeCameraStateAfterSceneLoad()");
     var decisionIndex = body.IndexOf("TitleBackgroundFixOnViewOverrideLogic.ResolveRuntimeCameraRestoreDecision", StringComparison.Ordinal);
     var applyIndex = body.IndexOf("TryApplyRuntimeCameraPose(", StringComparison.Ordinal);
-    var poseApplyIndex = body.IndexOf("ApplySavedViewCameraPoseAfterSceneLoad(", StringComparison.Ordinal);
+    var deferIndex = body.IndexOf("\"deferred-to-fixon-pose\"", StringComparison.Ordinal);
 
     // saved-view 決定は先頭近く（attempt カウント直後）にあり、runtime state の pose 書込みより必ず前に
-    // 評価される。pose 適用（勝ち手）と pose 無し yield（後方互換）の両分岐を持つ。
+    // 評価される。pose付きはFixOnへ委ね、scene-readyでは保存poseを書かない。
     return decisionIndex >= 0
         && applyIndex >= 0
         && decisionIndex < applyIndex
-        && poseApplyIndex >= 0
-        && poseApplyIndex < applyIndex
+        && deferIndex >= 0
+        && deferIndex < applyIndex
+        && !body.Contains("ApplySavedViewCameraPoseAfterFixOn(", StringComparison.Ordinal)
         && body.Contains("_configuration.TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal)
         && body.Contains("BuildCharaSelectView()", StringComparison.Ordinal)
         && body.Contains("ResolveCurrentOverrideCandidate().Id", StringComparison.Ordinal)
@@ -5611,18 +5611,17 @@ Test(471, "saved view capture reads native pose from the shared camera snapshot 
         && !body.Contains("TryBuildPoseFromCameraFocus", StringComparison.Ordinal);
 });
 
-Test(472, "saved view pose apply shares the exact lobby camera write core with runtime restore and stays one-shot", () =>
+Test(472, "delayed saved view pose shares the lobby camera write core and stays outside framework update", () =>
 {
     var root = FindRepositoryRoot();
     var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
     var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
     var runtimeApplyBody = ExtractMethodBody(serviceText, "private bool TryApplyRuntimeCameraPose(");
     var coreBody = ExtractMethodBody(serviceText, "private bool TryApplyLobbyCameraPose(");
-    var savedViewApplyBody = ExtractMethodBody(serviceText, "private void ApplySavedViewCameraPoseAfterSceneLoad(TitleBackgroundCharaSelectView savedView)");
+    var savedViewApplyBody = ExtractMethodBody(serviceText, "private bool ApplySavedViewCameraPoseAfterFixOn(TitleBackgroundCharaSelectView savedView)");
     var frameworkUpdateBody = ExtractMethodBody(hooksText, "private void OnFrameworkUpdate(IFramework _)");
 
-    // 両経路が同一の書込コア（DirH/DirV/Distance/InterpDistance/FoV）を使い、
-    // 毎フレーム経路（OnFrameworkUpdate）からはどちらも呼ばれない（one-shot 契約）。
+    // runtime restoreと保存poseが同じ入力param書込コアを使い、無差別なFramework.Update経路には接続しない。
     return runtimeApplyBody.Contains("TryApplyLobbyCameraPose(", StringComparison.Ordinal)
         && savedViewApplyBody.Contains("TryApplyLobbyCameraPose(", StringComparison.Ordinal)
         && coreBody.Contains("lobbyCamera->DirH = dirH;", StringComparison.Ordinal)
@@ -5631,7 +5630,7 @@ Test(472, "saved view pose apply shares the exact lobby camera write core with r
         && coreBody.Contains("lobbyCamera->InterpDistance = distance;", StringComparison.Ordinal)
         && coreBody.Contains("lobbyCamera->FoV = fovY;", StringComparison.Ordinal)
         && !frameworkUpdateBody.Contains("TryApplyLobbyCameraPose", StringComparison.Ordinal)
-        && !frameworkUpdateBody.Contains("ApplySavedViewCameraPoseAfterSceneLoad", StringComparison.Ordinal)
+        && !frameworkUpdateBody.Contains("ApplySavedViewCameraPoseAfterFixOn", StringComparison.Ordinal)
         && !frameworkUpdateBody.Contains("TryApplyRuntimeCameraPose", StringComparison.Ordinal);
 });
 
@@ -5654,13 +5653,13 @@ Test(474, "automatic diagnostic allowlist includes saved view pose keys and run 
         "view.poseDirH=1.2",
         "view.poseDirV=-0.3",
         "view.poseDistance=3.3",
-        "view.poseRestoreStatus=applied-saved-view-pose",
+        "view.poseRestoreStatus=applied-saved-view-pose-after-fixon",
         "view.poseAppliedCount=1",
         "view.poseAppliedDirH=1.2",
         "view.poseAppliedDirV=-0.3",
         "view.poseAppliedDistance=3.3",
         "view.poseAppliedFovY=0.78",
-        "view.poseLastRestoreStatus=applied-saved-view-pose",
+        "view.poseLastRestoreStatus=applied-saved-view-pose-after-fixon",
         "view.poseLastRestoreSceneGeneration=4",
         "view.suppressedByRun=False",
         "unrelated.key=value",
@@ -5668,8 +5667,8 @@ Test(474, "automatic diagnostic allowlist includes saved view pose keys and run 
 
     return selected.Count == 13
         && selected.Contains("view.poseCaptured=True")
-        && selected.Contains("view.poseRestoreStatus=applied-saved-view-pose")
-        && selected.Contains("view.poseLastRestoreStatus=applied-saved-view-pose")
+        && selected.Contains("view.poseRestoreStatus=applied-saved-view-pose-after-fixon")
+        && selected.Contains("view.poseLastRestoreStatus=applied-saved-view-pose-after-fixon")
         && selected.Contains("view.poseLastRestoreSceneGeneration=4")
         && selected.Contains("view.poseAppliedCount=1")
         && selected.Contains("view.poseAppliedFovY=0.78")
@@ -5697,32 +5696,30 @@ Test(475, "view replay trace samples retain native DirH DirV and Distance values
         && Math.Abs(sample.Distance!.Value - 5.5f) < 0.0001f;
 });
 
-Test(476, "saved view pose apply starts read-only trace and records durable restore status", () =>
+Test(476, "saved view pose apply after FixOn starts trace and records durable restore status", () =>
 {
     var root = FindRepositoryRoot();
     var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
-    var body = ExtractMethodBody(serviceText, "private void ApplySavedViewCameraPoseAfterSceneLoad(TitleBackgroundCharaSelectView savedView)");
+    var body = ExtractMethodBody(serviceText, "private bool ApplySavedViewCameraPoseAfterFixOn(TitleBackgroundCharaSelectView savedView)");
     var applyIndex = body.IndexOf("TryApplyLobbyCameraPose(", StringComparison.Ordinal);
     var traceIndex = body.IndexOf("StartViewReplayTraceForSavedPose(savedView);", StringComparison.Ordinal);
 
     return applyIndex >= 0
         && traceIndex > applyIndex
-        && body.Contains("SavedViewPoseLastRestoreStatus = \"applied-saved-view-pose\"", StringComparison.Ordinal)
+        && body.Contains("SavedViewPoseLastRestoreStatus = \"applied-saved-view-pose-after-fixon\"", StringComparison.Ordinal)
         && body.Contains("SavedViewPoseLastRestoreSceneGeneration", StringComparison.Ordinal)
-        && body.Contains("SavedViewPoseLastRestoreStatus = \"saved-view-pose-failed\"", StringComparison.Ordinal);
+        && body.Contains("SavedViewPoseLastRestoreStatus = \"saved-view-pose-after-fixon-failed\"", StringComparison.Ordinal);
 });
 
-Test(477, "view replay trace merges pose and later FixOn timing within the same scene generation", () =>
+Test(477, "view replay trace starts at delayed pose write and records the same frame for FixOn and pose", () =>
 {
     var root = FindRepositoryRoot();
     var traceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.ViewReplayTrace.cs"));
-    var fixOnBody = ExtractMethodBody(traceText, "private void StartViewReplayTraceIfApplicable(bool viewOverrideAppliedThisInvocation)");
     var poseBody = ExtractMethodBody(traceText, "private void StartViewReplayTraceForSavedPose(TitleBackgroundCharaSelectView savedView)");
 
-    return fixOnBody.Contains("_viewReplayTrace.TraceSceneGeneration != _activeCharaSelectSceneGeneration", StringComparison.Ordinal)
-        && fixOnBody.Contains("_viewReplayTrace.FixOnApplyAbsoluteFrame ??= absoluteFrame;", StringComparison.Ordinal)
-        && fixOnBody.Contains("saved-view-pose+fix-on-view-override", StringComparison.Ordinal)
-        && poseBody.Contains("_viewReplayTrace.PoseApplyAbsoluteFrame = GetCurrentPhase2CFrame();", StringComparison.Ordinal)
+    return poseBody.Contains("\"saved-view-pose-after-fixon\"", StringComparison.Ordinal)
+        && poseBody.Contains("_viewReplayTrace.PoseApplyAbsoluteFrame = absoluteFrame;", StringComparison.Ordinal)
+        && poseBody.Contains("_viewReplayTrace.FixOnApplyAbsoluteFrame = absoluteFrame;", StringComparison.Ordinal)
         && poseBody.Contains("savedView.DirH", StringComparison.Ordinal)
         && poseBody.Contains("savedView.DirV", StringComparison.Ordinal)
         && poseBody.Contains("savedView.Distance", StringComparison.Ordinal);
@@ -5788,6 +5785,348 @@ Test(480, "view replay trace resets stale data when a reset adapter reuses the s
         && state.PoseApplyAbsoluteFrame == null
         && state.FixOnApplyAbsoluteFrame == null
         && state.Samples.Count == 0;
+});
+
+Test(481, "FixOn view resolution selects delayed pose, legacy absolute, and passthrough modes explicitly", () =>
+{
+    var poseView = new TitleBackgroundCharaSelectView(
+        true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 0.78f,
+        PoseCaptured: true, DirH: 1.2f, DirV: -0.3f, Distance: 3.3f);
+    var legacyView = poseView with { PoseCaptured = false };
+
+    var pose = TitleBackgroundFixOnViewOverrideLogic.Resolve(
+        true, poseView, "custom:n4f4", Vector3.Zero, Vector3.UnitY, 1f);
+    var legacy = TitleBackgroundFixOnViewOverrideLogic.Resolve(
+        true, legacyView, "custom:n4f4", Vector3.Zero, Vector3.UnitY, 1f);
+    var mismatch = TitleBackgroundFixOnViewOverrideLogic.Resolve(
+        true, poseView, "manual:slot1", Vector3.Zero, Vector3.UnitY, 1f);
+
+    return pose.ShouldOverride
+        && pose.ApplicationMode == TitleBackgroundFixOnViewOverrideLogic.ApplicationModeDelayedPose
+        && legacy.ShouldOverride
+        && legacy.ApplicationMode == TitleBackgroundFixOnViewOverrideLogic.ApplicationModeLegacyAbsolute
+        && !mismatch.ShouldOverride
+        && mismatch.ApplicationMode == TitleBackgroundFixOnViewOverrideLogic.ApplicationModePassthrough;
+});
+
+Test(482, "delayed saved pose is applied only after the natural FixOn original call", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var body = ExtractMethodBody(hooksText, "private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)");
+    var lastOriginalIndex = body.LastIndexOf("_hookLifecycle.CameraFixOnHook?.Original", StringComparison.Ordinal);
+    var delayedApplyIndex = body.IndexOf("ApplySavedViewCameraPoseAfterFixOn(savedViewPoseToApply.Value)", StringComparison.Ordinal);
+
+    return lastOriginalIndex >= 0
+        && delayedApplyIndex > lastOriginalIndex
+        && body.IndexOf("CapturePostFixOnCameraState();", StringComparison.Ordinal) > delayedApplyIndex;
+});
+
+Test(483, "pose view does not build absolute camera focus overrides or allow anchor focus override", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var body = ExtractMethodBody(hooksText, "private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)");
+    var delayedStart = body.IndexOf(
+        "if (viewResolution.ApplicationMode == TitleBackgroundFixOnViewOverrideLogic.ApplicationModeDelayedPose)",
+        StringComparison.Ordinal);
+    var legacyStart = body.IndexOf("else", delayedStart, StringComparison.Ordinal);
+    var focusOverrideSection = body.IndexOf("// 焦点 override", legacyStart, StringComparison.Ordinal);
+    var delayedBlock = delayedStart >= 0 && legacyStart > delayedStart
+        ? body[delayedStart..legacyStart]
+        : string.Empty;
+    var legacyBlock = legacyStart >= 0 && focusOverrideSection > legacyStart
+        ? body[legacyStart..focusOverrideSection]
+        : string.Empty;
+
+    return delayedBlock.Contains("savedViewPoseToApply = savedView;", StringComparison.Ordinal)
+        && !delayedBlock.Contains("cameraOverride =", StringComparison.Ordinal)
+        && !delayedBlock.Contains("focusOverride =", StringComparison.Ordinal)
+        && legacyBlock.Contains("cameraOverride =", StringComparison.Ordinal)
+        && legacyBlock.Contains("focusOverride =", StringComparison.Ordinal)
+        && body.Contains("&& !savedViewPoseToApply.HasValue", StringComparison.Ordinal);
+});
+
+Test(484, "scene-ready saved pose path only records defer status and performs no saved pose write", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var body = ExtractMethodBody(serviceText, "private void RestoreCharaSelectRuntimeCameraStateAfterSceneLoad()");
+
+    return body.Contains("RestoreDecisionDeferSavedViewPoseToFixOn", StringComparison.Ordinal)
+        && body.Contains("\"deferred-to-fixon-pose\"", StringComparison.Ordinal)
+        && !body.Contains("ApplySavedViewCameraPoseAfterFixOn(", StringComparison.Ordinal)
+        && !body.Contains("TryApplyLobbyCameraPose(", StringComparison.Ordinal);
+});
+
+Test(485, "view replay divergence detects delayed pose DirH reset without absolute camera targets", () =>
+{
+    var samples = new[]
+    {
+        new TitleBackgroundViewReplayTraceSample(
+            0, true, Vector3.Zero, new Vector3(-302f, 12f, 499f), 0.78f, "success", string.Empty,
+            DirH: 2.793f, DirV: 0.053f, Distance: 5.5f),
+        new TitleBackgroundViewReplayTraceSample(
+            2, true, Vector3.Zero, new Vector3(-302f, 12f, 499f), 0.78f, "success", string.Empty,
+            DirH: 0f, DirV: 0f, Distance: 3.3f),
+    };
+
+    var result = TitleBackgroundViewReplayTraceLogic.EvaluateFirstDivergence(
+        null, null, 0.78f, 2.793f, 0.053f, 5.5f, samples);
+
+    return result.Diverged
+        && result.DivergedAtFrame == 2
+        && result.Component == TitleBackgroundViewReplayTraceComponent.DirH;
+});
+
+Test(486, "automatic run suppression is evaluated before delayed pose reservation and write", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var body = ExtractMethodBody(hooksText, "private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)");
+    var suppressionIndex = body.IndexOf("if (IsSavedViewSuppressedByAutomaticRun())", StringComparison.Ordinal);
+    var reservationIndex = body.IndexOf("savedViewPoseToApply = savedView;", StringComparison.Ordinal);
+    var writeIndex = body.IndexOf("ApplySavedViewCameraPoseAfterFixOn(savedViewPoseToApply.Value)", StringComparison.Ordinal);
+
+    return suppressionIndex >= 0
+        && reservationIndex > suppressionIndex
+        && writeIndex > reservationIndex;
+});
+
+Test(487, "load-scoped FixOn reset clears view generation gate before each new load", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var body = ExtractMethodBody(serviceText, "private void ResetFixOnExperimentSnapshot()");
+
+    return body.Contains("_cameraObservation.LastViewOverrideAppliedGeneration = 0;", StringComparison.Ordinal);
+});
+
+Test(488, "bounded pose maintain state arms counts unique frames and preserves stop diagnostics", () =>
+{
+    var view = new TitleBackgroundCharaSelectView(
+        true, "custom:n4f4", Vector3.Zero, Vector3.UnitY, 0.78f,
+        PoseCaptured: true, DirH: 2.087f, DirV: 0.03f, Distance: 5.5f);
+    var state = new TitleBackgroundSavedViewPoseMaintainRuntimeState();
+
+    state.Arm(view, sceneGeneration: 4);
+    state.MarkApplied(75);
+    state.MarkApplied(75);
+    state.MarkApplied(76);
+    state.Stop("logged-in");
+
+    return !state.Active
+        && state.SceneGeneration == 4
+        && state.SavedView == view
+        && state.AppliedCallCount == 3
+        && state.AppliedFrameCount == 2
+        && state.LastAppliedFrame == 76
+        && state.StopReason == "logged-in";
+});
+
+Test(489, "both curve hooks invoke bounded pose maintain after native original and Phase2G", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var setMid = ExtractMethodBody(hooksText, "private void SetCameraCurveMidPointDetour(nint self, float value)");
+    var lowHigh = ExtractMethodBody(hooksText, "private void CalculateCameraCurveLowAndHighPointDetour(nint self, float value)");
+
+    bool Ordered(string body, string original, string phase2G)
+    {
+        var originalIndex = body.IndexOf(original, StringComparison.Ordinal);
+        var phase2GIndex = body.IndexOf(phase2G, StringComparison.Ordinal);
+        var maintainIndex = body.IndexOf("TryMaintainSavedViewPoseAfterCurveOriginal(", StringComparison.Ordinal);
+        return originalIndex >= 0 && phase2GIndex > originalIndex && maintainIndex > phase2GIndex;
+    }
+
+    return Ordered(setMid, "SetCameraCurveMidPointHook?.Original", "TryApplyPhase2GSetCameraCurveMidPointOverride")
+        && Ordered(lowHigh, "CalculateCameraCurveLowAndHighPointHook?.Original", "TryApplyPhase2GLowHighCurveOverride");
+});
+
+Test(490, "bounded pose maintain writes only lobby pose inputs and never SceneCamera position", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var maintainBody = ExtractMethodBody(hooksText, "private bool TryMaintainSavedViewPoseAfterCurveOriginal(");
+    var coreBody = ExtractMethodBody(serviceText, "private bool TryApplyLobbyCameraPose(");
+    var frameworkBody = ExtractMethodBody(hooksText, "private void OnFrameworkUpdate(IFramework _)");
+
+    return maintainBody.Contains("TryApplyLobbyCameraPose(", StringComparison.Ordinal)
+        && coreBody.Contains("lobbyCamera->DirH = dirH;", StringComparison.Ordinal)
+        && coreBody.Contains("lobbyCamera->DirV = dirV;", StringComparison.Ordinal)
+        && coreBody.Contains("lobbyCamera->Distance = distance;", StringComparison.Ordinal)
+        && coreBody.Contains("lobbyCamera->InterpDistance = distance;", StringComparison.Ordinal)
+        && coreBody.Contains("lobbyCamera->FoV = fovY;", StringComparison.Ordinal)
+        && !maintainBody.Contains("SceneCamera", StringComparison.Ordinal)
+        && !coreBody.Contains("SceneCamera", StringComparison.Ordinal)
+        && !frameworkBody.Contains("TryMaintainSavedViewPoseAfterCurveOriginal", StringComparison.Ordinal)
+        && !frameworkBody.Contains("TryApplyLobbyCameraPose", StringComparison.Ordinal);
+});
+
+Test(491, "bounded pose maintain gate stops on login generation run context and saved-view changes", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var body = ExtractMethodBody(hooksText, "private bool TryResolveSavedViewPoseMaintainTarget(");
+
+    return body.Contains("_clientState.IsLoggedIn", StringComparison.Ordinal)
+        && body.Contains("_hookLifecycle.State != TitleBackgroundServiceState.Ready", StringComparison.Ordinal)
+        && body.Contains("IsHookProbeMode()", StringComparison.Ordinal)
+        && body.Contains("IsSavedViewSuppressedByAutomaticRun()", StringComparison.Ordinal)
+        && body.Contains("_charaSelectTitleBackgroundSessionActive", StringComparison.Ordinal)
+        && body.Contains("_savedViewPoseMaintain.SceneGeneration", StringComparison.Ordinal)
+        && body.Contains("_activeCharaSelectSceneGeneration", StringComparison.Ordinal)
+        && body.Contains("GetFixOnFocusOverrideContextReason()", StringComparison.Ordinal)
+        && body.Contains("ApplicationModeDelayedPose", StringComparison.Ordinal)
+        && body.Contains("currentView != _savedViewPoseMaintain.SavedView", StringComparison.Ordinal);
+});
+
+Test(492, "bounded pose maintain is inactive before successful delayed FixOn apply and arms only on success", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var applyBody = ExtractMethodBody(serviceText, "private bool ApplySavedViewCameraPoseAfterFixOn(TitleBackgroundCharaSelectView savedView)");
+    var writeIndex = applyBody.IndexOf("TryApplyLobbyCameraPose(", StringComparison.Ordinal);
+    var armIndex = applyBody.IndexOf("_savedViewPoseMaintain.Arm(", StringComparison.Ordinal);
+    var state = new TitleBackgroundSavedViewPoseMaintainRuntimeState();
+
+    return !state.Active
+        && writeIndex >= 0
+        && armIndex > writeIndex
+        && applyBody.IndexOf("return false;", StringComparison.Ordinal) < armIndex;
+});
+
+Test(493, "automatic diagnostic allowlist includes bounded pose maintain keys", () =>
+{
+    var selected = TitleBackgroundAutomaticCheckDiagnosticSelector.Select(
+    [
+        "view.poseMaintain.active=False",
+        "view.poseMaintain.sceneGeneration=4",
+        "view.poseMaintain.appliedCallCount=240",
+        "view.poseMaintain.appliedFrameCount=120",
+        "view.poseMaintain.lastFrame=194",
+        "view.poseMaintain.stopReason=world-login-transition",
+        "unrelated.key=value",
+    ]);
+
+    return selected.Count == 6
+        && selected.Contains("view.poseMaintain.active=False")
+        && selected.Contains("view.poseMaintain.appliedFrameCount=120")
+        && selected.Contains("view.poseMaintain.stopReason=world-login-transition")
+        && !selected.Contains("unrelated.key=value");
+});
+
+Test(494, "session and load cleanup stop bounded pose maintain without erasing counters", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var resetBody = ExtractMethodBody(serviceText, "private void ResetFixOnExperimentSnapshot()");
+    var endBody = ExtractMethodBody(serviceText, "private void EndCharaSelectTitleBackgroundSession(string reason, string source)");
+
+    return resetBody.Contains("_savedViewPoseMaintain.Stop(\"scene-load-started\");", StringComparison.Ordinal)
+        && endBody.Contains("_savedViewPoseMaintain.Stop(reason);", StringComparison.Ordinal);
+});
+
+Test(495, "framework update performs only immediate maintain stop validation and no camera write", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var frameworkBody = ExtractMethodBody(hooksText, "private void OnFrameworkUpdate(IFramework _)");
+    var stopBody = ExtractMethodBody(hooksText, "private void StopSavedViewPoseMaintainIfInvalid()");
+
+    return frameworkBody.Contains("StopSavedViewPoseMaintainIfInvalid();", StringComparison.Ordinal)
+        && !frameworkBody.Contains("TryApplyLobbyCameraPose", StringComparison.Ordinal)
+        && stopBody.Contains("TryResolveSavedViewPoseMaintainTarget", StringComparison.Ordinal)
+        && stopBody.Contains("_savedViewPoseMaintain.Stop(stopReason);", StringComparison.Ordinal)
+        && !stopBody.Contains("TryApplyLobbyCameraPose", StringComparison.Ordinal);
+});
+
+Test(496, "character facing yaw uses saved DirH plus the single calibration offset", () =>
+{
+    var fromZero = TitleBackgroundCharaSelectCharacterFacing.ComputeYaw(0f);
+    var fromSaved = TitleBackgroundCharaSelectCharacterFacing.ComputeYaw(2.087f);
+    var expected = TitleBackgroundCharaSelectCameraLogic.NormalizeRadians(
+        2.087f + TitleBackgroundCharaSelectCharacterFacing.CalibrationOffset);
+
+    return Math.Abs(fromZero - MathF.PI) < 0.0001f
+        && Math.Abs(fromSaved - expected) < 0.0001f
+        && TitleBackgroundCharaSelectCharacterFacing.ComputeYaw(float.NaN) == 0f;
+});
+
+Test(497, "character rotation writer uses native SetRotation yaw and does not synthesize DrawObject quaternion", () =>
+{
+    var root = FindRepositoryRoot();
+    var probeText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundCharacterSourceProbe.cs"));
+    var body = ExtractMethodBody(probeText, "public static bool TrySetCurrentCharacterDrawRotation(float yaw, out float readBackRotation)");
+
+    return body.Contains("character->SetRotation(yaw);", StringComparison.Ordinal)
+        && body.Contains("readBackRotation = character->Rotation;", StringComparison.Ordinal)
+        && !body.Contains("drawObject->Rotation", StringComparison.Ordinal)
+        && !body.Contains("SceneCamera", StringComparison.Ordinal);
+});
+
+Test(498, "character facing runs directly after successful position write in the existing placement slot", () =>
+{
+    var root = FindRepositoryRoot();
+    var timelineText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.TimelineDiagnostics.cs"));
+    var body = ExtractMethodBody(timelineText, "private void MaintainCharaSelectCharacterPlacement()");
+    var positionIndex = body.IndexOf("TrySetCurrentCharacterDrawPosition(target)", StringComparison.Ordinal);
+    var facingIndex = body.IndexOf("ApplySavedViewCharacterFacing(activeCandidate);", StringComparison.Ordinal);
+
+    return positionIndex >= 0
+        && facingIndex > positionIndex
+        && body.Contains("if (TitleBackgroundCharacterSourceProbe.TrySetCurrentCharacterDrawPosition(target))", StringComparison.Ordinal);
+});
+
+Test(499, "character facing gate requires pre-login session run allowance maintained pose and matching saved view", () =>
+{
+    var root = FindRepositoryRoot();
+    var timelineText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.TimelineDiagnostics.cs"));
+    var body = ExtractMethodBody(timelineText, "private void ApplySavedViewCharacterFacing(TitleBackgroundCharacterSelectOverrideCandidate activeCandidate)");
+
+    return body.Contains("_clientState.IsLoggedIn", StringComparison.Ordinal)
+        && body.Contains("_charaSelectTitleBackgroundSessionActive", StringComparison.Ordinal)
+        && body.Contains("IsSavedViewSuppressedByAutomaticRun()", StringComparison.Ordinal)
+        && body.Contains("_savedViewPoseMaintain.Active", StringComparison.Ordinal)
+        && body.Contains("TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal)
+        && body.Contains("activeCandidate.Id", StringComparison.Ordinal)
+        && body.Contains("ApplicationModeDelayedPose", StringComparison.Ordinal)
+        && body.Contains("savedView != _savedViewPoseMaintain.SavedView", StringComparison.Ordinal);
+});
+
+Test(500, "character facing diagnostics are included in the automatic report allowlist", () =>
+{
+    var selected = TitleBackgroundAutomaticCheckDiagnosticSelector.Select(
+    [
+        "character.facing.active=False",
+        "character.facing.appliedFrameCount=120",
+        "character.facing.appliedYaw=-1.055",
+        "character.facing.savedDirH=2.087",
+        "character.facing.readBackRotation=-1.055",
+        "character.facing.lastError=suppressed-by-run",
+        "unrelated.key=value",
+    ]);
+
+    return selected.Count == 6
+        && selected.Contains("character.facing.active=False")
+        && selected.Contains("character.facing.appliedYaw=-1.055")
+        && selected.Contains("character.facing.readBackRotation=-1.055")
+        && !selected.Contains("unrelated.key=value");
+});
+
+Test(501, "character facing never writes SceneCamera and only placement owns the rotation writer", () =>
+{
+    var root = FindRepositoryRoot();
+    var timelineText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.TimelineDiagnostics.cs"));
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var facingBody = ExtractMethodBody(timelineText, "private void ApplySavedViewCharacterFacing(TitleBackgroundCharacterSelectOverrideCandidate activeCandidate)");
+    var frameworkBody = ExtractMethodBody(hooksText, "private void OnFrameworkUpdate(IFramework _)");
+
+    return facingBody.Contains("TrySetCurrentCharacterDrawRotation", StringComparison.Ordinal)
+        && !facingBody.Contains("SceneCamera", StringComparison.Ordinal)
+        && frameworkBody.Contains("MaintainCharaSelectCharacterPlacement();", StringComparison.Ordinal)
+        && !frameworkBody.Contains("TrySetCurrentCharacterDrawRotation", StringComparison.Ordinal);
 });
 
     }

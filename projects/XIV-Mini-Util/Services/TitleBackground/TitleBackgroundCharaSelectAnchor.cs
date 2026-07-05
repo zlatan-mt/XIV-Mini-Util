@@ -76,8 +76,8 @@ internal static class TitleBackgroundLayerStepLogic
 }
 
 // 候補固有の陸上アンカー。位置はゲーム内 capture で確定し、nudge で微調整する。
-// Rotation は将来のために保持するが、現状の placement では position のみを書き込む
-// （毎フレームの rotation 書き込みはエンジンと競合してガクつく恐れがあるため意図的に未適用）。
+// Rotation はアンカーcapture互換のため保持する。保存view利用時のfacingはこの値ではなく、
+// 保存DirHから算出した固定yawを既存placement slotで適用する。
 internal readonly record struct TitleBackgroundCharaSelectAnchor(
     bool Enabled,
     string CandidateId,
@@ -240,7 +240,8 @@ internal readonly record struct TitleBackgroundCharaSelectPlacementDecision(
     bool UsedAnchor,
     string EffectiveFrame);
 
-// 「今の見え方を保存」した CharaSelect カメラ（scene-local 絶対値）。TitleEdit の CameraPos/FixOnPos/FovY 相当。
+// 「今の見え方を保存」した CharaSelect カメラ。pose 付きはFixOn自然焦点に対する相対構図、
+// pose 無しの旧形式だけがscene-local絶対camera/focus値（TitleEdit相当）を使う。
 // PoseCaptured/DirH/DirV/Distance は保存時のネイティブ LobbyCamera pose（runtime restore と同じフィールド群）。
 // エンジンは camera 位置を DirH/DirV/Distance＋焦点から毎フレーム再導出するため（view.trace 実測）、
 // camera 位置形式の FixOn 上書きは数フレームで負ける。pose 形式の復元が構図持続の本命で、
@@ -279,14 +280,18 @@ internal readonly record struct TitleBackgroundFixOnViewResolution(
     Vector3 Camera,
     Vector3 Focus,
     float FovY,
-    string Source);
+    string Source,
+    string ApplicationMode);
 
-// FixOn detour から呼ぶ「見え方」上書きの純粋判定。TitleEdit と同様に camera/focus/fov を
-// まとめて絶対値で差し替える（観測値からの相対ではない）。候補は非空・完全一致のみ。
+// FixOn detour から呼ぶ「見え方」適用の純粋判定。pose付きは自然FixOn後の相対pose、
+// pose無しの旧viewだけはTitleEdit同様の絶対camera/focus/fovを選ぶ。候補は非空・完全一致のみ。
 internal static class TitleBackgroundFixOnViewOverrideLogic
 {
     public const string ViewSource = "view";
     public const string PassthroughSource = "passthrough";
+    public const string ApplicationModePassthrough = "passthrough";
+    public const string ApplicationModeDelayedPose = "delayed-pose";
+    public const string ApplicationModeLegacyAbsolute = "legacy-absolute";
 
     public static TitleBackgroundFixOnViewResolution Resolve(
         bool featureEnabled,
@@ -305,7 +310,8 @@ internal static class TitleBackgroundFixOnViewOverrideLogic
                 view.Camera,
                 view.Focus,
                 view.FovY,
-                ViewSource);
+                ViewSource,
+                view.HasUsablePose ? ApplicationModeDelayedPose : ApplicationModeLegacyAbsolute);
         }
 
         return new TitleBackgroundFixOnViewResolution(
@@ -313,7 +319,8 @@ internal static class TitleBackgroundFixOnViewOverrideLogic
             observedCamera,
             observedFocus,
             observedFovY,
-            PassthroughSource);
+            PassthroughSource,
+            ApplicationModePassthrough);
     }
 
     // 安全側に倒し、空 CandidateId のワイルドカード一致は許さない（別背景に適用させない）。
@@ -349,13 +356,13 @@ internal static class TitleBackgroundFixOnViewOverrideLogic
 
     // scene load 後の runtime camera restore 経路の決定（3値）。
     // - ProceedRuntimeRestore: view 非成立（または run 中の抑止）→ 従来の runtime restore を実行する。
-    // - ApplySavedViewPose: pose 付き view が成立 → runtime state ではなく view の DirH/DirV/Distance/FovY を
-    //   1 回だけ適用する（本命修正。エンジンの camera 位置再導出に負けない持続形式）。
+    // - DeferSavedViewPoseToFixOn: pose 付き view が成立 → scene-readyでは書かず、FixOn originalが自然焦点を
+    //   確定した直後のone-shot適用へ委ねる。
     // - YieldNoPose: pose 無しの旧保存 view が成立 → 従来どおり譲る（後方互換。FixOn の camera/focus
     //   override に任せる。再保存すれば pose 付きへ昇格する）。
     // view 成立条件は ShouldYieldCameraPoseToSavedView（= FixOn 側 Resolve の成立条件）と同一。
     public const string RestoreDecisionProceedRuntimeRestore = "proceed-runtime-restore";
-    public const string RestoreDecisionApplySavedViewPose = "apply-saved-view-pose";
+    public const string RestoreDecisionDeferSavedViewPoseToFixOn = "defer-saved-view-pose-to-fixon";
     public const string RestoreDecisionYieldNoPose = "yield-no-pose";
 
     public static string ResolveRuntimeCameraRestoreDecision(
@@ -375,7 +382,7 @@ internal static class TitleBackgroundFixOnViewOverrideLogic
         }
 
         return view.HasUsablePose
-            ? RestoreDecisionApplySavedViewPose
+            ? RestoreDecisionDeferSavedViewPoseToFixOn
             : RestoreDecisionYieldNoPose;
     }
 }
