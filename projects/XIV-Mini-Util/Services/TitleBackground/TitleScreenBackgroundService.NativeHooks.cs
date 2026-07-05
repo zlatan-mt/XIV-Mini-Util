@@ -316,6 +316,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
         float[]? focusOverride = null;
         var overrideFovY = fovY;
         var invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(false);
+        // 保存view再現バグ診断: この呼び出しで view override が成立したかを一時保持する（catch で握り潰された
+        // 場合は false のままなので trace は開始しない＝誤ったtarget値でtraceを走らせない安全側の挙動）。
+        var viewOverrideAppliedThisInvocation = false;
         try
         {
             _cameraObservation.LastObservedFixOnCamera = TryReadVector(cameraPos);
@@ -368,41 +371,52 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     _configuration.TitleBackgroundCharaSelectViewEnabled)
                 && IsFixOnFocusOverrideContextActive())
             {
-                var viewResolution = TitleBackgroundFixOnViewOverrideLogic.Resolve(
-                    _configuration.TitleBackgroundCharaSelectViewEnabled,
-                    BuildCharaSelectView(),
-                    ResolveCurrentOverrideCandidate().Id,
-                    _cameraObservation.LastObservedFixOnCamera ?? Vector3.Zero,
-                    _cameraObservation.LastObservedFixOnFocus ?? Vector3.Zero,
-                    fovY);
-                _cameraObservation.LastFixOnViewOverrideSource = viewResolution.Source;
-                if (viewResolution.ShouldOverride)
+                // 自動確認 run 中は view override を抑止し、カメラを自然 FixOn（配置キャラ追従）に任せる。
+                // 抑止した事実は LastFixOnViewOverrideSource=suppressed-by-run として run レポートで読める。
+                // run 判定は _automaticCheck.Requested ベースで、run の完了・失敗・キャンセルで必ず解除される。
+                if (IsSavedViewSuppressedByAutomaticRun())
                 {
-                    cameraOverride =
-                    [
-                        viewResolution.Camera.X,
-                        viewResolution.Camera.Y,
-                        viewResolution.Camera.Z,
-                    ];
-                    focusOverride =
-                    [
-                        viewResolution.Focus.X,
-                        viewResolution.Focus.Y,
-                        viewResolution.Focus.Z,
-                    ];
-                    overrideFovY = viewResolution.FovY;
-                    _cameraObservation.LastCameraOverrideApplied = true;
-                    _cameraObservation.LastAppliedCamera = viewResolution.Camera;
-                    _cameraObservation.LastAppliedFocus = viewResolution.Focus;
-                    _cameraObservation.LastAppliedFovY = viewResolution.FovY;
-                    _cameraObservation.FixOnViewOverrideAppliedCount++;
-                    _cameraObservation.LastViewOverrideAppliedGeneration = _activeCharaSelectSceneGeneration;
-                    invocationMode = "view-override";
-                    _log.Information(
-                        "[XMU BG] FixOn view override applied. camera={Camera}, focus={Focus}, fovY={FovY}",
-                        FormatVector(viewResolution.Camera),
-                        FormatVector(viewResolution.Focus),
-                        viewResolution.FovY);
+                    _cameraObservation.LastFixOnViewOverrideSource = "suppressed-by-run";
+                }
+                else
+                {
+                    var viewResolution = TitleBackgroundFixOnViewOverrideLogic.Resolve(
+                        _configuration.TitleBackgroundCharaSelectViewEnabled,
+                        BuildCharaSelectView(),
+                        ResolveCurrentOverrideCandidate().Id,
+                        _cameraObservation.LastObservedFixOnCamera ?? Vector3.Zero,
+                        _cameraObservation.LastObservedFixOnFocus ?? Vector3.Zero,
+                        fovY);
+                    _cameraObservation.LastFixOnViewOverrideSource = viewResolution.Source;
+                    if (viewResolution.ShouldOverride)
+                    {
+                        cameraOverride =
+                        [
+                            viewResolution.Camera.X,
+                            viewResolution.Camera.Y,
+                            viewResolution.Camera.Z,
+                        ];
+                        focusOverride =
+                        [
+                            viewResolution.Focus.X,
+                            viewResolution.Focus.Y,
+                            viewResolution.Focus.Z,
+                        ];
+                        overrideFovY = viewResolution.FovY;
+                        _cameraObservation.LastCameraOverrideApplied = true;
+                        _cameraObservation.LastAppliedCamera = viewResolution.Camera;
+                        _cameraObservation.LastAppliedFocus = viewResolution.Focus;
+                        _cameraObservation.LastAppliedFovY = viewResolution.FovY;
+                        _cameraObservation.FixOnViewOverrideAppliedCount++;
+                        _cameraObservation.LastViewOverrideAppliedGeneration = _activeCharaSelectSceneGeneration;
+                        invocationMode = "view-override";
+                        viewOverrideAppliedThisInvocation = true;
+                        _log.Information(
+                            "[XMU BG] FixOn view override applied. camera={Camera}, focus={Focus}, fovY={FovY}",
+                            FormatVector(viewResolution.Camera),
+                            FormatVector(viewResolution.Focus),
+                            viewResolution.FovY);
+                    }
                 }
             }
 
@@ -450,6 +464,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             focusOverride = null;
             overrideFovY = fovY;
             invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(false);
+            viewOverrideAppliedThisInvocation = false;
         }
 
         _cameraObservation.LastFixOnInvocationMode = invocationMode;
@@ -472,6 +487,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
         CapturePostFixOnCameraState();
         ScheduleCameraProbeTimelineCapture(cameraOverride != null || focusOverride != null);
+        // 保存view再現バグ診断（read-only）: view override が成立したFixOn呼び出し直後だけtraceを開始する。
+        // カメラには一切書き込まず、CapturePostFixOnCameraState() が既に読み取った実値をframe 0として使う。
+        StartViewReplayTraceIfApplicable(viewOverrideAppliedThisInvocation);
         return result;
     }
 
@@ -833,6 +851,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         CapturePhase2CTimelineOnFrameworkUpdate();
         CaptureCameraProbeTimelineOnFrameworkUpdate();
         CapturePreLoginCameraOnFrameworkUpdate();
+        CaptureViewReplayTraceOnFrameworkUpdate();
         MaintainCharaSelectCharacterPlacement();
         MaintainCharaSelectEnvironmentNoon();
         MaintainCharaSelectEnvironmentClearSky();

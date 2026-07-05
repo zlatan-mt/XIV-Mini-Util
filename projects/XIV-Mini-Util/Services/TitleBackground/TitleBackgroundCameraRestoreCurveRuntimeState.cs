@@ -38,6 +38,22 @@ internal sealed class TitleBackgroundCameraRestoreCurveRuntimeState
 
     public float? RuntimeRestoreLastRestoredFovY { get; set; }
 
+    // 保存 view の pose（DirH/DirV/Distance/FovY）を scene load 後に 1 回適用した記録（診断用）。
+    public int SavedViewPoseAppliedCount { get; set; }
+
+    public float? SavedViewPoseAppliedDirH { get; set; }
+
+    public float? SavedViewPoseAppliedDirV { get; set; }
+
+    public float? SavedViewPoseAppliedDistance { get; set; }
+
+    public float? SavedViewPoseAppliedFovY { get; set; }
+
+    // view 非関与 load の skipped 等で上書きしない、最後の保存 view pose 復元結果。
+    public string SavedViewPoseLastRestoreStatus { get; set; } = "not-run";
+
+    public int SavedViewPoseLastRestoreSceneGeneration { get; set; }
+
     public int CurveApplyAttemptCount { get; set; }
 
     public int CurveApplySuccessCount { get; set; }

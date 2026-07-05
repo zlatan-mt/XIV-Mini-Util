@@ -41,6 +41,12 @@ internal sealed record TitleBackgroundAutomaticCheckSettingsSnapshot
     public float ViewFocusY { get; init; }
     public float ViewFocusZ { get; init; }
     public float ViewFovY { get; init; }
+    // 保存 view のネイティブ pose（DirH/DirV/Distance）。旧 journal（キー無し）は既定値
+    // （PoseCaptured=false）で復元され、pose 復元が働かないだけで安全（fail-closed）。
+    public bool ViewPoseCaptured { get; init; }
+    public float ViewDirH { get; init; }
+    public float ViewDirV { get; init; }
+    public float ViewDistance { get; init; }
 
     public static TitleBackgroundAutomaticCheckSettingsSnapshot Capture(Configuration configuration)
     {
@@ -80,6 +86,10 @@ internal sealed record TitleBackgroundAutomaticCheckSettingsSnapshot
             ViewFocusY = configuration.TitleBackgroundCharaSelectViewFocusY,
             ViewFocusZ = configuration.TitleBackgroundCharaSelectViewFocusZ,
             ViewFovY = configuration.TitleBackgroundCharaSelectViewFovY,
+            ViewPoseCaptured = configuration.TitleBackgroundCharaSelectViewPoseCaptured,
+            ViewDirH = configuration.TitleBackgroundCharaSelectViewDirH,
+            ViewDirV = configuration.TitleBackgroundCharaSelectViewDirV,
+            ViewDistance = configuration.TitleBackgroundCharaSelectViewDistance,
         };
     }
 
@@ -119,6 +129,10 @@ internal sealed record TitleBackgroundAutomaticCheckSettingsSnapshot
         configuration.TitleBackgroundCharaSelectViewFocusY = ViewFocusY;
         configuration.TitleBackgroundCharaSelectViewFocusZ = ViewFocusZ;
         configuration.TitleBackgroundCharaSelectViewFovY = ViewFovY;
+        configuration.TitleBackgroundCharaSelectViewPoseCaptured = ViewPoseCaptured;
+        configuration.TitleBackgroundCharaSelectViewDirH = ViewDirH;
+        configuration.TitleBackgroundCharaSelectViewDirV = ViewDirV;
+        configuration.TitleBackgroundCharaSelectViewDistance = ViewDistance;
     }
 }
 

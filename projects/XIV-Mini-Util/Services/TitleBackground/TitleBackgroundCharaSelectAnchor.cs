@@ -241,12 +241,20 @@ internal readonly record struct TitleBackgroundCharaSelectPlacementDecision(
     string EffectiveFrame);
 
 // 「今の見え方を保存」した CharaSelect カメラ（scene-local 絶対値）。TitleEdit の CameraPos/FixOnPos/FovY 相当。
+// PoseCaptured/DirH/DirV/Distance は保存時のネイティブ LobbyCamera pose（runtime restore と同じフィールド群）。
+// エンジンは camera 位置を DirH/DirV/Distance＋焦点から毎フレーム再導出するため（view.trace 実測）、
+// camera 位置形式の FixOn 上書きは数フレームで負ける。pose 形式の復元が構図持続の本命で、
+// PoseCaptured=false の旧保存 view は pose 復元を行わない（後方互換）。
 internal readonly record struct TitleBackgroundCharaSelectView(
     bool Enabled,
     string CandidateId,
     Vector3 Camera,
     Vector3 Focus,
-    float FovY)
+    float FovY,
+    bool PoseCaptured = false,
+    float DirH = 0f,
+    float DirV = 0f,
+    float Distance = 0f)
 {
     public static TitleBackgroundCharaSelectView None { get; } =
         new(false, string.Empty, Vector3.Zero, Vector3.Zero, TitleBackgroundPreset.DefaultFovY);
@@ -257,6 +265,13 @@ internal readonly record struct TitleBackgroundCharaSelectView(
         && TitleBackgroundCameraMath.IsFiniteVector(Focus)
         && float.IsFinite(FovY)
         && FovY > 0f;
+
+    public bool HasUsablePose =>
+        PoseCaptured
+        && float.IsFinite(DirH)
+        && float.IsFinite(DirV)
+        && float.IsFinite(Distance)
+        && Distance > 0f;
 }
 
 internal readonly record struct TitleBackgroundFixOnViewResolution(
@@ -321,7 +336,7 @@ internal static class TitleBackgroundFixOnViewOverrideLogic
     // FixOn 側の view override 成立条件（featureEnabled && view.HasUsableView && candidate 正規化一致）と
     // 完全に同一の判定にすることで、「view override は勝ったのに runtime restore がまた上書きする」
     // 非対称を作らない。保存 view が使用可能かつ active candidate と一致するときだけ true を返し、
-    // 呼び出し側はその scene generation でのカメラ pose 書込みをスキップする。
+    // 呼び出し側はその scene generation でのカメラ pose 書込みをスキップまたは view pose 適用へ切り替える。
     public static bool ShouldYieldCameraPoseToSavedView(
         bool viewEnabled,
         TitleBackgroundCharaSelectView view,
@@ -330,6 +345,38 @@ internal static class TitleBackgroundFixOnViewOverrideLogic
         return viewEnabled
             && view.HasUsableView
             && MatchesCandidateStrict(view.CandidateId, activeCandidateId);
+    }
+
+    // scene load 後の runtime camera restore 経路の決定（3値）。
+    // - ProceedRuntimeRestore: view 非成立（または run 中の抑止）→ 従来の runtime restore を実行する。
+    // - ApplySavedViewPose: pose 付き view が成立 → runtime state ではなく view の DirH/DirV/Distance/FovY を
+    //   1 回だけ適用する（本命修正。エンジンの camera 位置再導出に負けない持続形式）。
+    // - YieldNoPose: pose 無しの旧保存 view が成立 → 従来どおり譲る（後方互換。FixOn の camera/focus
+    //   override に任せる。再保存すれば pose 付きへ昇格する）。
+    // view 成立条件は ShouldYieldCameraPoseToSavedView（= FixOn 側 Resolve の成立条件）と同一。
+    public const string RestoreDecisionProceedRuntimeRestore = "proceed-runtime-restore";
+    public const string RestoreDecisionApplySavedViewPose = "apply-saved-view-pose";
+    public const string RestoreDecisionYieldNoPose = "yield-no-pose";
+
+    public static string ResolveRuntimeCameraRestoreDecision(
+        bool suppressedByAutomaticRun,
+        bool viewEnabled,
+        TitleBackgroundCharaSelectView view,
+        string? activeCandidateId)
+    {
+        if (suppressedByAutomaticRun)
+        {
+            return RestoreDecisionProceedRuntimeRestore;
+        }
+
+        if (!ShouldYieldCameraPoseToSavedView(viewEnabled, view, activeCandidateId))
+        {
+            return RestoreDecisionProceedRuntimeRestore;
+        }
+
+        return view.HasUsablePose
+            ? RestoreDecisionApplySavedViewPose
+            : RestoreDecisionYieldNoPose;
     }
 }
 

@@ -71,6 +71,14 @@ public sealed partial class Configuration
     public float TitleBackgroundCharaSelectViewFocusY { get; set; } = 0f;
     public float TitleBackgroundCharaSelectViewFocusZ { get; set; } = 0f;
     public float TitleBackgroundCharaSelectViewFovY { get; set; } = TitleBackgroundPreset.DefaultFovY;
+    // 保存 view のネイティブカメラ pose（DirH/DirV/Distance）。FixOn の camera 引数はエンジンが
+    // DirH/DirV/Distance＋焦点から毎フレーム位置を再導出するため数フレームで負ける（view.trace 実測）。
+    // pose 形式でも保存し、scene load 後に 1 回だけ LobbyCamera へ復元することで構図を持続させる。
+    // PoseCaptured=false（旧バージョンで保存された view）は pose 復元せず従来挙動（後方互換）。
+    public bool TitleBackgroundCharaSelectViewPoseCaptured { get; set; } = false;
+    public float TitleBackgroundCharaSelectViewDirH { get; set; } = 0f;
+    public float TitleBackgroundCharaSelectViewDirV { get; set; } = 0f;
+    public float TitleBackgroundCharaSelectViewDistance { get; set; } = 0f;
     // FixOn フックを passive 観測専用（override 無し）で装着するか。発火可否の診断用。既定 OFF で挙動不変。
     public bool TitleBackgroundFixOnPassiveObservationEnabled { get; set; } = false;
     // 保存済み陸上アンカー座標を FixOn の焦点へ「候補一致時のみ」適用するか。
@@ -171,6 +179,10 @@ public sealed partial class Configuration
         TitleBackgroundCharaSelectViewFocusY = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewFocusY);
         TitleBackgroundCharaSelectViewFocusZ = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewFocusZ);
         TitleBackgroundCharaSelectViewFovY = SanitizeFovY(source.TitleBackgroundCharaSelectViewFovY);
+        TitleBackgroundCharaSelectViewPoseCaptured = source.TitleBackgroundCharaSelectViewPoseCaptured;
+        TitleBackgroundCharaSelectViewDirH = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewDirH);
+        TitleBackgroundCharaSelectViewDirV = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewDirV);
+        TitleBackgroundCharaSelectViewDistance = SanitizeCoordinate(source.TitleBackgroundCharaSelectViewDistance);
         TitleBackgroundFixOnPassiveObservationEnabled = source.TitleBackgroundFixOnPassiveObservationEnabled;
         TitleBackgroundFixOnFocusAnchorOverrideEnabled = source.TitleBackgroundFixOnFocusAnchorOverrideEnabled;
         TitleBackgroundEnvironmentNoonEnabled = source.TitleBackgroundEnvironmentNoonEnabled;
@@ -458,6 +470,32 @@ public sealed partial class Configuration
             TitleBackgroundCharaSelectViewFocusY = normalizedViewFocusY;
             TitleBackgroundCharaSelectViewFocusZ = normalizedViewFocusZ;
             TitleBackgroundCharaSelectViewFovY = normalizedViewFovY;
+            changed = true;
+        }
+
+        // 保存 view の pose（DirH/DirV/Distance）。PoseCaptured=true なのに値が非有限、または
+        // Distance が 0 以下の場合は pose だけを無効化する（fail-closed）。view 本体（camera/focus 形式）は
+        // pose とは独立して従来どおり使えるため、view enabled はここでは落とさない。
+        if (TitleBackgroundCharaSelectViewPoseCaptured
+            && (!float.IsFinite(TitleBackgroundCharaSelectViewDirH)
+                || !float.IsFinite(TitleBackgroundCharaSelectViewDirV)
+                || !float.IsFinite(TitleBackgroundCharaSelectViewDistance)
+                || TitleBackgroundCharaSelectViewDistance <= 0f))
+        {
+            TitleBackgroundCharaSelectViewPoseCaptured = false;
+            changed = true;
+        }
+
+        var normalizedViewDirH = SanitizeCoordinate(TitleBackgroundCharaSelectViewDirH);
+        var normalizedViewDirV = SanitizeCoordinate(TitleBackgroundCharaSelectViewDirV);
+        var normalizedViewDistance = SanitizeCoordinate(TitleBackgroundCharaSelectViewDistance);
+        if (TitleBackgroundCharaSelectViewDirH != normalizedViewDirH
+            || TitleBackgroundCharaSelectViewDirV != normalizedViewDirV
+            || TitleBackgroundCharaSelectViewDistance != normalizedViewDistance)
+        {
+            TitleBackgroundCharaSelectViewDirH = normalizedViewDirH;
+            TitleBackgroundCharaSelectViewDirV = normalizedViewDirV;
+            TitleBackgroundCharaSelectViewDistance = normalizedViewDistance;
             changed = true;
         }
 

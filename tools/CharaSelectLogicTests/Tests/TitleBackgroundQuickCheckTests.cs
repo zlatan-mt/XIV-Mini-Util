@@ -676,12 +676,25 @@ Test(123, "title background quickcheck background mode labels are user facing", 
         && TitleBackgroundQuickCheckUiPresenter.GetBackgroundModeUiLabel(TitleBackgroundCharacterSelectBackgroundMode.PreserveCharaSelectForeground).Contains("Experimental", StringComparison.Ordinal);
 });
 
-Test(361, "automatic check does not force passive when view override is configured", () =>
+Test(361, "automatic check suppresses saved view during runs instead of skipping passive observation", () =>
 {
+    // 方針転換（2026-07-04）: run 中は保存 view を抑止する。view ON はもはや passive を立てない
+    // 理由にならないため、PrepareAutomaticQuickCheckDiagnostics は view を条件にしない。
+    // 一方、focus anchor override の実挙動確認を邪魔しない配慮（passive を立てない）は維持する。
+    // 抑止は FixOn detour（suppressed-by-run 記録）と runtime restore 決定の両経路に存在し、
+    // run 判定は _automaticCheck.Requested（完了・失敗・キャンセルで必ず解除）を使う。
     var root = FindRepositoryRoot();
     var serviceText = string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground"), "TitleScreenBackgroundService*.cs").Select(File.ReadAllText));
-    var body = ExtractMethodBody(serviceText, "private void PrepareAutomaticQuickCheckDiagnostics()");
-    return body.Contains("TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal);
+    var prepareBody = ExtractMethodBody(serviceText, "private void PrepareAutomaticQuickCheckDiagnostics()");
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var fixOnBody = ExtractMethodBody(hooksText, "private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)");
+    var suppressBody = ExtractMethodBody(serviceText, "private bool IsSavedViewSuppressedByAutomaticRun()");
+
+    return !prepareBody.Contains("TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal)
+        && prepareBody.Contains("TitleBackgroundFixOnFocusAnchorOverrideEnabled", StringComparison.Ordinal)
+        && fixOnBody.Contains("IsSavedViewSuppressedByAutomaticRun()", StringComparison.Ordinal)
+        && fixOnBody.Contains("\"suppressed-by-run\"", StringComparison.Ordinal)
+        && suppressBody.Contains("_automaticCheck.Requested", StringComparison.Ordinal);
 });
 
 Test(380, "recovery snapshot round-trips world experimental fields", () =>

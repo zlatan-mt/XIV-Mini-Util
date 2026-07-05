@@ -5053,70 +5053,105 @@ Test(447, "automatic diagnostic allowlist includes both noon and clear-sky envir
         && selected.Contains("environment.clearSkyOverrideLastStatus=applied");
 });
 
-Test(448, "runtime camera pose yields to saved view when enabled and candidate matches", () =>
+Test(448, "runtime restore decision applies saved view pose when pose is captured and candidate matches", () =>
 {
-    var view = new TitleBackgroundCharaSelectView(
+    // 新契約（2026-07-04）: pose 付き view は yield ではなく pose 適用が勝ち手。
+    // FixOn の camera 引数はエンジンの毎フレーム再導出（DirH/DirV/Distance→位置）に負けるため（trace実測）、
+    // 持続実績のある pose 形式で復元する。
+    var poseView = new TitleBackgroundCharaSelectView(
+        true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f,
+        PoseCaptured: true, DirH: 1.2f, DirV: -0.3f, Distance: 3.3f);
+    var noPoseView = new TitleBackgroundCharaSelectView(
         true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
-    return TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(true, view, "custom:n4f4");
+
+    return TitleBackgroundFixOnViewOverrideLogic.ResolveRuntimeCameraRestoreDecision(false, true, poseView, "custom:n4f4")
+            == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionApplySavedViewPose
+        // pose 無しの旧保存 view は従来どおり譲る（後方互換。再保存で pose 付きへ昇格）。
+        && TitleBackgroundFixOnViewOverrideLogic.ResolveRuntimeCameraRestoreDecision(false, true, noPoseView, "custom:n4f4")
+            == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionYieldNoPose
+        && poseView.HasUsablePose
+        && !noPoseView.HasUsablePose;
 });
 
-Test(449, "runtime camera pose does not yield when view disabled, candidate mismatched, or view unusable", () =>
+Test(449, "runtime restore decision proceeds with runtime restore when view disabled, mismatched, unusable, or suppressed", () =>
 {
-    var view = new TitleBackgroundCharaSelectView(
-        true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
-    var disabledView = view with { Enabled = false };
+    var poseView = new TitleBackgroundCharaSelectView(
+        true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f,
+        PoseCaptured: true, DirH: 1.2f, DirV: -0.3f, Distance: 3.3f);
+    var disabledView = poseView with { Enabled = false };
     var nanView = new TitleBackgroundCharaSelectView(true, "custom:n4f4", new Vector3(float.NaN, 0f, 0f), new Vector3(0f, 0f, 0f), 45f);
-    var emptyIdView = new TitleBackgroundCharaSelectView(true, string.Empty, new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
+    var emptyIdView = poseView with { CandidateId = string.Empty };
+    var nanPoseView = poseView with { DirH = float.NaN };
+    var zeroDistancePoseView = poseView with { Distance = 0f };
+    const string Proceed = TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionProceedRuntimeRestore;
 
-    return !TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(false, view, "custom:n4f4")
-        && !TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(true, view, "manual:slot1")
-        && !TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(true, disabledView, "custom:n4f4")
-        && !TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(true, nanView, "custom:n4f4")
-        && !TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(true, emptyIdView, "anything");
+    string Decide(bool suppressed, bool enabled, TitleBackgroundCharaSelectView view, string? candidateId) =>
+        TitleBackgroundFixOnViewOverrideLogic.ResolveRuntimeCameraRestoreDecision(suppressed, enabled, view, candidateId);
+
+    return Decide(false, false, poseView, "custom:n4f4") == Proceed
+        && Decide(false, true, poseView, "manual:slot1") == Proceed
+        && Decide(false, true, disabledView, "custom:n4f4") == Proceed
+        && Decide(false, true, nanView, "custom:n4f4") == Proceed
+        && Decide(false, true, emptyIdView, "anything") == Proceed
+        // 自動確認 run 中の抑止は成立している view でも proceed（自然 FixOn でその場を写す）。
+        && Decide(true, true, poseView, "custom:n4f4") == Proceed
+        // run 外（suppressed=false）では pose 適用が働く＝抑止が run の外へ漏れないことの裏面。
+        && Decide(false, true, poseView, "custom:n4f4") == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionApplySavedViewPose
+        // pose だけが壊れている view は yield へフォールバック（view 自体は成立している）。
+        && Decide(false, true, nanPoseView, "custom:n4f4") == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionYieldNoPose
+        && Decide(false, true, zeroDistancePoseView, "custom:n4f4") == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionYieldNoPose;
 });
 
-Test(450, "runtime camera pose yield decision matches FixOn view override success condition exactly", () =>
+Test(450, "runtime restore view involvement matches FixOn view override success condition exactly", () =>
 {
-    // ShouldYieldCameraPoseToSavedView と Resolve の ShouldOverride は、同じ入力に対して
-    // 常に同じ真偽値を返さなければならない（非対称禁止）。複数パターンで突き合わせる。
+    // restore 決定が「view 関与（pose 適用 or yield）」になる条件と、FixOn 側 Resolve の
+    // ShouldOverride は、同じ入力（抑止なし）に対して常に一致しなければならない（非対称禁止）。
     var matchingView = new TitleBackgroundCharaSelectView(
-        true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f);
+        true, "custom:n4f4", new Vector3(1f, 14f, 3f), new Vector3(0f, 14.5f, 0f), 45f,
+        PoseCaptured: true, DirH: 1.2f, DirV: -0.3f, Distance: 3.3f);
     var observedCam = new Vector3(2f, 2f, 2f);
     var observedFocus = new Vector3(0f, 14f, 0f);
 
     bool Matches(bool enabled, TitleBackgroundCharaSelectView view, string? candidateId)
     {
-        var yield = TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(enabled, view, candidateId);
+        var decision = TitleBackgroundFixOnViewOverrideLogic.ResolveRuntimeCameraRestoreDecision(false, enabled, view, candidateId);
+        var viewInvolved = decision != TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionProceedRuntimeRestore;
         var resolve = TitleBackgroundFixOnViewOverrideLogic.Resolve(enabled, view, candidateId, observedCam, observedFocus, 60f);
-        return yield == resolve.ShouldOverride;
+        return viewInvolved == resolve.ShouldOverride;
     }
 
     return Matches(true, matchingView, "custom:n4f4")
         && Matches(false, matchingView, "custom:n4f4")
         && Matches(true, matchingView, "manual:slot1")
         && Matches(true, matchingView with { Enabled = false }, "custom:n4f4")
+        && Matches(true, matchingView with { PoseCaptured = false }, "custom:n4f4")
         && Matches(true, new TitleBackgroundCharaSelectView(true, string.Empty, matchingView.Camera, matchingView.Focus, matchingView.FovY), "anything");
 });
 
-Test(451, "runtime restore camera pose write path has yield check at the top before applying pose", () =>
+Test(451, "runtime restore camera pose write path decides saved-view handling at the top before applying pose", () =>
 {
     var root = FindRepositoryRoot();
     var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
     var body = ExtractMethodBody(serviceText, "private void RestoreCharaSelectRuntimeCameraStateAfterSceneLoad()");
-    var yieldIndex = body.IndexOf("TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView", StringComparison.Ordinal);
+    var decisionIndex = body.IndexOf("TitleBackgroundFixOnViewOverrideLogic.ResolveRuntimeCameraRestoreDecision", StringComparison.Ordinal);
     var applyIndex = body.IndexOf("TryApplyRuntimeCameraPose(", StringComparison.Ordinal);
+    var poseApplyIndex = body.IndexOf("ApplySavedViewCameraPoseAfterSceneLoad(", StringComparison.Ordinal);
 
-    // 譲歩判定は先頭近く（attempt カウント直後）にあり、実際の pose 書込みより必ず前に評価される。
-    return yieldIndex >= 0
+    // saved-view 決定は先頭近く（attempt カウント直後）にあり、runtime state の pose 書込みより必ず前に
+    // 評価される。pose 適用（勝ち手）と pose 無し yield（後方互換）の両分岐を持つ。
+    return decisionIndex >= 0
         && applyIndex >= 0
-        && yieldIndex < applyIndex
+        && decisionIndex < applyIndex
+        && poseApplyIndex >= 0
+        && poseApplyIndex < applyIndex
         && body.Contains("_configuration.TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal)
         && body.Contains("BuildCharaSelectView()", StringComparison.Ordinal)
         && body.Contains("ResolveCurrentOverrideCandidate().Id", StringComparison.Ordinal)
-        && body.Contains("\"yielded-to-saved-view\"", StringComparison.Ordinal);
+        && body.Contains("IsSavedViewSuppressedByAutomaticRun()", StringComparison.Ordinal)
+        && body.Contains("\"yielded-to-saved-view-no-pose\"", StringComparison.Ordinal);
 });
 
-Test(452, "runtime restore yield check uses identical arguments as FixOn view override gate", () =>
+Test(452, "runtime restore saved-view decision uses identical arguments as FixOn view override gate", () =>
 {
     var root = FindRepositoryRoot();
     var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
@@ -5124,13 +5159,635 @@ Test(452, "runtime restore yield check uses identical arguments as FixOn view ov
     var restoreBody = ExtractMethodBody(serviceText, "private void RestoreCharaSelectRuntimeCameraStateAfterSceneLoad()");
     var fixOnBody = ExtractMethodBody(hooksText, "private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)");
 
-    // 両経路とも同じ3要素（view有効フラグ / BuildCharaSelectView() / ResolveCurrentOverrideCandidate().Id）を使う。
+    // 両経路とも同じ3要素（view有効フラグ / BuildCharaSelectView() / ResolveCurrentOverrideCandidate().Id）と
+    // 同じ run 抑止判定（IsSavedViewSuppressedByAutomaticRun）を使う。
     return restoreBody.Contains("_configuration.TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal)
         && restoreBody.Contains("BuildCharaSelectView()", StringComparison.Ordinal)
         && restoreBody.Contains("ResolveCurrentOverrideCandidate().Id", StringComparison.Ordinal)
+        && restoreBody.Contains("IsSavedViewSuppressedByAutomaticRun()", StringComparison.Ordinal)
         && fixOnBody.Contains("_configuration.TitleBackgroundCharaSelectViewEnabled", StringComparison.Ordinal)
         && fixOnBody.Contains("BuildCharaSelectView()", StringComparison.Ordinal)
-        && fixOnBody.Contains("ResolveCurrentOverrideCandidate().Id", StringComparison.Ordinal);
+        && fixOnBody.Contains("ResolveCurrentOverrideCandidate().Id", StringComparison.Ordinal)
+        && fixOnBody.Contains("IsSavedViewSuppressedByAutomaticRun()", StringComparison.Ordinal);
+});
+
+Test(453, "view replay trace sampling frames cover dense 1-10 then sparse checkpoints up to a fixed cap", () =>
+{
+    var frames = TitleBackgroundViewReplayTraceLogic.SamplingFrames;
+    var dense = Enumerable.Range(1, 10).ToArray();
+    var sparse = new[] { 15, 20, 30, 45, 60, 90, 120 };
+    return frames.Length == dense.Length + sparse.Length
+        && dense.All(frame => Array.IndexOf(frames, frame) >= 0)
+        && sparse.All(frame => Array.IndexOf(frames, frame) >= 0)
+        && frames.SequenceEqual(frames.OrderBy(frame => frame))
+        && TitleBackgroundViewReplayTraceLogic.IsTraceComplete(frames[^1])
+        && !TitleBackgroundViewReplayTraceLogic.IsTraceComplete(frames[^1] - 1);
+});
+
+Test(454, "view replay trace should-capture gate accepts frame 0 and only listed sampling frames", () =>
+{
+    return TitleBackgroundViewReplayTraceLogic.ShouldCaptureAtFrame(0)
+        && TitleBackgroundViewReplayTraceLogic.ShouldCaptureAtFrame(1)
+        && TitleBackgroundViewReplayTraceLogic.ShouldCaptureAtFrame(10)
+        && TitleBackgroundViewReplayTraceLogic.ShouldCaptureAtFrame(15)
+        && TitleBackgroundViewReplayTraceLogic.ShouldCaptureAtFrame(120)
+        && !TitleBackgroundViewReplayTraceLogic.ShouldCaptureAtFrame(11)
+        && !TitleBackgroundViewReplayTraceLogic.ShouldCaptureAtFrame(14)
+        && !TitleBackgroundViewReplayTraceLogic.ShouldCaptureAtFrame(121)
+        && !TitleBackgroundViewReplayTraceLogic.ShouldCaptureAtFrame(-1);
+});
+
+Test(455, "view replay trace divergence reports none when every sample matches target within tolerance", () =>
+{
+    var target = new Vector3(-389.386f, 57.06f, 509.873f);
+    var focus = new Vector3(-388.334f, 56.921f, 513.781f);
+    var samples = new[]
+    {
+        new TitleBackgroundViewReplayTraceSample(0, true, target, focus, 0.78f, "success", string.Empty),
+        new TitleBackgroundViewReplayTraceSample(1, true, target, focus, 0.78f, "success", string.Empty),
+        new TitleBackgroundViewReplayTraceSample(2, true, target + new Vector3(0.01f, 0f, 0f), focus, 0.78f, "success", string.Empty),
+    };
+
+    var result = TitleBackgroundViewReplayTraceLogic.EvaluateFirstDivergence(target, focus, 0.78f, samples);
+    return !result.Diverged
+        && result.DivergedAtFrame == null
+        && result.Component == TitleBackgroundViewReplayTraceComponent.None;
+});
+
+Test(456, "view replay trace divergence finds first frame and camera component when camera drifts beyond tolerance", () =>
+{
+    var target = new Vector3(-389.386f, 57.06f, 509.873f);
+    var focus = new Vector3(-388.334f, 56.921f, 513.781f);
+    var samples = new[]
+    {
+        new TitleBackgroundViewReplayTraceSample(0, true, target, focus, 0.78f, "success", string.Empty),
+        new TitleBackgroundViewReplayTraceSample(1, true, target, focus, 0.78f, "success", string.Empty),
+        new TitleBackgroundViewReplayTraceSample(2, true, target + new Vector3(1.5f, 0f, 0f), focus, 0.78f, "success", string.Empty),
+        new TitleBackgroundViewReplayTraceSample(3, true, target + new Vector3(3f, 0f, 0f), focus, 0.78f, "success", string.Empty),
+    };
+
+    var result = TitleBackgroundViewReplayTraceLogic.EvaluateFirstDivergence(target, focus, 0.78f, samples);
+    return result.Diverged
+        && result.DivergedAtFrame == 2
+        && result.Component == TitleBackgroundViewReplayTraceComponent.Camera
+        && result.Magnitude > 1f;
+});
+
+Test(457, "view replay trace divergence finds lookAt-only drift when camera stays fixed", () =>
+{
+    var target = new Vector3(-389.386f, 57.06f, 509.873f);
+    var focus = new Vector3(-388.334f, 56.921f, 513.781f);
+    var samples = new[]
+    {
+        new TitleBackgroundViewReplayTraceSample(0, true, target, focus, 0.78f, "success", string.Empty),
+        new TitleBackgroundViewReplayTraceSample(1, true, target, focus + new Vector3(0f, 2f, 0f), 0.78f, "success", string.Empty),
+    };
+
+    var result = TitleBackgroundViewReplayTraceLogic.EvaluateFirstDivergence(target, focus, 0.78f, samples);
+    return result.Diverged
+        && result.DivergedAtFrame == 1
+        && result.Component == TitleBackgroundViewReplayTraceComponent.LookAt;
+});
+
+Test(458, "view replay trace divergence finds fovY-only drift when camera and lookAt stay fixed", () =>
+{
+    var target = new Vector3(-389.386f, 57.06f, 509.873f);
+    var focus = new Vector3(-388.334f, 56.921f, 513.781f);
+    var samples = new[]
+    {
+        new TitleBackgroundViewReplayTraceSample(0, true, target, focus, 0.78f, "success", string.Empty),
+        new TitleBackgroundViewReplayTraceSample(1, true, target, focus, 1.2f, "success", string.Empty),
+    };
+
+    var result = TitleBackgroundViewReplayTraceLogic.EvaluateFirstDivergence(target, focus, 0.78f, samples);
+    return result.Diverged
+        && result.DivergedAtFrame == 1
+        && result.Component == TitleBackgroundViewReplayTraceComponent.FovY;
+});
+
+Test(459, "view replay trace divergence skips uncaptured samples and non-finite targets safely", () =>
+{
+    var target = new Vector3(-389.386f, 57.06f, 509.873f);
+    var focus = new Vector3(-388.334f, 56.921f, 513.781f);
+    var samples = new[]
+    {
+        new TitleBackgroundViewReplayTraceSample(0, false, null, null, null, "failed", "active camera unavailable"),
+        new TitleBackgroundViewReplayTraceSample(1, true, target, focus, 0.78f, "success", string.Empty),
+    };
+
+    // captured=false のサンプルは判定から除外され、null target では例外にならず「乖離なし」を返す。
+    var resultWithGoodSamples = TitleBackgroundViewReplayTraceLogic.EvaluateFirstDivergence(target, focus, 0.78f, samples);
+    var resultWithNullTarget = TitleBackgroundViewReplayTraceLogic.EvaluateFirstDivergence(null, null, null, samples);
+    return !resultWithGoodSamples.Diverged
+        && !resultWithNullTarget.Diverged;
+});
+
+Test(460, "view replay trace runtime state resets all fields including active samples", () =>
+{
+    var state = new TitleBackgroundViewReplayTraceRuntimeState
+    {
+        TraceSceneGeneration = 4,
+        Source = "saved-view-pose",
+        StartedDuringAutomaticRun = true,
+        TargetCamera = new Vector3(1f, 2f, 3f),
+        TargetFocus = new Vector3(4f, 5f, 6f),
+        TargetFovY = 0.78f,
+        TargetDirH = 1.2f,
+        TargetDirV = -0.3f,
+        TargetDistance = 3.3f,
+        RelativeFrameCounter = 3,
+        StartAbsoluteFrame = 42,
+        StartLookAtYCallCount = 7,
+        StartCurveSetMidCallCount = 5,
+        StartCurveLowHighCallCount = 5,
+        PoseApplyAbsoluteFrame = 42,
+        FixOnApplyAbsoluteFrame = 67,
+        Status = "collecting",
+    };
+    state.Samples[0] = new TitleBackgroundViewReplayTraceSample(0, true, Vector3.Zero, Vector3.Zero, 0.78f, "success", string.Empty);
+
+    state.Reset();
+
+    return state.TraceSceneGeneration == 0
+        && state.Source == "not-run"
+        && !state.StartedDuringAutomaticRun
+        && state.TargetCamera == null
+        && state.TargetFocus == null
+        && state.TargetFovY == null
+        && state.TargetDirH == null
+        && state.TargetDirV == null
+        && state.TargetDistance == null
+        && state.RelativeFrameCounter == -1
+        && state.StartAbsoluteFrame == null
+        && state.StartLookAtYCallCount == 0
+        && state.StartCurveSetMidCallCount == 0
+        && state.StartCurveLowHighCallCount == 0
+        && state.PoseApplyAbsoluteFrame == null
+        && state.FixOnApplyAbsoluteFrame == null
+        && state.Samples.Count == 0
+        && state.Status == "not-run"
+        && !state.IsActive;
+});
+
+Test(461, "FixOn detour starts view replay trace only when view override was applied this invocation, after post-FixOn capture", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var body = ExtractMethodBody(hooksText, "private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)");
+    var captureIndex = body.IndexOf("CapturePostFixOnCameraState();", StringComparison.Ordinal);
+    var startTraceIndex = body.IndexOf("StartViewReplayTraceIfApplicable(viewOverrideAppliedThisInvocation);", StringComparison.Ordinal);
+    var viewOverrideFlagSetIndex = body.IndexOf("viewOverrideAppliedThisInvocation = true;", StringComparison.Ordinal);
+
+    return captureIndex >= 0
+        && startTraceIndex >= 0
+        && captureIndex < startTraceIndex
+        && viewOverrideFlagSetIndex >= 0
+        && body.Contains("viewOverrideAppliedThisInvocation = false;", StringComparison.Ordinal);
+});
+
+Test(462, "view replay trace framework-update capture is gated identically to pre-login camera capture", () =>
+{
+    var root = FindRepositoryRoot();
+    var traceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.ViewReplayTrace.cs"));
+    var body = ExtractMethodBody(traceText, "private void CaptureViewReplayTraceOnFrameworkUpdate()");
+
+    // 既存 CapturePreLoginCameraOnFrameworkUpdate と同じゲート要素（pre-login, session active, generation一致）を使う。
+    return body.Contains("_clientState.IsLoggedIn", StringComparison.Ordinal)
+        && body.Contains("_charaSelectTitleBackgroundSessionActive", StringComparison.Ordinal)
+        && body.Contains("_viewReplayTrace.TraceSceneGeneration <= 0", StringComparison.Ordinal)
+        && body.Contains("_charaSelectCameraAdapter.RuntimeState.SceneGeneration != _viewReplayTrace.TraceSceneGeneration", StringComparison.Ordinal);
+});
+
+Test(463, "OnFrameworkUpdate invokes view replay trace capture alongside existing pre-login camera capture", () =>
+{
+    var root = FindRepositoryRoot();
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var body = ExtractMethodBody(hooksText, "private void OnFrameworkUpdate(IFramework _)");
+    var preLoginIndex = body.IndexOf("CapturePreLoginCameraOnFrameworkUpdate();", StringComparison.Ordinal);
+    var traceIndex = body.IndexOf("CaptureViewReplayTraceOnFrameworkUpdate();", StringComparison.Ordinal);
+    return preLoginIndex >= 0 && traceIndex >= 0 && preLoginIndex < traceIndex;
+});
+
+Test(464, "load-scoped reset delegates view trace preservation and collision handling to runtime state", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var body = ExtractMethodBody(serviceText, "private void ResetFixOnExperimentSnapshot()");
+    return body.Contains("_viewReplayTrace.PrepareForSceneLoad(_activeCharaSelectSceneGeneration);", StringComparison.Ordinal)
+        && !body.Contains("_viewReplayTrace.Reset();", StringComparison.Ordinal);
+});
+
+Test(465, "automatic diagnostic allowlist includes view replay trace summary keys and dynamic per-frame sample keys", () =>
+{
+    var selected = TitleBackgroundAutomaticCheckDiagnosticSelector.Select(
+    [
+        "view.trace.status=complete",
+        "view.trace.sceneGeneration=4",
+        "view.trace.fromCurrentRun=False",
+        "view.trace.source=saved-view-pose",
+        "view.trace.poseApplyAbsoluteFrame=12",
+        "view.trace.diverged=True",
+        "view.trace.divergedAtFrame=2",
+        "view.trace.divergedComponent=LookAt",
+        "view.trace.divergedMagnitude=1.2",
+        "view.trace.sample[0].status=success",
+        "view.trace.sample[0].camera=(1.000, 2.000, 3.000)",
+        "view.trace.sample[0].dirH=2.793",
+        "view.trace.sample[0].dirV=0.053",
+        "view.trace.sample[0].distance=5.5",
+        "view.trace.sample[120].fovY=0.78",
+        "view.trace.sample[999].status=success",
+        "unrelated.key=value",
+    ]);
+
+    return selected.Count == 15
+        && selected.Contains("view.trace.status=complete")
+        && selected.Contains("view.trace.fromCurrentRun=False")
+        && selected.Contains("view.trace.source=saved-view-pose")
+        && selected.Contains("view.trace.poseApplyAbsoluteFrame=12")
+        && selected.Contains("view.trace.diverged=True")
+        && selected.Contains("view.trace.sample[0].status=success")
+        && selected.Contains("view.trace.sample[0].camera=(1.000, 2.000, 3.000)")
+        && selected.Contains("view.trace.sample[0].dirH=2.793")
+        && selected.Contains("view.trace.sample[0].dirV=0.053")
+        && selected.Contains("view.trace.sample[0].distance=5.5")
+        && selected.Contains("view.trace.sample[120].fovY=0.78")
+        && !selected.Contains("view.trace.sample[999].status=success")
+        && !selected.Contains("unrelated.key=value");
+});
+
+Test(466, "automatic diagnostic allowlist includes trace start baseline keys and per-sample absolute-frame and hook-counter keys", () =>
+{
+    var selected = TitleBackgroundAutomaticCheckDiagnosticSelector.Select(
+    [
+        "view.trace.startAbsoluteFrame=12",
+        "view.trace.startLookAtYCallCount=3",
+        "view.trace.startCurveSetMidCallCount=2",
+        "view.trace.startCurveLowHighCallCount=2",
+        "view.trace.sample[0].absoluteFrame=12",
+        "view.trace.sample[0].lookAtYCalls=3",
+        "view.trace.sample[0].curveSetMidCalls=2",
+        "view.trace.sample[0].curveLowHighCalls=2",
+        "view.trace.sample[120].absoluteFrame=132",
+        "view.trace.sample[120].lookAtYCalls=45",
+        "view.trace.sample[999].absoluteFrame=1000",
+        "view.trace.sample[999].lookAtYCalls=99",
+    ]);
+
+    return selected.Count == 10
+        && selected.Contains("view.trace.startAbsoluteFrame=12")
+        && selected.Contains("view.trace.startLookAtYCallCount=3")
+        && selected.Contains("view.trace.startCurveSetMidCallCount=2")
+        && selected.Contains("view.trace.startCurveLowHighCallCount=2")
+        && selected.Contains("view.trace.sample[0].absoluteFrame=12")
+        && selected.Contains("view.trace.sample[0].lookAtYCalls=3")
+        && selected.Contains("view.trace.sample[0].curveSetMidCalls=2")
+        && selected.Contains("view.trace.sample[0].curveLowHighCalls=2")
+        && selected.Contains("view.trace.sample[120].absoluteFrame=132")
+        && selected.Contains("view.trace.sample[120].lookAtYCalls=45")
+        && !selected.Contains("view.trace.sample[999].absoluteFrame=1000")
+        && !selected.Contains("view.trace.sample[999].lookAtYCalls=99");
+});
+
+Test(467, "view replay trace records absolute frame and hook-counter baselines at start and stamps every sample with counters", () =>
+{
+    var root = FindRepositoryRoot();
+    var traceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.ViewReplayTrace.cs"));
+    var startBody = ExtractMethodBody(traceText, "private void InitializeViewReplayTrace(");
+    var sampleBody = ExtractMethodBody(traceText, "private TitleBackgroundViewReplayTraceSample CaptureViewReplayTraceSample(int relativeFrame)");
+
+    // trace開始時: 絶対フレーム（Phase2C基準）とフックカウンタのベースラインを記録する。
+    // 各サンプル採取時: 採取時点の絶対フレームと累計カウンタをサンプルへ格納する（区間差分ブラケット用）。
+    return startBody.Contains("_viewReplayTrace.StartAbsoluteFrame = GetCurrentPhase2CFrame();", StringComparison.Ordinal)
+        && startBody.Contains("_viewReplayTrace.StartLookAtYCallCount = _phaseRecording.Phase2ECalculateLookAtYCallCount;", StringComparison.Ordinal)
+        && startBody.Contains("_viewReplayTrace.StartCurveSetMidCallCount = _phaseRecording.Phase2FSetCameraCurveMidPointCallCount;", StringComparison.Ordinal)
+        && startBody.Contains("_viewReplayTrace.StartCurveLowHighCallCount = _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCallCount;", StringComparison.Ordinal)
+        && sampleBody.Contains("var absoluteFrame = GetCurrentPhase2CFrame();", StringComparison.Ordinal)
+        && sampleBody.Contains("var lookAtYCalls = _phaseRecording.Phase2ECalculateLookAtYCallCount;", StringComparison.Ordinal)
+        && sampleBody.Contains("var curveSetMidCalls = _phaseRecording.Phase2FSetCameraCurveMidPointCallCount;", StringComparison.Ordinal)
+        && sampleBody.Contains("var curveLowHighCalls = _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCallCount;", StringComparison.Ordinal);
+});
+
+Test(468, "configuration saved view pose fields default off and round-trip through both serializers", () =>
+{
+    // Dalamud SavePluginConfig は Newtonsoft.Json、ExportToBase64 は System.Text.Json を使うため、
+    // 新規 pose 4 項目が両シリアライザで round-trip することを固定する。既定は PoseCaptured=false（挙動不変）。
+    var defaultConfiguration = new Configuration();
+    var configuration = new Configuration
+    {
+        TitleBackgroundCharaSelectViewPoseCaptured = true,
+        TitleBackgroundCharaSelectViewDirH = 1.25f,
+        TitleBackgroundCharaSelectViewDirV = -0.375f,
+        TitleBackgroundCharaSelectViewDistance = 3.3f,
+    };
+
+    var systemJson = JsonSerializer.Serialize(configuration);
+    var systemRestored = JsonSerializer.Deserialize<Configuration>(systemJson);
+    var newtonsoftJson = Newtonsoft.Json.JsonConvert.SerializeObject(configuration);
+    var newtonsoftRestored = Newtonsoft.Json.JsonConvert.DeserializeObject<Configuration>(newtonsoftJson);
+
+    return !defaultConfiguration.TitleBackgroundCharaSelectViewPoseCaptured
+        && defaultConfiguration.TitleBackgroundCharaSelectViewDistance == 0f
+        && systemJson.Contains("\"TitleBackgroundCharaSelectViewPoseCaptured\"", StringComparison.Ordinal)
+        && systemJson.Contains("\"TitleBackgroundCharaSelectViewDirH\"", StringComparison.Ordinal)
+        && systemJson.Contains("\"TitleBackgroundCharaSelectViewDirV\"", StringComparison.Ordinal)
+        && systemJson.Contains("\"TitleBackgroundCharaSelectViewDistance\"", StringComparison.Ordinal)
+        && systemRestored != null
+        && systemRestored.TitleBackgroundCharaSelectViewPoseCaptured
+        && Math.Abs(systemRestored.TitleBackgroundCharaSelectViewDirH - 1.25f) < 0.0001f
+        && Math.Abs(systemRestored.TitleBackgroundCharaSelectViewDirV - (-0.375f)) < 0.0001f
+        && Math.Abs(systemRestored.TitleBackgroundCharaSelectViewDistance - 3.3f) < 0.0001f
+        && newtonsoftJson.Contains("\"TitleBackgroundCharaSelectViewPoseCaptured\"", StringComparison.Ordinal)
+        && newtonsoftRestored != null
+        && newtonsoftRestored.TitleBackgroundCharaSelectViewPoseCaptured
+        && Math.Abs(newtonsoftRestored.TitleBackgroundCharaSelectViewDirH - 1.25f) < 0.0001f
+        && Math.Abs(newtonsoftRestored.TitleBackgroundCharaSelectViewDirV - (-0.375f)) < 0.0001f
+        && Math.Abs(newtonsoftRestored.TitleBackgroundCharaSelectViewDistance - 3.3f) < 0.0001f;
+});
+
+Test(469, "configuration normalization disables saved view pose on non-finite or non-positive values without dropping the view itself", () =>
+{
+    // 正規化は ApplyFrom の末尾（NormalizeAndMigrate）で走る（Test 7 と同じ経路）。
+    Configuration NormalizeVia(Configuration source)
+    {
+        var target = new Configuration();
+        target.ApplyFrom(source);
+        return target;
+    }
+
+    // Distance=NaN は ApplyFrom コピー時に SanitizeCoordinate で 0 へ丸まり、normalize の
+    // 「Distance <= 0 → pose 無効化」で確実に落ちる。DirH/DirV の NaN は同じ Sanitize で 0（正当な
+    // 有限値）へ丸まるため pose は残るが、非有限値が LobbyCamera へ書かれない防御は
+    // HasUsablePose（Test 449 の nanPoseView）が最終ゲートとして担う（多層防御）。
+    var nanDistancePose = NormalizeVia(new Configuration
+    {
+        TitleBackgroundCharaSelectViewEnabled = true,
+        TitleBackgroundCharaSelectViewCandidateId = "custom:n4f4",
+        TitleBackgroundCharaSelectViewCameraX = 1f,
+        TitleBackgroundCharaSelectViewCameraY = 14f,
+        TitleBackgroundCharaSelectViewCameraZ = 3f,
+        TitleBackgroundCharaSelectViewFocusX = 0f,
+        TitleBackgroundCharaSelectViewFocusY = 14.5f,
+        TitleBackgroundCharaSelectViewFocusZ = 0f,
+        TitleBackgroundCharaSelectViewFovY = 0.78f,
+        TitleBackgroundCharaSelectViewPoseCaptured = true,
+        TitleBackgroundCharaSelectViewDirH = 1f,
+        TitleBackgroundCharaSelectViewDirV = 0f,
+        TitleBackgroundCharaSelectViewDistance = float.NaN,
+    });
+    var zeroDistancePose = NormalizeVia(new Configuration
+    {
+        TitleBackgroundCharaSelectViewPoseCaptured = true,
+        TitleBackgroundCharaSelectViewDirH = 1f,
+        TitleBackgroundCharaSelectViewDirV = 0f,
+        TitleBackgroundCharaSelectViewDistance = 0f,
+    });
+    var validPose = NormalizeVia(new Configuration
+    {
+        TitleBackgroundCharaSelectViewPoseCaptured = true,
+        TitleBackgroundCharaSelectViewDirH = 1.2f,
+        TitleBackgroundCharaSelectViewDirV = -0.3f,
+        TitleBackgroundCharaSelectViewDistance = 3.3f,
+    });
+
+    // pose が壊れていても view 本体（camera/focus 形式）は独立して残る（enabled は落ちない）。
+    return !nanDistancePose.TitleBackgroundCharaSelectViewPoseCaptured
+        && nanDistancePose.TitleBackgroundCharaSelectViewEnabled
+        && !zeroDistancePose.TitleBackgroundCharaSelectViewPoseCaptured
+        && validPose.TitleBackgroundCharaSelectViewPoseCaptured
+        && Math.Abs(validPose.TitleBackgroundCharaSelectViewDirH - 1.2f) < 0.0001f
+        && Math.Abs(validPose.TitleBackgroundCharaSelectViewDistance - 3.3f) < 0.0001f;
+});
+
+Test(470, "recovery snapshot round-trips saved view pose fields and old journals default to no pose", () =>
+{
+    var source = new Configuration
+    {
+        TitleBackgroundCharaSelectViewPoseCaptured = true,
+        TitleBackgroundCharaSelectViewDirH = 1.2f,
+        TitleBackgroundCharaSelectViewDirV = -0.3f,
+        TitleBackgroundCharaSelectViewDistance = 3.3f,
+    };
+    var snapshot = TitleBackgroundAutomaticCheckSettingsSnapshot.Capture(source);
+    var dest = new Configuration();
+    snapshot.ApplyTo(dest);
+
+    // 旧 journal（pose キー無し）は既定値（PoseCaptured=false）で復元される（fail-closed）。
+    var oldJournalJson = """
+        {
+          "SchemaVersion": 1,
+          "RunId": "old-run",
+          "StartedAt": "2026-07-03T12:00:00+09:00",
+          "OriginalSettings": { "ViewEnabled": true, "ViewCandidateId": "custom:n4f4" }
+        }
+        """;
+    var oldJournal = TitleBackgroundAutomaticCheckRecoveryJournal.Deserialize(oldJournalJson);
+
+    return dest.TitleBackgroundCharaSelectViewPoseCaptured
+        && Math.Abs(dest.TitleBackgroundCharaSelectViewDirH - 1.2f) < 0.0001f
+        && Math.Abs(dest.TitleBackgroundCharaSelectViewDirV - (-0.3f)) < 0.0001f
+        && Math.Abs(dest.TitleBackgroundCharaSelectViewDistance - 3.3f) < 0.0001f
+        && oldJournal != null
+        && !oldJournal.OriginalSettings.ViewPoseCaptured
+        && oldJournal.OriginalSettings.ViewEnabled;
+});
+
+Test(471, "saved view capture reads native pose from the shared camera snapshot without trigonometric conversion", () =>
+{
+    var root = FindRepositoryRoot();
+    var timelineText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.TimelineDiagnostics.cs"));
+    var body = ExtractMethodBody(timelineText, "public bool TryCaptureCharaSelectViewFromCurrentCamera(out string status)");
+
+    // pose は TryCaptureActiveCameraSnapshot（runtime restore の書込先 LobbyCamera->DirH/DirV/Distance と
+    // 同一フィールド群の read 経路）から取り、自前の三角関数変換（規約推定）は行わない。
+    return body.Contains("TryCaptureActiveCameraSnapshot(out var snapshot", StringComparison.Ordinal)
+        && body.Contains("snapshot.DirH", StringComparison.Ordinal)
+        && body.Contains("snapshot.DirV", StringComparison.Ordinal)
+        && body.Contains("snapshot.Distance", StringComparison.Ordinal)
+        && !body.Contains("Math.Atan", StringComparison.Ordinal)
+        && !body.Contains("MathF.Atan", StringComparison.Ordinal)
+        && !body.Contains("Math.Asin", StringComparison.Ordinal)
+        && !body.Contains("MathF.Asin", StringComparison.Ordinal)
+        && !body.Contains("TryBuildPoseFromCameraFocus", StringComparison.Ordinal);
+});
+
+Test(472, "saved view pose apply shares the exact lobby camera write core with runtime restore and stays one-shot", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var hooksText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.NativeHooks.cs"));
+    var runtimeApplyBody = ExtractMethodBody(serviceText, "private bool TryApplyRuntimeCameraPose(");
+    var coreBody = ExtractMethodBody(serviceText, "private bool TryApplyLobbyCameraPose(");
+    var savedViewApplyBody = ExtractMethodBody(serviceText, "private void ApplySavedViewCameraPoseAfterSceneLoad(TitleBackgroundCharaSelectView savedView)");
+    var frameworkUpdateBody = ExtractMethodBody(hooksText, "private void OnFrameworkUpdate(IFramework _)");
+
+    // 両経路が同一の書込コア（DirH/DirV/Distance/InterpDistance/FoV）を使い、
+    // 毎フレーム経路（OnFrameworkUpdate）からはどちらも呼ばれない（one-shot 契約）。
+    return runtimeApplyBody.Contains("TryApplyLobbyCameraPose(", StringComparison.Ordinal)
+        && savedViewApplyBody.Contains("TryApplyLobbyCameraPose(", StringComparison.Ordinal)
+        && coreBody.Contains("lobbyCamera->DirH = dirH;", StringComparison.Ordinal)
+        && coreBody.Contains("lobbyCamera->DirV = dirV;", StringComparison.Ordinal)
+        && coreBody.Contains("lobbyCamera->Distance = distance;", StringComparison.Ordinal)
+        && coreBody.Contains("lobbyCamera->InterpDistance = distance;", StringComparison.Ordinal)
+        && coreBody.Contains("lobbyCamera->FoV = fovY;", StringComparison.Ordinal)
+        && !frameworkUpdateBody.Contains("TryApplyLobbyCameraPose", StringComparison.Ordinal)
+        && !frameworkUpdateBody.Contains("ApplySavedViewCameraPoseAfterSceneLoad", StringComparison.Ordinal)
+        && !frameworkUpdateBody.Contains("TryApplyRuntimeCameraPose", StringComparison.Ordinal);
+});
+
+Test(473, "simple reset clears saved view pose fields together with the view itself", () =>
+{
+    var root = FindRepositoryRoot();
+    var quickCheckText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.QuickCheck.cs"));
+    var body = ExtractMethodBody(quickCheckText, "internal bool ResetSimpleTitleBackgroundSettings()");
+    return body.Contains("TitleBackgroundCharaSelectViewPoseCaptured = false", StringComparison.Ordinal)
+        && body.Contains("TitleBackgroundCharaSelectViewDirH = 0f", StringComparison.Ordinal)
+        && body.Contains("TitleBackgroundCharaSelectViewDirV = 0f", StringComparison.Ordinal)
+        && body.Contains("TitleBackgroundCharaSelectViewDistance = 0f", StringComparison.Ordinal);
+});
+
+Test(474, "automatic diagnostic allowlist includes saved view pose keys and run suppression flag", () =>
+{
+    var selected = TitleBackgroundAutomaticCheckDiagnosticSelector.Select(
+    [
+        "view.poseCaptured=True",
+        "view.poseDirH=1.2",
+        "view.poseDirV=-0.3",
+        "view.poseDistance=3.3",
+        "view.poseRestoreStatus=applied-saved-view-pose",
+        "view.poseAppliedCount=1",
+        "view.poseAppliedDirH=1.2",
+        "view.poseAppliedDirV=-0.3",
+        "view.poseAppliedDistance=3.3",
+        "view.poseAppliedFovY=0.78",
+        "view.poseLastRestoreStatus=applied-saved-view-pose",
+        "view.poseLastRestoreSceneGeneration=4",
+        "view.suppressedByRun=False",
+        "unrelated.key=value",
+    ]);
+
+    return selected.Count == 13
+        && selected.Contains("view.poseCaptured=True")
+        && selected.Contains("view.poseRestoreStatus=applied-saved-view-pose")
+        && selected.Contains("view.poseLastRestoreStatus=applied-saved-view-pose")
+        && selected.Contains("view.poseLastRestoreSceneGeneration=4")
+        && selected.Contains("view.poseAppliedCount=1")
+        && selected.Contains("view.poseAppliedFovY=0.78")
+        && selected.Contains("view.suppressedByRun=False")
+        && !selected.Contains("unrelated.key=value");
+});
+
+Test(475, "view replay trace samples retain native DirH DirV and Distance values", () =>
+{
+    var sample = new TitleBackgroundViewReplayTraceSample(
+        0,
+        true,
+        Vector3.Zero,
+        Vector3.UnitZ,
+        0.78f,
+        "success",
+        string.Empty,
+        AbsoluteFrame: 12,
+        DirH: 2.793f,
+        DirV: 0.053f,
+        Distance: 5.5f);
+
+    return Math.Abs(sample.DirH!.Value - 2.793f) < 0.0001f
+        && Math.Abs(sample.DirV!.Value - 0.053f) < 0.0001f
+        && Math.Abs(sample.Distance!.Value - 5.5f) < 0.0001f;
+});
+
+Test(476, "saved view pose apply starts read-only trace and records durable restore status", () =>
+{
+    var root = FindRepositoryRoot();
+    var serviceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.cs"));
+    var body = ExtractMethodBody(serviceText, "private void ApplySavedViewCameraPoseAfterSceneLoad(TitleBackgroundCharaSelectView savedView)");
+    var applyIndex = body.IndexOf("TryApplyLobbyCameraPose(", StringComparison.Ordinal);
+    var traceIndex = body.IndexOf("StartViewReplayTraceForSavedPose(savedView);", StringComparison.Ordinal);
+
+    return applyIndex >= 0
+        && traceIndex > applyIndex
+        && body.Contains("SavedViewPoseLastRestoreStatus = \"applied-saved-view-pose\"", StringComparison.Ordinal)
+        && body.Contains("SavedViewPoseLastRestoreSceneGeneration", StringComparison.Ordinal)
+        && body.Contains("SavedViewPoseLastRestoreStatus = \"saved-view-pose-failed\"", StringComparison.Ordinal);
+});
+
+Test(477, "view replay trace merges pose and later FixOn timing within the same scene generation", () =>
+{
+    var root = FindRepositoryRoot();
+    var traceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.ViewReplayTrace.cs"));
+    var fixOnBody = ExtractMethodBody(traceText, "private void StartViewReplayTraceIfApplicable(bool viewOverrideAppliedThisInvocation)");
+    var poseBody = ExtractMethodBody(traceText, "private void StartViewReplayTraceForSavedPose(TitleBackgroundCharaSelectView savedView)");
+
+    return fixOnBody.Contains("_viewReplayTrace.TraceSceneGeneration != _activeCharaSelectSceneGeneration", StringComparison.Ordinal)
+        && fixOnBody.Contains("_viewReplayTrace.FixOnApplyAbsoluteFrame ??= absoluteFrame;", StringComparison.Ordinal)
+        && fixOnBody.Contains("saved-view-pose+fix-on-view-override", StringComparison.Ordinal)
+        && poseBody.Contains("_viewReplayTrace.PoseApplyAbsoluteFrame = GetCurrentPhase2CFrame();", StringComparison.Ordinal)
+        && poseBody.Contains("savedView.DirH", StringComparison.Ordinal)
+        && poseBody.Contains("savedView.DirV", StringComparison.Ordinal)
+        && poseBody.Contains("savedView.Distance", StringComparison.Ordinal);
+});
+
+Test(478, "view replay trace unrelated scene generation preserves prior samples and source metadata", () =>
+{
+    var state = new TitleBackgroundViewReplayTraceRuntimeState
+    {
+        TraceSceneGeneration = 4,
+        Source = "saved-view-pose",
+        RelativeFrameCounter = 10,
+        Status = "collecting",
+        PoseApplyAbsoluteFrame = 12,
+    };
+    state.Samples[0] = new TitleBackgroundViewReplayTraceSample(0, true, Vector3.Zero, Vector3.UnitZ, 0.78f, "success", string.Empty);
+
+    state.PrepareForSceneLoad(activeSceneGeneration: 5);
+
+    return !state.IsActive
+        && state.Status == "interrupted-scene-change"
+        && state.TraceSceneGeneration == 4
+        && state.Source == "saved-view-pose"
+        && state.PoseApplyAbsoluteFrame == 12
+        && state.Samples.Count == 1;
+});
+
+Test(479, "view replay report emits pose timing native pose samples and source-run metadata", () =>
+{
+    var root = FindRepositoryRoot();
+    var traceText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.ViewReplayTrace.cs"));
+    var body = ExtractMethodBody(traceText, "private void AddViewReplayTraceLines(List<string> lines)");
+
+    return body.Contains("view.trace.fromCurrentRun=", StringComparison.Ordinal)
+        && body.Contains("view.trace.poseApplyAbsoluteFrame=", StringComparison.Ordinal)
+        && body.Contains("view.trace.fixOnApplyAbsoluteFrame=", StringComparison.Ordinal)
+        && body.Contains("view.trace.targetDirH=", StringComparison.Ordinal)
+        && body.Contains("].dirH=", StringComparison.Ordinal)
+        && body.Contains("].dirV=", StringComparison.Ordinal)
+        && body.Contains("].distance=", StringComparison.Ordinal);
+});
+
+Test(480, "view replay trace resets stale data when a reset adapter reuses the same scene generation", () =>
+{
+    var state = new TitleBackgroundViewReplayTraceRuntimeState
+    {
+        TraceSceneGeneration = 1,
+        Source = "saved-view-pose",
+        RelativeFrameCounter = -1,
+        Status = "complete",
+        PoseApplyAbsoluteFrame = 12,
+        FixOnApplyAbsoluteFrame = 67,
+    };
+    state.Samples[0] = new TitleBackgroundViewReplayTraceSample(0, true, Vector3.Zero, Vector3.UnitZ, 0.78f, "success", string.Empty);
+
+    // load開始時点では同じgenerationのtraceはまだ作成され得ない。同値なら旧epochとの番号衝突。
+    state.PrepareForSceneLoad(activeSceneGeneration: 1);
+
+    return state.TraceSceneGeneration == 0
+        && state.Source == "not-run"
+        && state.RelativeFrameCounter == -1
+        && state.Status == "not-run"
+        && state.PoseApplyAbsoluteFrame == null
+        && state.FixOnApplyAbsoluteFrame == null
+        && state.Samples.Count == 0;
 });
 
     }

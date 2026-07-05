@@ -1731,7 +1731,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 _configuration.TitleBackgroundCharaSelectViewFocusX,
                 _configuration.TitleBackgroundCharaSelectViewFocusY,
                 _configuration.TitleBackgroundCharaSelectViewFocusZ),
-            _configuration.TitleBackgroundCharaSelectViewFovY);
+            _configuration.TitleBackgroundCharaSelectViewFovY,
+            _configuration.TitleBackgroundCharaSelectViewPoseCaptured,
+            _configuration.TitleBackgroundCharaSelectViewDirH,
+            _configuration.TitleBackgroundCharaSelectViewDirV,
+            _configuration.TitleBackgroundCharaSelectViewDistance);
     }
 
     private void StoreCharaSelectView(TitleBackgroundCharaSelectView view)
@@ -1745,6 +1749,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _configuration.TitleBackgroundCharaSelectViewFocusY = view.Focus.Y;
         _configuration.TitleBackgroundCharaSelectViewFocusZ = view.Focus.Z;
         _configuration.TitleBackgroundCharaSelectViewFovY = view.FovY;
+        _configuration.TitleBackgroundCharaSelectViewPoseCaptured = view.PoseCaptured;
+        _configuration.TitleBackgroundCharaSelectViewDirH = view.DirH;
+        _configuration.TitleBackgroundCharaSelectViewDirV = view.DirV;
+        _configuration.TitleBackgroundCharaSelectViewDistance = view.Distance;
         _configuration.Save();
     }
 
@@ -1778,13 +1786,25 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
 
         var fovY = snapshot.FovY ?? _configuration.TitleBackgroundCharaSelectViewFovY;
+        // ネイティブ pose（DirH/DirV/Distance）も同じ snapshot（TryCaptureActiveCameraSnapshot＝
+        // runtime restore の書込先 LobbyCamera->DirH/DirV/Distance と同一フィールド群の read 経路）から
+        // 捕捉する。自前の三角関数変換は行わない（座標規約ズレを構造的に排除するため）。
+        // いずれかが読めない（非有限）場合は pose 無しで保存し、従来の camera/focus 形式のみで動作する。
+        var poseCaptured = snapshot.DirH.HasValue
+            && snapshot.DirV.HasValue
+            && snapshot.Distance.HasValue
+            && snapshot.Distance.Value > 0f;
         var view = new TitleBackgroundCharaSelectView(
             true,
             TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(
                 ResolveCurrentOverrideCandidate().Id),
             snapshot.SceneCameraPosition,
             snapshot.LookAtVector,
-            fovY);
+            fovY,
+            poseCaptured,
+            poseCaptured ? snapshot.DirH!.Value : 0f,
+            poseCaptured ? snapshot.DirV!.Value : 0f,
+            poseCaptured ? snapshot.Distance!.Value : 0f);
         // 候補 ID が未設定の場合は MatchesCandidateStrict が空 ID を拒否するため、
         // 保存しても FixOn で適用されない。保存前に弾いて silent failure を防ぐ。
         if (string.IsNullOrEmpty(view.CandidateId))

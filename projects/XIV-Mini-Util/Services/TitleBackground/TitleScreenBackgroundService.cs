@@ -52,6 +52,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly TitleBackgroundEnvironmentNoonRuntimeState _environmentNoon = new();
     // 背景セッション中の環境天候（晴れ）上書きのセッション限定診断状態（プラグイン再起動で消える）。
     private readonly TitleBackgroundEnvironmentClearSkyRuntimeState _environmentClearSky = new();
+    // 保存view再現バグ診断: pose/FixOn適用直後〜後続フレームのカメラ実値trace（read-only、次のview関与loadまで保持）。
+    private readonly TitleBackgroundViewReplayTraceRuntimeState _viewReplayTrace = new();
 
     private string _validatedTerritoryPath = string.Empty;
     private string _validationError = string.Empty;
@@ -705,18 +707,32 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _cameraRestoreCurve.RuntimeRestoreAttemptCount++;
         RecordTransitionEvent("runtime restore attempted", $"attempt={_cameraRestoreCurve.RuntimeRestoreAttemptCount}");
 
-        // 保存 view が使用可能かつ active candidate と一致する場合、FixOn 側の view override が
-        // 既にこの scene generation で保存構図を書き込んでいる（またはこれから書く）ので、
-        // runtime restore が yaw/pitch/distance を上書きして保存構図を消さないよう譲る。
-        // 判定条件は TitleBackgroundFixOnViewOverrideLogic.Resolve の成立条件と同一。
-        if (TitleBackgroundFixOnViewOverrideLogic.ShouldYieldCameraPoseToSavedView(
-                _configuration.TitleBackgroundCharaSelectViewEnabled,
-                BuildCharaSelectView(),
-                ResolveCurrentOverrideCandidate().Id))
+        // 保存 view が使用可能かつ active candidate と一致する場合の 3 値決定。
+        // - apply-saved-view-pose: pose 付き view は runtime state ではなく view の DirH/DirV/Distance/FovY を
+        //   1 回だけ適用する（本命修正。FixOn の camera 引数はエンジンの毎フレーム再導出に負けるため、
+        //   持続実績のある pose 形式で構図を復元する）。
+        // - yield-no-pose: pose 無しの旧保存 view は従来どおり譲る（後方互換。再保存で pose 付きへ昇格）。
+        // - proceed-runtime-restore: view 非成立、または自動確認 run 中の抑止 → 従来の runtime restore。
+        // view 成立条件は TitleBackgroundFixOnViewOverrideLogic.Resolve の成立条件と同一。
+        var savedView = BuildCharaSelectView();
+        var restoreDecision = TitleBackgroundFixOnViewOverrideLogic.ResolveRuntimeCameraRestoreDecision(
+            IsSavedViewSuppressedByAutomaticRun(),
+            _configuration.TitleBackgroundCharaSelectViewEnabled,
+            savedView,
+            ResolveCurrentOverrideCandidate().Id);
+        if (restoreDecision == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionApplySavedViewPose)
         {
-            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "yielded-to-saved-view";
+            ApplySavedViewCameraPoseAfterSceneLoad(savedView);
+            return;
+        }
+
+        if (restoreDecision == TitleBackgroundFixOnViewOverrideLogic.RestoreDecisionYieldNoPose)
+        {
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "yielded-to-saved-view-no-pose";
             _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
-            RecordTransitionEvent("runtime restore failed", "yielded-to-saved-view");
+            _cameraRestoreCurve.SavedViewPoseLastRestoreStatus = "yielded-to-saved-view-no-pose";
+            _cameraRestoreCurve.SavedViewPoseLastRestoreSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+            RecordTransitionEvent("runtime restore failed", "yielded-to-saved-view-no-pose");
             return;
         }
 
@@ -757,6 +773,57 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             restoredPitch,
             restoredDistance,
             _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreSceneGeneration);
+    }
+
+    // 保存 view の pose（DirH/DirV/Distance/FovY）を scene load 後に 1 回だけ LobbyCamera へ適用する。
+    // 書込コアは runtime restore と同一（TryApplyLobbyCameraPose）。失敗時は runtime restore へは
+    // フォールバックしない（runtime state の pose を書くと保存構図がまた消されるため、譲って終える）。
+    private void ApplySavedViewCameraPoseAfterSceneLoad(TitleBackgroundCharaSelectView savedView)
+    {
+        if (!TryApplyLobbyCameraPose(
+                savedView.DirH,
+                savedView.DirV,
+                savedView.Distance,
+                savedView.FovY,
+                out var errorMessage))
+        {
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "saved-view-pose-failed";
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreFailureReason = errorMessage;
+            _cameraRestoreCurve.SavedViewPoseLastRestoreStatus = "saved-view-pose-failed";
+            _cameraRestoreCurve.SavedViewPoseLastRestoreSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+            RecordTransitionEvent("runtime restore failed", $"saved-view-pose-failed: {errorMessage}");
+            _log.Debug("[XMU BG] Saved view camera pose apply failed. reason={Reason}", errorMessage);
+            return;
+        }
+
+        _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "applied-saved-view-pose";
+        _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreFailureReason = string.Empty;
+        _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+        _cameraRestoreCurve.SavedViewPoseAppliedCount++;
+        _cameraRestoreCurve.SavedViewPoseAppliedDirH = savedView.DirH;
+        _cameraRestoreCurve.SavedViewPoseAppliedDirV = savedView.DirV;
+        _cameraRestoreCurve.SavedViewPoseAppliedDistance = savedView.Distance;
+        _cameraRestoreCurve.SavedViewPoseAppliedFovY = savedView.FovY;
+        _cameraRestoreCurve.SavedViewPoseLastRestoreStatus = "applied-saved-view-pose";
+        _cameraRestoreCurve.SavedViewPoseLastRestoreSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+        StartViewReplayTraceForSavedPose(savedView);
+        RecordTransitionEvent("runtime restore succeeded", "applied-saved-view-pose");
+        _log.Information(
+            "[XMU BG] Saved view camera pose applied. dirH={DirH}, dirV={DirV}, distance={Distance}, fovY={FovY}, generation={Generation}",
+            savedView.DirH,
+            savedView.DirV,
+            savedView.Distance,
+            savedView.FovY,
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreSceneGeneration);
+    }
+
+    // 自動確認 run 中は保存 view（FixOn の view override / scene load 後の pose 適用の両方）を抑止する。
+    // run 中はカメラを自然 FixOn（配置キャラ追従）に任せて確認場所を写し、view による座標サンプル汚染
+    // （§12.3 の既知事象）も防ぐ。run はログアウト遷移を跨いで継続するため Requested フラグで判定し、
+    // run の完了・失敗・キャンセル・リセットで必ず false へ戻る（run 外への漏れなし）。
+    private bool IsSavedViewSuppressedByAutomaticRun()
+    {
+        return _automaticCheck.Requested;
     }
 
     private void ApplyCharaSelectCameraCurveAfterSceneLoad()
@@ -873,13 +940,31 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         float? restoredYaw,
         out string errorMessage)
     {
-        errorMessage = string.Empty;
         if (!restoredYaw.HasValue || !runtimeState.Pitch.HasValue || !runtimeState.Distance.HasValue)
         {
             errorMessage = "runtime camera pose is incomplete";
             return false;
         }
 
+        return TryApplyLobbyCameraPose(
+            restoredYaw.Value,
+            runtimeState.Pitch.Value,
+            runtimeState.Distance.Value,
+            _configuration.TitleBackgroundFovY,
+            out errorMessage);
+    }
+
+    // LobbyCamera への pose 書込コア（runtime restore と保存 view pose 復元の共通経路）。
+    // 書込フィールド・順序は従来の runtime restore と完全に同一。scene load 後に 1 回だけ呼ばれる
+    // one-shot 経路であり、Framework.Update からの毎フレーム書込には絶対に接続しないこと。
+    private bool TryApplyLobbyCameraPose(
+        float dirH,
+        float dirV,
+        float distance,
+        float fovY,
+        out string errorMessage)
+    {
+        errorMessage = string.Empty;
         try
         {
             var cameraManager = CameraManager.Instance();
@@ -896,11 +981,11 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
                 return false;
             }
 
-            lobbyCamera->DirH = restoredYaw.Value;
-            lobbyCamera->DirV = runtimeState.Pitch.Value;
-            lobbyCamera->Distance = runtimeState.Distance.Value;
-            lobbyCamera->InterpDistance = runtimeState.Distance.Value;
-            lobbyCamera->FoV = _configuration.TitleBackgroundFovY;
+            lobbyCamera->DirH = dirH;
+            lobbyCamera->DirV = dirV;
+            lobbyCamera->Distance = distance;
+            lobbyCamera->InterpDistance = distance;
+            lobbyCamera->FoV = fovY;
             return true;
         }
         catch (Exception ex)
@@ -1058,6 +1143,9 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _cameraObservation.LastPreLoginSceneCameraFovY = null;
         _cameraObservation.LastPreLoginSceneCameraGeneration = 0;
         _cameraObservation.LastPreLoginSceneCameraFrame = null;
+        // 前回の view 関与 load の trace は次の自動確認レポートまで保持する。収集中ならここで
+        // 読み取りだけ停止する。ただしadapter reset後のgeneration再採番と衝突したstale traceは破棄する。
+        _viewReplayTrace.PrepareForSceneLoad(_activeCharaSelectSceneGeneration);
     }
 
     // detour が毎回記録する総合ゲート理由（feature-off / passive-precedence / 実行コンテキスト理由 / ready）。
@@ -1826,6 +1914,30 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"view.fovY={(_configuration.TitleBackgroundCharaSelectViewEnabled ? _configuration.TitleBackgroundCharaSelectViewFovY.ToString("0.###") : "none")}");
         lines.Add($"view.overrideAppliedCount={(fixOnInstalled ? _cameraObservation.FixOnViewOverrideAppliedCount.ToString() : "unavailable")}");
         lines.Add($"view.overrideLastSource={FormatNone(_cameraObservation.LastFixOnViewOverrideSource)}");
+        // 保存 view のネイティブ pose（DirH/DirV/Distance）。poseCaptured=False は旧形式の保存 view で、
+        // pose 復元は行われない（再保存すると pose 付きへ昇格する）。
+        lines.Add($"view.poseCaptured={_configuration.TitleBackgroundCharaSelectViewPoseCaptured}");
+        lines.Add($"view.poseDirH={(_configuration.TitleBackgroundCharaSelectViewPoseCaptured ? _configuration.TitleBackgroundCharaSelectViewDirH.ToString("0.###") : "none")}");
+        lines.Add($"view.poseDirV={(_configuration.TitleBackgroundCharaSelectViewPoseCaptured ? _configuration.TitleBackgroundCharaSelectViewDirV.ToString("0.###") : "none")}");
+        lines.Add($"view.poseDistance={(_configuration.TitleBackgroundCharaSelectViewPoseCaptured ? _configuration.TitleBackgroundCharaSelectViewDistance.ToString("0.###") : "none")}");
+        // scene load 後の pose 適用結果（applied-saved-view-pose / yielded-to-saved-view-no-pose /
+        // saved-view-pose-failed / それ以外は runtime restore の status）。
+        lines.Add($"view.poseRestoreStatus={FormatNone(_cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus)}");
+        lines.Add($"view.poseAppliedCount={_cameraRestoreCurve.SavedViewPoseAppliedCount}");
+        lines.Add($"view.poseAppliedDirH={(_cameraRestoreCurve.SavedViewPoseAppliedDirH.HasValue ? _cameraRestoreCurve.SavedViewPoseAppliedDirH.Value.ToString("0.###") : "none")}");
+        lines.Add($"view.poseAppliedDirV={(_cameraRestoreCurve.SavedViewPoseAppliedDirV.HasValue ? _cameraRestoreCurve.SavedViewPoseAppliedDirV.Value.ToString("0.###") : "none")}");
+        lines.Add($"view.poseAppliedDistance={(_cameraRestoreCurve.SavedViewPoseAppliedDistance.HasValue ? _cameraRestoreCurve.SavedViewPoseAppliedDistance.Value.ToString("0.###") : "none")}");
+        lines.Add($"view.poseAppliedFovY={(_cameraRestoreCurve.SavedViewPoseAppliedFovY.HasValue ? _cameraRestoreCurve.SavedViewPoseAppliedFovY.Value.ToString("0.###") : "none")}");
+        lines.Add($"view.poseLastRestoreStatus={FormatNone(_cameraRestoreCurve.SavedViewPoseLastRestoreStatus)}");
+        lines.Add($"view.poseLastRestoreSceneGeneration={_cameraRestoreCurve.SavedViewPoseLastRestoreSceneGeneration}");
+        // 自動確認 run 中は保存 view（FixOn override / pose 適用）を抑止する。レポートは run 中に生成される
+        // ため、この行が True なら「view が発火しなかったのは run 抑止のため」と読める。
+        lines.Add($"view.suppressedByRun={IsSavedViewSuppressedByAutomaticRun() && _configuration.TitleBackgroundCharaSelectViewEnabled}");
+
+        // 保存view再現バグ診断（read-only）: FixOn view override適用直後〜後続フレームのSceneCamera実値trace。
+        // 「FixOn引数と最終表示がそもそも一致するか」「一致するとして後から何が上書きするか」を1回の
+        // 自動確認runだけで切り分けるための診断行（view.trace.*）。
+        AddViewReplayTraceLines(lines);
 
         // R0/R1/R2 比較実験ブロック（read-only）。1キャプチャで原因弁別に必要な値を出す。
         // method は Phase1 では focus-only 固定（parallel は Phase2 で実装してから R3 で測る）。

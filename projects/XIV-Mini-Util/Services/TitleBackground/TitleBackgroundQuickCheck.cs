@@ -242,6 +242,55 @@ internal static class TitleBackgroundAutomaticCheckDiagnosticSelector
         "view.fovY",
         "view.overrideAppliedCount",
         "view.overrideLastSource",
+        // 保存 view のネイティブ pose とその復元結果、run 中の view 抑止フラグ。
+        "view.poseCaptured",
+        "view.poseDirH",
+        "view.poseDirV",
+        "view.poseDistance",
+        "view.poseRestoreStatus",
+        "view.poseAppliedCount",
+        "view.poseAppliedDirH",
+        "view.poseAppliedDirV",
+        "view.poseAppliedDistance",
+        "view.poseAppliedFovY",
+        "view.poseLastRestoreStatus",
+        "view.poseLastRestoreSceneGeneration",
+        "view.suppressedByRun",
+        // 保存view再現バグ診断（view.trace.*）: pose/FixOn適用直後〜後続フレームのカメラ実値trace。
+        // サマリー行は常に allowlist。サンプル明細行（view.trace.sample[N].*）は動的キーのため
+        // BuildViewReplayTraceSampleKeys() で TitleBackgroundViewReplayTraceLogic のフレームリストから機械的に生成する。
+        "view.trace.status",
+        "view.trace.sceneGeneration",
+        "view.trace.fromCurrentRun",
+        "view.trace.source",
+        "view.trace.poseApplyAbsoluteFrame",
+        "view.trace.fixOnApplyAbsoluteFrame",
+        "view.trace.startAbsoluteFrame",
+        "view.trace.startLookAtYCallCount",
+        "view.trace.startCurveSetMidCallCount",
+        "view.trace.startCurveLowHighCallCount",
+        "view.trace.targetCamera",
+        "view.trace.targetFocus",
+        "view.trace.targetFovY",
+        "view.trace.targetDirH",
+        "view.trace.targetDirV",
+        "view.trace.targetDistance",
+        "view.trace.sampleCount",
+        "view.trace.firstFrame",
+        "view.trace.lastFrame",
+        "view.trace.diverged",
+        "view.trace.divergedAtFrame",
+        "view.trace.divergedComponent",
+        "view.trace.divergedMagnitude",
+        "view.trace.lookAtYCallCount",
+        "view.trace.lookAtYLastFrame",
+        "view.trace.lookAtYLastReturnValue",
+        "view.trace.curveSetMidCallCount",
+        "view.trace.curveLowHighCallCount",
+        "view.trace.curveGenerationOverrideSetMidAppliedCount",
+        "view.trace.curveGenerationOverrideLowHighAppliedCount",
+        "view.trace.curveGenerationOverrideLastAppliedFrame",
+        "view.trace.runtimeRestoreStatus",
         "environment.dayTimeHours",
         "environment.weather",
         "environment.rainy",
@@ -269,6 +318,37 @@ internal static class TitleBackgroundAutomaticCheckDiagnosticSelector
         "fixOn.exp.captureContext",
         "fixOn.exp.charaSelectSession",
     };
+
+    // view.trace.sample[N].* は相対フレーム番号ごとの動的キー。TitleBackgroundViewReplayTraceLogic の
+    // 固定フレームリスト（frame 0 + SamplingFrames）から機械的に生成し、allowlist へ静的に追加する。
+    // フレームリストが変わってもここを手で書き直す必要がないようにするため。
+    static TitleBackgroundAutomaticCheckDiagnosticSelector()
+    {
+        foreach (var frame in BuildViewReplayTraceSampleFrames())
+        {
+            IncludedKeys.Add($"view.trace.sample[{frame}].status");
+            IncludedKeys.Add($"view.trace.sample[{frame}].camera");
+            IncludedKeys.Add($"view.trace.sample[{frame}].lookAt");
+            IncludedKeys.Add($"view.trace.sample[{frame}].fovY");
+            IncludedKeys.Add($"view.trace.sample[{frame}].dirH");
+            IncludedKeys.Add($"view.trace.sample[{frame}].dirV");
+            IncludedKeys.Add($"view.trace.sample[{frame}].distance");
+            // 絶対フレーム（Phase2C基準）と採取時点の累計フックカウンタ（区間差分でフック稼働を読むための併記値）。
+            IncludedKeys.Add($"view.trace.sample[{frame}].absoluteFrame");
+            IncludedKeys.Add($"view.trace.sample[{frame}].lookAtYCalls");
+            IncludedKeys.Add($"view.trace.sample[{frame}].curveSetMidCalls");
+            IncludedKeys.Add($"view.trace.sample[{frame}].curveLowHighCalls");
+        }
+    }
+
+    private static IEnumerable<int> BuildViewReplayTraceSampleFrames()
+    {
+        yield return 0;
+        foreach (var frame in TitleBackgroundViewReplayTraceLogic.SamplingFrames)
+        {
+            yield return frame;
+        }
+    }
 
     public static IReadOnlyList<string> Select(IReadOnlyList<string> lines)
     {

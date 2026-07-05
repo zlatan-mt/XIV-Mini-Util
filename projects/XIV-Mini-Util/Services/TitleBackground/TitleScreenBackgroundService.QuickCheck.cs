@@ -154,11 +154,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void PrepareAutomaticQuickCheckDiagnostics()
     {
-        // 既に override 系（焦点 anchor / view）が ON なら、その実挙動を確認したいので passive は立てない。
+        // 焦点 anchor override が ON なら、その実挙動を確認したいので passive は立てない。
         // passive は最優先 passthrough のため、立てると override が一度も走らず確認にならない。
+        // 保存 view は方針転換（2026-07-04）により run 中は常に抑止される（FixOn detour / runtime restore の
+        // 両経路が _automaticCheck.Requested で抑止）ため、view ON はもはや passive を立てない理由にならない。
+        // run 中はカメラを自然 FixOn に任せて確認場所を写し、view による座標サンプル汚染も防ぐ。
         if (_configuration.TitleBackgroundFixOnPassiveObservationEnabled
-            || _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled
-            || _configuration.TitleBackgroundCharaSelectViewEnabled)
+            || _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled)
         {
             return;
         }
@@ -424,6 +426,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _configuration.TitleBackgroundCharaSelectViewFocusY = 0f;
         _configuration.TitleBackgroundCharaSelectViewFocusZ = 0f;
         _configuration.TitleBackgroundCharaSelectViewFovY = TitleBackgroundPreset.DefaultFovY;
+        _configuration.TitleBackgroundCharaSelectViewPoseCaptured = false;
+        _configuration.TitleBackgroundCharaSelectViewDirH = 0f;
+        _configuration.TitleBackgroundCharaSelectViewDirV = 0f;
+        _configuration.TitleBackgroundCharaSelectViewDistance = 0f;
         _configuration.Save();
 
         _automaticCheck.State = TitleBackgroundAutomaticCheckState.Idle;
