@@ -1,0 +1,1259 @@
+// Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleScreenBackgroundService.NativeHooks.cs
+// Description: TitleBackground の native hook 初期化、detour、Phase2G curve 適用を提供する
+// Reason: native hook 経路を TitleScreenBackgroundService の本体状態管理から分離するため
+using Dalamud.Game.ClientState.Objects.Enums;
+using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.LayoutEngine;
+using System.Numerics;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace XivMiniUtil.Services.TitleBackground;
+
+public sealed unsafe partial class TitleScreenBackgroundService
+{
+    private void InitializeHooks(bool useKnownSignaturesForMissing = false)
+    {
+        try
+        {
+            if (!_addressResolver.Resolve(
+                    _sigScanner,
+                    _configuration,
+                    useKnownSignaturesForMissing))
+            {
+                _hookLifecycle.State = TitleBackgroundServiceState.AddressResolveFailed;
+                _hookLifecycle.StateReason = _addressResolver.LastError;
+                return;
+            }
+
+            if (!ShouldCreateSceneHooks())
+            {
+                _hookLifecycle.State = TitleBackgroundServiceState.Disabled;
+                _hookLifecycle.StateReason = _configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.ResolveOnly
+                    ? "resolver-only"
+                    : "無効";
+                return;
+            }
+
+            _hookLifecycle.CreateSceneHook = _gameInteropProvider.HookFromAddress<CreateSceneDelegate>(_addressResolver.CreateScene, CreateSceneDetour);
+            _hookLifecycle.LobbyUpdateHook = _gameInteropProvider.HookFromAddress<LobbyUpdateDelegate>(_addressResolver.LobbyUpdate, LobbyUpdateDetour);
+            _hookLifecycle.LoadLobbySceneHook = _gameInteropProvider.HookFromAddress<LoadLobbySceneDelegate>(_addressResolver.LoadLobbyScene, LoadLobbySceneDetour);
+            if (_addressResolver.UpdateLobbyUIStage != nint.Zero)
+            {
+                _hookLifecycle.LobbySceneLoadedHook = _gameInteropProvider.HookFromAddress<LobbySceneLoadedDelegate>(_addressResolver.UpdateLobbyUIStage, LobbySceneLoadedDetour);
+            }
+
+            if (_addressResolver.CalculateLobbyCameraLookAtY != nint.Zero)
+            {
+                _hookLifecycle.CalculateLobbyCameraLookAtYHook = _gameInteropProvider.HookFromAddress<CalculateLobbyCameraLookAtYDelegate>(
+                    _addressResolver.CalculateLobbyCameraLookAtY,
+                    CalculateLobbyCameraLookAtYDetour);
+            }
+
+            if (_addressResolver.SetCameraCurveMidPoint != nint.Zero)
+            {
+                _hookLifecycle.SetCameraCurveMidPointHook = _gameInteropProvider.HookFromAddress<SetCameraCurveMidPointDelegate>(
+                    _addressResolver.SetCameraCurveMidPoint,
+                    SetCameraCurveMidPointDetour);
+            }
+
+            if (_addressResolver.CalculateCameraCurveLowAndHighPoint != nint.Zero)
+            {
+                _hookLifecycle.CalculateCameraCurveLowAndHighPointHook = _gameInteropProvider.HookFromAddress<CalculateCameraCurveLowAndHighPointDelegate>(
+                    _addressResolver.CalculateCameraCurveLowAndHighPoint,
+                    CalculateCameraCurveLowAndHighPointDetour);
+            }
+
+            // FixOn は既定では装着しない（dead code 整理済み）。passive 観測フラグ、または
+            // focus-anchor override フラグが ON の時だけ装着する。passive は診断専用（上書き無し）、
+            // focus override は候補一致時のみ焦点だけを陸上アンカーへ差し替える。
+            if (ShouldInstallFixOnHook())
+            {
+                _hookLifecycle.CameraFixOnHook = _gameInteropProvider.HookFromAddress<LobbyCameraFixOnDelegate>(
+                    _addressResolver.FixOn,
+                    LobbyCameraFixOnDetour);
+            }
+
+            _hookLifecycle.CreateSceneHook.Enable();
+            _hookLifecycle.LobbyUpdateHook.Enable();
+            _hookLifecycle.LoadLobbySceneHook.Enable();
+            _hookLifecycle.LobbySceneLoadedHook?.Enable();
+            _hookLifecycle.CalculateLobbyCameraLookAtYHook?.Enable();
+            _hookLifecycle.SetCameraCurveMidPointHook?.Enable();
+            _hookLifecycle.CalculateCameraCurveLowAndHighPointHook?.Enable();
+            _hookLifecycle.CameraFixOnHook?.Enable();
+            RecordTransitionEvent("hooks enabled", "InitializeHooks");
+
+            _hookLifecycle.State = TitleBackgroundServiceState.Disabled;
+            _hookLifecycle.StateReason = "無効";
+        }
+        catch (Exception ex)
+        {
+            _hookLifecycle.State = _hookLifecycle.CreateSceneHook == null ? TitleBackgroundServiceState.HookCreateFailed : TitleBackgroundServiceState.HookEnableFailed;
+            _hookLifecycle.StateReason = ex.Message;
+            _log.Warning(ex, "TitleBackground: native integration failed.");
+            DisposeHooks();
+        }
+    }
+
+    private void LoadLobbySceneDetour(GameLobbyType mapId)
+    {
+        RecordTransitionEvent("LoadLobbySceneDetour entered", mapId.ToString());
+        RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.LoadLobbyScene);
+        if (TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(mapId))
+        {
+            ResetPhase2ECalculateLookAtYObservation();
+        }
+
+        _loadingLobbyType = mapId;
+        RecordCharaSelectRuntimeCameraStateBeforeSceneReload(mapId);
+        _charaSelectCameraAdapter.NotifySceneLoadStarted(mapId);
+        if (TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(mapId))
+        {
+            _charaSelectTitleBackgroundSessionActive = true;
+            _activeCharaSelectSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+            _sceneOverrideCleanupReason = "none";
+            _loggedInWorldTransitionRecorded = false;
+            // R 実験の値は必ずロード単位にする。FixOn は本ロード中（下の Original 内）で再発火し再populate される。
+            ResetFixOnExperimentSnapshot();
+            // V2 production path: この scene generation 向けに bounded framing ウィンドウを arm する。
+            // 新 generation ごとに 1 回だけ arm され、retry+settle 予算を使い切ると恒久停止する。
+            if (IsV2Active)
+            {
+                _v2.ArmForSceneGeneration(_activeCharaSelectSceneGeneration);
+                _v2.NotifySceneReadyObserved();
+            }
+        }
+
+        RecordTransitionEvent("scene generation incremented", $"generation={_charaSelectCameraAdapter.RuntimeState.SceneGeneration}");
+        RecordProbeLoadLobbyScene(mapId);
+        _log.Debug("[XMU BG] LoadLobbyScene mapId={MapId}", mapId);
+        _hookLifecycle.LoadLobbySceneHook?.Original(mapId);
+        RecordTransitionEvent("LoadLobbySceneDetour original called", mapId.ToString());
+    }
+
+    private void LobbySceneLoadedDetour(nint thisPtr)
+    {
+        _hookLifecycle.LobbySceneLoadedHook?.Original(thisPtr);
+
+        try
+        {
+            var stateBeforeHandle = _charaSelectCameraAdapter.State;
+            var map = ResolveSceneReadySignalLobbyMap();
+            _cameraRestoreCurve.SceneReadySignalCallCount++;
+            _cameraRestoreCurve.SceneReadySignalLastAdapterStateBeforeHandle = stateBeforeHandle.ToString();
+            _cameraRestoreCurve.SceneReadySignalLastResolvedLobbyMap = map;
+            var sceneReadySnapshot = BuildTransitionSnapshot("sceneReady");
+            _transitionDiagnostics.RecordSceneReadyRaw(sceneReadySnapshot, $"map={map}; stateBefore={stateBeforeHandle}");
+
+            // Phase 2-A uses AgentLobby.UpdateLobbyUIStage as a provisional scene-ready signal.
+            // This is not a confirmed native LobbySceneLoaded-equivalent hook.
+            if (ShouldHandleCharaSelectSceneReadySignal(stateBeforeHandle, map))
+            {
+                _cameraRestoreCurve.SceneReadySignalAcceptedCount++;
+                if (_quickCheckState.RunState == TitleBackgroundQuickCheckRunState.Armed)
+                {
+                    _quickCheckState = _quickCheckState with { RunState = TitleBackgroundQuickCheckRunState.CharaSelectObserved };
+                }
+
+                _transitionDiagnostics.RecordSceneReadyAccepted(
+                    sceneReadySnapshot,
+                    $"map={map}; stateBefore={stateBeforeHandle}",
+                    _charaSelectCameraAdapter.RuntimeState.SceneGeneration,
+                    _clientState.IsLoggedIn);
+                StartPhase2CTimelineObservation();
+                CaptureCharacterPlacementPlacementFrame(0, "scene-ready-accepted");
+                _charaSelectCameraAdapter.NotifySceneLoaded(map);
+                RecordTransitionEvent("sceneLoadedNotification success", map.ToString());
+                RestoreCharaSelectRuntimeCameraStateAfterSceneLoad();
+                ApplyCharaSelectCameraCurveAfterSceneLoad();
+                CapturePhase2CTimelineFrame(0);
+            }
+            else
+            {
+                _transitionDiagnostics.RecordSceneReadyRejected(
+                    sceneReadySnapshot,
+                    $"map={map}; stateBefore={stateBeforeHandle}");
+            }
+
+            // 新 CharaSelect エンジン（V2 framing / TitleEdit-informed placement / OneClick placement proof）は
+            // legacy adapter を arm しないため上の accepted 経路（RunState 遷移含む）を通らない。
+            // 実機確認 run の状態機械を進めるため、CharaSelect セッション中の scene-ready で
+            // Armed → CharaSelectObserved を進める（診断のみ。camera/placement には触れない）。
+            // その後 login 遷移で EndCharaSelectTitleBackgroundSession が CharaSelectObserved → LoggedInObserved
+            // を進めるため、legacy と同じ完了判定経路に合流する。
+            // 本 detour は UpdateLobbyUIStage 由来で高頻度に発火するが、RunState 遷移は Armed のときだけ。
+            if (IsNewCharaSelectEngineActive)
+            {
+                if (TitleBackgroundV2Logic.IsCharaSelectMap(map)
+                    && !_clientState.IsLoggedIn
+                    && _quickCheckState.RunState == TitleBackgroundQuickCheckRunState.Armed)
+                {
+                    _quickCheckState = _quickCheckState with { RunState = TitleBackgroundQuickCheckRunState.CharaSelectObserved };
+                    RecordTransitionEvent(
+                        "quickcheck charaSelect observed",
+                        TitleBackgroundCharaSelectEngineOwnerLogic.Describe(CharaSelectEngineOwner));
+                }
+            }
+
+            // framing 書込は V2 の bounded ウィンドウ内だけ（placement proof は camera を書かない）。
+            if (IsV2Active)
+            {
+                TryApplyV2Framing(GetCurrentPhase2CFrame() ?? 0);
+            }
+        }
+        catch (Exception ex)
+        {
+            MarkRuntimeError(ex, nameof(LobbySceneLoadedDetour));
+            RecordTransitionEvent("sceneLoadedNotification failure", nameof(LobbySceneLoadedDetour), ex.Message);
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreStatus = "runtime-error";
+            _cameraRestoreCurve.LastCharaSelectCameraRuntimeRestoreFailureReason = ex.Message;
+            _cameraRestoreCurve.CurveApplyLastStatus = "runtime-error";
+            _cameraRestoreCurve.CurveApplyLastFailureReason = ex.Message;
+        }
+    }
+
+    private int CreateSceneDetour(byte* territoryPath, uint territoryId, nint p3, uint layerFilterKey, nint festivals, int p6, uint contentFinderConditionId)
+    {
+        byte[]? overrideBytes = null;
+        var placementSceneGenerationPending = false;
+        try
+        {
+            var lobbyType = EffectiveLobbyType;
+            var originalPath = territoryPath == null ? string.Empty : Marshal.PtrToStringUTF8((nint)territoryPath) ?? string.Empty;
+            RecordTransitionEvent("CreateSceneDetour entered", $"lobbyType={lobbyType}; path={originalPath}");
+            RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.CreateScene);
+            _lastObservedCreateScenePath = originalPath;
+            RecordProbeCreateScene(lobbyType, originalPath, territoryId, layerFilterKey);
+            _log.Debug("[XMU BG] CreateScene lobbyType={LobbyType}, path={Path}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", lobbyType, originalPath, territoryId, layerFilterKey);
+
+            if (IsHookProbeMode())
+            {
+                RecordTransitionEvent("CreateSceneDetour original path observed", "hook-probe");
+                return _hookLifecycle.CreateSceneHook?.Original(territoryPath, territoryId, p3, layerFilterKey, festivals, p6, contentFinderConditionId) ?? 0;
+            }
+
+            if (ShouldOverrideCharaSelect(lobbyType))
+            {
+                LayoutWorld.UnloadPrefetchLayout();
+                var presetTerritoryId = GetEffectiveOverrideTerritoryId();
+                if (presetTerritoryId != 0)
+                {
+                    territoryId = presetTerritoryId;
+                }
+
+                // 非 0 の設定値は従来どおり override。明示 layer 指定候補（LayerFilterKeyExplicit）は
+                // 値が 0 でも「明示的に 0」として書き込み、「override しない」と区別する
+                // （TitleEdit の FRU preset も LayerFilterKey=0 を明示指定する）。
+                if (_configuration.TitleBackgroundLayoutLayerFilterKey != 0
+                    || ResolveCurrentOverrideCandidate().LayerFilterKeyExplicit)
+                {
+                    layerFilterKey = _configuration.TitleBackgroundLayoutLayerFilterKey;
+                }
+
+                overrideBytes = Encoding.UTF8.GetBytes(_validatedTerritoryPath + '\0');
+                _cameraApplyPending = false;
+                _charaSelectCameraAdapter.NotifySceneOverrideApplied(lobbyType);
+                _lastOverrideApplied = true;
+                _lastOverrideLobbyType = lobbyType;
+                _lastOverrideOriginalPath = originalPath;
+                _lastOverrideNewPath = _validatedTerritoryPath;
+                _lastOverrideTerritoryId = territoryId;
+                _lastOverrideLayerFilterKey = layerFilterKey;
+                _quickCheckOverrideAppliedCount++;
+                _charaSelectTitleBackgroundSessionActive = true;
+                _activeCharaSelectSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+                // TitleEdit-informed placement path 用の独立 scene-generation を進める。legacy camera adapter は
+                // 新エンジン owner のとき arm されず RuntimeState.SceneGeneration が 0 のままになるため、
+                // placement gate は実際の CharaSelect scene 差し替え回数を数えるこのカウンタで判定する
+                // （legacy adapter を再 arm しない。旧 _oldSharlayanPlacementSceneGeneration と同じ方式）。
+                placementSceneGenerationPending = true;
+                _activeSceneOverride = true;
+                _activeSceneOverrideLobbyType = lobbyType;
+                _activeSceneOverridePath = _validatedTerritoryPath;
+                _lastHistoricalOverridePath = _validatedTerritoryPath;
+                _sceneOverrideCleanupReason = "none";
+                _loggedInWorldTransitionRecorded = false;
+                RecordTransitionEvent("CreateSceneDetour override applied", $"lobbyType={lobbyType}");
+                _log.Information("[XMU BG] Override CharaSelect scene lobbyType={LobbyType}, originalPath={OriginalPath}, newPath={NewPath}, territoryId={TerritoryId}, layerFilterKey={LayerFilterKey}", lobbyType, originalPath, _validatedTerritoryPath, territoryId, layerFilterKey);
+            }
+            else
+            {
+                RecordTransitionEvent("CreateSceneDetour override skipped", $"lobbyType={lobbyType}");
+            }
+        }
+        catch (Exception ex)
+        {
+            MarkRuntimeError(ex, nameof(CreateSceneDetour));
+            overrideBytes = null;
+        }
+        finally
+        {
+            _loadingLobbyType = GameLobbyType.None;
+        }
+
+        var result = 0;
+        if (overrideBytes is { Length: > 0 })
+        {
+            fixed (byte* overridePath = overrideBytes)
+            {
+                result = _hookLifecycle.CreateSceneHook?.Original(
+                    overridePath,
+                    territoryId,
+                    p3,
+                    layerFilterKey,
+                    festivals,
+                    p6,
+                    contentFinderConditionId) ?? 0;
+            }
+        }
+        else
+        {
+            result = _hookLifecycle.CreateSceneHook?.Original(
+                territoryPath,
+                territoryId,
+                p3,
+                layerFilterKey,
+                festivals,
+                p6,
+                contentFinderConditionId) ?? 0;
+        }
+
+        // Count the independent generation only after the native CreateScene original returned.
+        // This keeps a thrown/aborted original call from creating a false active generation while
+        // preserving the existing hook and avoiding another native callback.
+        if (placementSceneGenerationPending)
+        {
+            _charaSelectPlacement.IncrementSceneGeneration();
+            RecordTransitionEvent(
+                "placement scene generation incremented",
+                $"generation={_charaSelectPlacement.SceneGeneration}");
+        }
+
+        return result;
+    }
+
+    private byte LobbyUpdateDetour(GameLobbyType mapId, int time)
+    {
+        RecordTransitionEvent("LobbyUpdateDetour entered", $"map={mapId}; time={time}");
+        var frame = RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.LobbyUpdate);
+        try
+        {
+            RecordProbeLobbyUpdate(mapId, time);
+            _charaSelectCameraAdapter.NotifyLobbyUpdate(mapId);
+            RecordTransitionEvent("adapter state transition", $"event=LobbyUpdate; map={mapId}; state={_charaSelectCameraAdapter.State}");
+            if (!TitleBackgroundCharaSelectCameraLogic.IsCharaSelectMap(mapId))
+            {
+                RecordTransitionEvent("leaving title/character-select context if detectable", mapId.ToString());
+                EndCharaSelectTitleBackgroundSessionIfNeeded(mapId, "lobby-update");
+            }
+
+            if (!IsHookProbeMode() && ShouldResetCurrentMapForReload(mapId))
+            {
+                _currentMapWriteAttempted = true;
+                _lastCurrentMapWriteSucceeded = TryWriteCurrentLobbyMap(GameLobbyType.None);
+                _lastCurrentLobbyMapResetReason = $"reload-transition-to-{mapId}";
+                RecordTransitionEvent("CurrentLobbyMap reset", _lastCurrentLobbyMapResetReason);
+                _log.Debug("[XMU BG] CurrentLobbyMap reset requested. next={NextMap}, success={Success}", mapId, _lastCurrentMapWriteSucceeded);
+            }
+            else
+            {
+                RecordTransitionEvent("CurrentLobbyMap set", mapId.ToString());
+            }
+        }
+        catch (Exception ex)
+        {
+            MarkRuntimeError(ex, nameof(LobbyUpdateDetour));
+        }
+        finally
+        {
+            _lastLobbyUpdateMapId = mapId;
+        }
+
+        CaptureCameraProbeLobbyUpdateState(frame, beforeOriginal: true);
+        var result = _hookLifecycle.LobbyUpdateHook?.Original(mapId, time) ?? 0;
+        CaptureCameraProbeLobbyUpdateState(frame, beforeOriginal: false);
+        return result;
+    }
+
+    private nint LobbyCameraFixOnDetour(nint self, float* cameraPos, float* focusPos, float fovY)
+    {
+        _cameraObservation.FixOnPassiveCallCount++;
+        // FixOn 発火「時点」の generation / context を保持する（報告は post-login で行われ active
+        // generation は終了処理で 0、context は post-login になるため、その時の値では取り違える）。
+        _cameraObservation.FixOnExperimentSceneGeneration = _activeCharaSelectSceneGeneration;
+        _cameraObservation.FixOnExperimentCaptureContext = _clientState.IsLoggedIn ? "post-login" : "pre-login";
+        _cameraObservation.FixOnExperimentCharaSelectSession = _charaSelectTitleBackgroundSessionActive;
+        RecordCameraProbeTimelineEvent(TitleBackgroundCameraProbeTimelineEventKind.FixOn);
+        float[]? cameraOverride = null;
+        float[]? focusOverride = null;
+        var overrideFovY = fovY;
+        var invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(false);
+        TitleBackgroundCharaSelectView? savedViewPoseToApply = null;
+        // 保存view再現バグ診断: この呼び出しで view override が成立したかを一時保持する（catch で握り潰された
+        // 場合は false のままなので trace は開始しない＝誤ったtarget値でtraceを走らせない安全側の挙動）。
+        var viewOverrideAppliedThisInvocation = false;
+        // V2 production path 有効時は FixOn detour では一切 override せず passthrough を強制する
+        // （legacy camera/view/focus override 経路を V2 と同時に動かさない）。
+        var legacyFixOnOverrideAllowed = TitleBackgroundV2Logic.IsLegacyCameraMaintenanceAllowed(IsNewCharaSelectEngineActive);
+        try
+        {
+            _cameraObservation.LastObservedFixOnCamera = TryReadVector(cameraPos);
+            _cameraObservation.LastObservedFixOnFocus = TryReadVector(focusPos);
+            _cameraObservation.LastObservedFixOnFovY = fovY;
+            // passive 観測モードでは、将来 ShouldOverrideCamera() が復活しても絶対に
+            // override せず passthrough を強制する（観測専用フックの不変条件）。
+            if (legacyFixOnOverrideAllowed
+                && !_configuration.TitleBackgroundFixOnPassiveObservationEnabled && ShouldOverrideCamera())
+            {
+                _cameraApplyPending = false;
+                var plan = TitleBackgroundCameraOverridePlan.FromConfiguration(_configuration);
+                cameraOverride =
+                [
+                    plan.Camera.X,
+                    plan.Camera.Y,
+                    plan.Camera.Z,
+                ];
+                focusOverride =
+                [
+                    plan.Focus.X,
+                    plan.Focus.Y,
+                    plan.Focus.Z,
+                ];
+                overrideFovY = plan.FovY;
+                _cameraObservation.LastCameraOverrideApplied = true;
+                invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(true);
+                _cameraObservation.LastAppliedCamera = plan.Camera;
+                _cameraObservation.LastAppliedFocus = plan.Focus;
+                _cameraObservation.LastAppliedFovY = plan.FovY;
+                _log.Information(
+                    "[XMU BG] Camera override applied. camera={Camera}, focus={Focus}, fovY={FovY}",
+                    FormatVector(plan.Camera),
+                    FormatVector(plan.Focus),
+                    plan.FovY);
+            }
+
+            // 診断（read-only）: 適用可否の総合理由を毎回記録する。"ready" のときだけ下の override が走る。
+            _cameraObservation.LastFixOnFocusOverrideGateReason = ComputeFixOnFocusOverrideGateReason();
+
+            // view override（TitleEdit 方式）: 「今の見え方を保存」した camera+focus+fov を scene-local
+            // 絶対値で「まとめて」上書きする。passive 観測 ON は最優先 passthrough、実行コンテキストは
+            // 焦点 override と同じ FixOn 専用ゲート、候補一致時のみ。焦点だけの anchor override より優先する。
+            // 同一 scene generation での再発火は _cameraObservation.LastViewOverrideAppliedGeneration で弾き、ネイティブ FixOn
+            // への適用を generation あたり 1 回に制限する（再呼び出しの冪等性は保証されないため）。
+            if (legacyFixOnOverrideAllowed
+                && cameraOverride == null
+                && focusOverride == null
+                && _cameraObservation.LastViewOverrideAppliedGeneration != _activeCharaSelectSceneGeneration
+                && TitleBackgroundFixOnFocusOverrideLogic.ShouldConsiderFocusOverride(
+                    _configuration.TitleBackgroundFixOnPassiveObservationEnabled,
+                    _configuration.TitleBackgroundCharaSelectViewEnabled)
+                && IsFixOnFocusOverrideContextActive())
+            {
+                // 自動確認 run 中は view override を抑止し、カメラを自然 FixOn（配置キャラ追従）に任せる。
+                // 抑止した事実は LastFixOnViewOverrideSource=suppressed-by-run として run レポートで読める。
+                // run 判定は _automaticCheck.Requested ベースで、run の完了・失敗・キャンセルで必ず解除される。
+                if (IsSavedViewSuppressedByAutomaticRun())
+                {
+                    _cameraObservation.LastFixOnViewOverrideSource = "suppressed-by-run";
+                }
+                else
+                {
+                    var savedView = BuildCharaSelectView();
+                    var viewResolution = TitleBackgroundFixOnViewOverrideLogic.Resolve(
+                        _configuration.TitleBackgroundCharaSelectViewEnabled,
+                        savedView,
+                        ResolveCurrentOverrideCandidate().Id,
+                        _cameraObservation.LastObservedFixOnCamera ?? Vector3.Zero,
+                        _cameraObservation.LastObservedFixOnFocus ?? Vector3.Zero,
+                        fovY);
+                    _cameraObservation.LastFixOnViewOverrideSource = viewResolution.Source;
+                    if (viewResolution.ShouldOverride)
+                    {
+                        if (viewResolution.ApplicationMode == TitleBackgroundFixOnViewOverrideLogic.ApplicationModeDelayedPose)
+                        {
+                            // pose付きviewは絶対camera/focusを渡さない。自然FixOn originalに配置キャラの焦点を
+                            // 確定させ、その直後に相対poseだけをone-shot適用する。
+                            savedViewPoseToApply = savedView;
+                            _cameraObservation.LastViewOverrideAppliedGeneration = _activeCharaSelectSceneGeneration;
+                            _cameraObservation.LastFixOnViewOverrideSource = "saved-view-pose-after-fixon-pending";
+                            invocationMode = "saved-view-pose-after-fixon-pending";
+                        }
+                        else
+                        {
+                            // pose無しの旧保存viewは従来どおりscene-local絶対値をFixOnへ渡す。
+                            cameraOverride =
+                            [
+                                viewResolution.Camera.X,
+                                viewResolution.Camera.Y,
+                                viewResolution.Camera.Z,
+                            ];
+                            focusOverride =
+                            [
+                                viewResolution.Focus.X,
+                                viewResolution.Focus.Y,
+                                viewResolution.Focus.Z,
+                            ];
+                            overrideFovY = viewResolution.FovY;
+                            _cameraObservation.LastCameraOverrideApplied = true;
+                            _cameraObservation.LastAppliedCamera = viewResolution.Camera;
+                            _cameraObservation.LastAppliedFocus = viewResolution.Focus;
+                            _cameraObservation.LastAppliedFovY = viewResolution.FovY;
+                            _cameraObservation.FixOnViewOverrideAppliedCount++;
+                            _cameraObservation.LastViewOverrideAppliedGeneration = _activeCharaSelectSceneGeneration;
+                            invocationMode = "view-override";
+                            viewOverrideAppliedThisInvocation = true;
+                            _log.Information(
+                                "[XMU BG] FixOn legacy view override applied. camera={Camera}, focus={Focus}, fovY={FovY}",
+                                FormatVector(viewResolution.Camera),
+                                FormatVector(viewResolution.Focus),
+                                viewResolution.FovY);
+                        }
+                    }
+                }
+            }
+
+            // 焦点 override は次を全て満たすときだけ。passive 観測 ON は最優先で passthrough を強制し、
+            // 実行コンテキストは FixOn 専用ゲート（pre-login + Ready + bridge + session active + scene
+            // generation 一致 + CharaSelect セッション）を必須にする。FixOn はシーン読み込み途中に発火し
+            // CurrentLobbyMap が None に戻り得るため CurrentLobbyMap には依存しない。legacy override が
+            // 発火していない場合に限り焦点だけを置き換える（camera/fovY は不変）。
+            if (legacyFixOnOverrideAllowed
+                && cameraOverride == null
+                && focusOverride == null
+                && !savedViewPoseToApply.HasValue
+                && TitleBackgroundFixOnFocusOverrideLogic.ShouldConsiderFocusOverride(
+                    _configuration.TitleBackgroundFixOnPassiveObservationEnabled,
+                    _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled)
+                && IsFixOnFocusOverrideContextActive())
+            {
+                var focusResolution = TitleBackgroundFixOnFocusOverrideLogic.Resolve(
+                    _configuration.TitleBackgroundFixOnFocusAnchorOverrideEnabled,
+                    BuildFixOnFocusAnchor(),
+                    ResolveCurrentOverrideCandidate().Id,
+                    _cameraObservation.LastObservedFixOnFocus ?? Vector3.Zero,
+                    CharaSelectCharacterFocusBodyDrop);
+                _cameraObservation.LastFixOnFocusOverrideSource = focusResolution.Source;
+                if (focusResolution.ShouldOverride)
+                {
+                    focusOverride =
+                    [
+                        focusResolution.Focus.X,
+                        focusResolution.Focus.Y,
+                        focusResolution.Focus.Z,
+                    ];
+                    _cameraObservation.LastCameraOverrideApplied = true;
+                    _cameraObservation.LastAppliedFocus = focusResolution.Focus;
+                    _cameraObservation.FixOnFocusOverrideAppliedCount++;
+                    invocationMode = "anchor-focus-override";
+                    _log.Information(
+                        "[XMU BG] FixOn focus anchor override applied. focus={Focus}",
+                        FormatVector(focusResolution.Focus));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            MarkRuntimeError(ex, nameof(LobbyCameraFixOnDetour));
+            cameraOverride = null;
+            focusOverride = null;
+            overrideFovY = fovY;
+            invocationMode = TitleBackgroundCameraOverridePlan.GetFixOnInvocationMode(false);
+            viewOverrideAppliedThisInvocation = false;
+            savedViewPoseToApply = null;
+        }
+
+        nint result;
+        if (cameraOverride != null || focusOverride != null)
+        {
+            // 上書きしない側はゲームの元ポインタをそのまま渡す（focus のみ差し替えにも対応）。
+            fixed (float* cameraOverridePointer = cameraOverride)
+            fixed (float* focusOverridePointer = focusOverride)
+            {
+                var cameraPointer = cameraOverride != null ? cameraOverridePointer : cameraPos;
+                var focusPointer = focusOverride != null ? focusOverridePointer : focusPos;
+                result = _hookLifecycle.CameraFixOnHook?.Original(self, cameraPointer, focusPointer, overrideFovY) ?? nint.Zero;
+            }
+        }
+        else
+        {
+            result = _hookLifecycle.CameraFixOnHook?.Original(self, cameraPos, focusPos, fovY) ?? nint.Zero;
+        }
+
+        var savedViewPoseAppliedThisInvocation = false;
+        if (savedViewPoseToApply.HasValue)
+        {
+            savedViewPoseAppliedThisInvocation = ApplySavedViewCameraPoseAfterFixOn(savedViewPoseToApply.Value);
+            if (savedViewPoseAppliedThisInvocation)
+            {
+                _cameraObservation.LastCameraOverrideApplied = true;
+                _cameraObservation.LastAppliedFovY = savedViewPoseToApply.Value.FovY;
+                _cameraObservation.FixOnViewOverrideAppliedCount++;
+                _cameraObservation.LastFixOnViewOverrideSource = "saved-view-pose-after-fixon";
+                invocationMode = "saved-view-pose-after-fixon";
+            }
+            else
+            {
+                _cameraObservation.LastFixOnViewOverrideSource = "saved-view-pose-after-fixon-failed";
+                invocationMode = "saved-view-pose-after-fixon-failed";
+            }
+        }
+
+        _cameraObservation.LastFixOnInvocationMode = invocationMode;
+        CapturePostFixOnCameraState();
+        ScheduleCameraProbeTimelineCapture(
+            cameraOverride != null || focusOverride != null || savedViewPoseAppliedThisInvocation);
+        // 保存view再現バグ診断（read-only）: view override が成立したFixOn呼び出し直後だけtraceを開始する。
+        // カメラには一切書き込まず、CapturePostFixOnCameraState() が既に読み取った実値をframe 0として使う。
+        StartViewReplayTraceIfApplicable(viewOverrideAppliedThisInvocation);
+        return result;
+    }
+
+    private float CalculateLobbyCameraLookAtYDetour(
+        nint self,
+        float distance,
+        CurvePoint* lowPoint,
+        CurvePoint* midPoint,
+        CurvePoint* highPoint)
+    {
+        var callIndex = ++_phaseRecording.Phase2ECalculateLookAtYCallCount;
+        RecordTransitionEvent("calculateLobbyCameraLookAtY hook called", $"callIndex={callIndex}");
+        var frame = GetCurrentPhase2CFrame();
+        var low = ReadCurvePoint(lowPoint);
+        var mid = ReadCurvePoint(midPoint);
+        var high = ReadCurvePoint(highPoint);
+        var activeBefore = TryCaptureActiveCameraSnapshot(out var beforeSnapshot, out _)
+            ? beforeSnapshot.LookAtVector.Y
+            : (float?)null;
+        float returnValue;
+        try
+        {
+            returnValue = _hookLifecycle.CalculateLobbyCameraLookAtYHook?.Original(self, distance, lowPoint, midPoint, highPoint) ?? 0f;
+        }
+        catch (Exception ex)
+        {
+            _phaseRecording.Phase2ECalculateLookAtYLastError = ex.Message;
+            RecordPhase2ECalculateLookAtYCall(new TitleBackgroundPhase2ECalculateLookAtYCall(
+                callIndex,
+                frame,
+                distance,
+                low,
+                mid,
+                high,
+                null,
+                activeBefore,
+                null,
+                "original-error",
+                ex.Message));
+            throw;
+        }
+
+        var activeAfter = TryCaptureActiveCameraSnapshot(out var afterSnapshot, out var afterError)
+            ? afterSnapshot.LookAtVector.Y
+            : (float?)null;
+        var status = activeAfter.HasValue ? "success" : "active-camera-unavailable";
+        var error = activeAfter.HasValue ? string.Empty : afterError;
+        _phaseRecording.Phase2ECalculateLookAtYLastError = error;
+        RecordPhase2ECalculateLookAtYCall(new TitleBackgroundPhase2ECalculateLookAtYCall(
+            callIndex,
+            frame,
+            distance,
+            low,
+            mid,
+            high,
+            float.IsFinite(returnValue) ? returnValue : null,
+            activeBefore,
+            activeAfter,
+            status,
+            error));
+        return returnValue;
+    }
+
+    private void SetCameraCurveMidPointDetour(nint self, float value)
+    {
+        var callIndex = ++_phaseRecording.Phase2FSetCameraCurveMidPointCallCount;
+        RecordTransitionEvent("SetCameraCurveMidPoint hook called", $"callIndex={callIndex}");
+        var frame = GetCurrentPhase2CFrame();
+        var beforeCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var before, out var beforeError);
+        var activeBefore = TryCaptureActiveCameraSnapshot(out var activeBeforeSnapshot, out _)
+            ? activeBeforeSnapshot
+            : (TitleBackgroundActiveCameraSnapshot?)null;
+        string phase2GStatus;
+        string phase2GError;
+        string poseMaintainStatus;
+        string poseMaintainError;
+        try
+        {
+            _hookLifecycle.SetCameraCurveMidPointHook?.Original(self, value);
+            TryApplyPhase2GSetCameraCurveMidPointOverride(self, frame, out phase2GStatus, out phase2GError);
+            TryMaintainSavedViewPoseAfterCurveOriginal(frame, out poseMaintainStatus, out poseMaintainError);
+        }
+        catch (Exception ex)
+        {
+            _phaseRecording.Phase2FSetCameraCurveMidPointLastError = ex.Message;
+            RecordPhase2FSetCameraCurveMidPointCall(
+                BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, null, activeBefore, null, "original-error", ex.Message));
+            throw;
+        }
+
+        var afterCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var after, out var afterError);
+        var activeAfter = TryCaptureActiveCameraSnapshot(out var activeAfterSnapshot, out _)
+            ? activeAfterSnapshot
+            : (TitleBackgroundActiveCameraSnapshot?)null;
+        var status = beforeCaptured && afterCaptured ? "success" : "partial";
+        status = string.IsNullOrWhiteSpace(phase2GStatus) ? status : $"{status}; phase2G={phase2GStatus}";
+        status = string.IsNullOrWhiteSpace(poseMaintainStatus) ? status : $"{status}; poseMaintain={poseMaintainStatus}";
+        var error = JoinErrors(
+            JoinErrors(JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError), phase2GError),
+            poseMaintainError);
+        _phaseRecording.Phase2FSetCameraCurveMidPointLastError = error;
+        RecordPhase2FSetCameraCurveMidPointCall(
+            BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
+    }
+
+    private void CalculateCameraCurveLowAndHighPointDetour(nint self, float value)
+    {
+        var callIndex = ++_phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointCallCount;
+        RecordTransitionEvent("CalculateCameraCurveLowAndHighPoint hook called", $"callIndex={callIndex}");
+        var frame = GetCurrentPhase2CFrame();
+        var beforeCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var before, out var beforeError);
+        var activeBefore = TryCaptureActiveCameraSnapshot(out var activeBeforeSnapshot, out _)
+            ? activeBeforeSnapshot
+            : (TitleBackgroundActiveCameraSnapshot?)null;
+        string phase2GStatus;
+        string phase2GError;
+        string poseMaintainStatus;
+        string poseMaintainError;
+        try
+        {
+            _hookLifecycle.CalculateCameraCurveLowAndHighPointHook?.Original(self, value);
+            TryApplyPhase2GLowHighCurveOverride(self, frame, out phase2GStatus, out phase2GError);
+            TryMaintainSavedViewPoseAfterCurveOriginal(frame, out poseMaintainStatus, out poseMaintainError);
+        }
+        catch (Exception ex)
+        {
+            _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointLastError = ex.Message;
+            RecordPhase2FCalculateCameraCurveLowAndHighPointCall(
+                BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, null, activeBefore, null, "original-error", ex.Message));
+            throw;
+        }
+
+        var afterCaptured = TryCaptureExpandedLobbyCameraSnapshot(self, out var after, out var afterError);
+        var activeAfter = TryCaptureActiveCameraSnapshot(out var activeAfterSnapshot, out _)
+            ? activeAfterSnapshot
+            : (TitleBackgroundActiveCameraSnapshot?)null;
+        var status = beforeCaptured && afterCaptured ? "success" : "partial";
+        status = string.IsNullOrWhiteSpace(phase2GStatus) ? status : $"{status}; phase2G={phase2GStatus}";
+        status = string.IsNullOrWhiteSpace(poseMaintainStatus) ? status : $"{status}; poseMaintain={poseMaintainStatus}";
+        var error = JoinErrors(
+            JoinErrors(JoinErrors(beforeCaptured ? string.Empty : beforeError, afterCaptured ? string.Empty : afterError), phase2GError),
+            poseMaintainError);
+        _phaseRecording.Phase2FCalculateCameraCurveLowAndHighPointLastError = error;
+        RecordPhase2FCalculateCameraCurveLowAndHighPointCall(
+            BuildPhase2FGeneratedCurveCall(callIndex, frame, value, beforeCaptured ? before : null, afterCaptured ? after : null, activeBefore, activeAfter, status, error));
+    }
+
+    private bool TryMaintainSavedViewPoseAfterCurveOriginal(
+        int? frame,
+        out string status,
+        out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        // V2 production path 有効時は curve original 後の毎フレーム pose reassert を一切行わない（camera 制御排他）。
+        if (!TitleBackgroundV2Logic.IsLegacyCameraMaintenanceAllowed(IsNewCharaSelectEngineActive))
+        {
+            if (_savedViewPoseMaintain.Active)
+            {
+                _savedViewPoseMaintain.Stop("disabled-by-v2");
+            }
+
+            status = "skipped:disabled-by-v2";
+            return false;
+        }
+
+        if (!_savedViewPoseMaintain.Active)
+        {
+            status = "skipped:not-active";
+            return false;
+        }
+
+        if (!TryResolveSavedViewPoseMaintainTarget(out var savedView, out var stopReason))
+        {
+            _savedViewPoseMaintain.Stop(stopReason);
+            status = $"stopped:{stopReason}";
+            RecordTransitionEvent("saved view pose maintain stopped", stopReason);
+            return false;
+        }
+
+        if (!TryApplyLobbyCameraPose(
+                savedView.DirH,
+                savedView.DirV,
+                savedView.Distance,
+                savedView.FovY,
+                out errorMessage))
+        {
+            _savedViewPoseMaintain.Stop("apply-failed");
+            status = "failed";
+            RecordTransitionEvent("saved view pose maintain stopped", "apply-failed", errorMessage);
+            return false;
+        }
+
+        _savedViewPoseMaintain.MarkApplied(frame);
+        status = "applied-post-original";
+        return true;
+    }
+
+    private bool TryResolveSavedViewPoseMaintainTarget(
+        out TitleBackgroundCharaSelectView savedView,
+        out string stopReason)
+    {
+        savedView = TitleBackgroundCharaSelectView.None;
+        if (!IsSourceBackedCandidateReadyForMutation())
+        {
+            stopReason = "source-backed-candidate-not-ready";
+            return false;
+        }
+
+        if (_clientState.IsLoggedIn)
+        {
+            stopReason = "logged-in";
+            return false;
+        }
+
+        if (_hookLifecycle.State != TitleBackgroundServiceState.Ready)
+        {
+            stopReason = "service-not-ready";
+            return false;
+        }
+
+        if (IsHookProbeMode())
+        {
+            stopReason = "hook-probe";
+            return false;
+        }
+
+        if (IsSavedViewSuppressedByAutomaticRun())
+        {
+            stopReason = "suppressed-by-run";
+            return false;
+        }
+
+        if (!_charaSelectTitleBackgroundSessionActive)
+        {
+            stopReason = "session-inactive";
+            return false;
+        }
+
+        if (_savedViewPoseMaintain.SceneGeneration <= 0
+            || _activeCharaSelectSceneGeneration != _savedViewPoseMaintain.SceneGeneration
+            || _charaSelectCameraAdapter.RuntimeState.SceneGeneration != _savedViewPoseMaintain.SceneGeneration)
+        {
+            stopReason = "scene-generation-mismatch";
+            return false;
+        }
+
+        var contextReason = GetFixOnFocusOverrideContextReason();
+        if (contextReason != TitleBackgroundFixOnFocusOverrideLogic.GateReady)
+        {
+            stopReason = contextReason;
+            return false;
+        }
+
+        var currentView = BuildCharaSelectView();
+        var resolution = TitleBackgroundFixOnViewOverrideLogic.Resolve(
+            _configuration.TitleBackgroundCharaSelectViewEnabled,
+            currentView,
+            ResolveCurrentOverrideCandidate().Id,
+            Vector3.Zero,
+            Vector3.Zero,
+            currentView.FovY);
+        if (!resolution.ShouldOverride
+            || resolution.ApplicationMode != TitleBackgroundFixOnViewOverrideLogic.ApplicationModeDelayedPose)
+        {
+            stopReason = "saved-view-unavailable";
+            return false;
+        }
+
+        if (currentView != _savedViewPoseMaintain.SavedView)
+        {
+            stopReason = "saved-view-changed";
+            return false;
+        }
+
+        savedView = currentView;
+        stopReason = string.Empty;
+        return true;
+    }
+
+    private void StopSavedViewPoseMaintainIfInvalid()
+    {
+        if (!_savedViewPoseMaintain.Active
+            || TryResolveSavedViewPoseMaintainTarget(out _, out var stopReason))
+        {
+            return;
+        }
+
+        _savedViewPoseMaintain.Stop(stopReason);
+        RecordTransitionEvent("saved view pose maintain stopped", stopReason);
+    }
+
+    private bool TryApplyPhase2GSetCameraCurveMidPointOverride(nint self, int? frame, out string status, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        if (!TryGetPhase2GGenerationOverrideCurve(out var curve, out var skippedReason))
+        {
+            status = $"skipped:{skippedReason}";
+            _phaseRecording.Phase2GGenerationOverrideLastStatus = status;
+            _phaseRecording.Phase2GGenerationOverrideLastSkippedReason = skippedReason;
+            _transitionDiagnostics.RecordPhase2GSkipped(skippedReason);
+            RecordTransitionEvent("Phase 2G setMid skipped", skippedReason);
+            return false;
+        }
+
+        _phaseRecording.Phase2GGenerationOverrideSetMidAttemptCount++;
+        RecordTransitionEvent("Phase 2G setMid attempted", $"frame={FormatFrame(frame)}");
+        try
+        {
+            // Original is intentionally called first so native generation can keep its side effects;
+            // Phase 2G only replaces the generated MidPoint value after that generation step.
+            // Do not add Framework.Update maintenance or direct SceneCamera writes here.
+            WriteCurvePointY(self, LobbyCameraExpandedMidPointOffset, curve.Mid);
+            MarkPhase2GGenerationOverrideApplied(frame, "set-mid-applied");
+            _phaseRecording.Phase2GGenerationOverrideSetMidAppliedCount++;
+            _charaSelectService?.MarkTitleBackgroundCharacterCompositionBridgeCameraApplied();
+            _transitionDiagnostics.RecordPhase2GApply(
+                BuildTransitionSnapshot("Phase 2G setMid applied"),
+                _clientState.IsLoggedIn,
+                IsCharaSelectOrTitleBackground(TryReadCurrentLobbyMap(out var applyMap) ? applyMap : GameLobbyType.None),
+                "ShouldApplyGeneratedCurveOverride=true");
+            RecordTransitionEvent("Phase 2G setMid applied", $"frame={FormatFrame(frame)}");
+            status = "applied-post-original";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            status = "failed";
+            errorMessage = ex.Message;
+            _phaseRecording.Phase2GGenerationOverrideLastStatus = "set-mid-failed";
+            _phaseRecording.Phase2GGenerationOverrideLastSkippedReason = string.Empty;
+            RecordTransitionEvent("Phase 2G setMid skipped", "failed", ex.Message);
+            _log.Warning(ex, "TitleBackground Phase2G SetCameraCurveMidPoint override failed.");
+            return false;
+        }
+    }
+
+    private bool TryApplyPhase2GLowHighCurveOverride(nint self, int? frame, out string status, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        if (!TryGetPhase2GGenerationOverrideCurve(out var curve, out var skippedReason))
+        {
+            status = $"skipped:{skippedReason}";
+            _phaseRecording.Phase2GGenerationOverrideLastStatus = status;
+            _phaseRecording.Phase2GGenerationOverrideLastSkippedReason = skippedReason;
+            _transitionDiagnostics.RecordPhase2GSkipped(skippedReason);
+            RecordTransitionEvent("Phase 2G lowHigh skipped", skippedReason);
+            return false;
+        }
+
+        _phaseRecording.Phase2GGenerationOverrideLowHighAttemptCount++;
+        RecordTransitionEvent("Phase 2G lowHigh attempted", $"frame={FormatFrame(frame)}");
+        try
+        {
+            // Original computes Low/High from the current generated inputs first; the post-original
+            // write preserves native state changes and only pins the generated curve targets.
+            // Final yaw/pitch/distance mismatch is expected and remains non-blocking.
+            WriteCurvePointY(self, LobbyCameraExpandedLowPointOffset, curve.Low);
+            WriteCurvePointY(self, LobbyCameraExpandedHighPointOffset, curve.High);
+            MarkPhase2GGenerationOverrideApplied(frame, "low-high-applied");
+            _phaseRecording.Phase2GGenerationOverrideLowHighAppliedCount++;
+            _charaSelectService?.MarkTitleBackgroundCharacterCompositionBridgeCameraApplied();
+            _transitionDiagnostics.RecordPhase2GApply(
+                BuildTransitionSnapshot("Phase 2G lowHigh applied"),
+                _clientState.IsLoggedIn,
+                IsCharaSelectOrTitleBackground(TryReadCurrentLobbyMap(out var applyMap) ? applyMap : GameLobbyType.None),
+                "ShouldApplyGeneratedCurveOverride=true");
+            RecordTransitionEvent("Phase 2G lowHigh applied", $"frame={FormatFrame(frame)}");
+            status = "applied-post-original";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            status = "failed";
+            errorMessage = ex.Message;
+            _phaseRecording.Phase2GGenerationOverrideLastStatus = "low-high-failed";
+            _phaseRecording.Phase2GGenerationOverrideLastSkippedReason = string.Empty;
+            RecordTransitionEvent("Phase 2G lowHigh skipped", "failed", ex.Message);
+            _log.Warning(ex, "TitleBackground Phase2G CalculateCameraCurveLowAndHighPoint override failed.");
+            return false;
+        }
+    }
+
+    private bool TryGetPhase2GGenerationOverrideCurve(
+        out TitleBackgroundCharaSelectCameraCurve curve,
+        out string skippedReason)
+    {
+        curve = default;
+        // V2 production path 有効時は Phase2G generated curve override（curve-based camera ownership）を停止する。
+        if (!TitleBackgroundV2Logic.IsLegacyCameraMaintenanceAllowed(IsNewCharaSelectEngineActive))
+        {
+            skippedReason = "disabled-by-v2";
+            return false;
+        }
+
+        var currentMapAvailable = TryReadCurrentLobbyMap(out var currentMap);
+        var resolvedMap = ResolveSceneReadySignalLobbyMap();
+        if (!TitleBackgroundCharaSelectCameraLogic.ShouldApplyGeneratedCurveOverride(
+                _hookLifecycle.State == TitleBackgroundServiceState.Ready,
+                IsHookProbeMode(),
+                IsSceneOverrideEnabled(),
+                _charaSelectCameraAdapter.IsArmed,
+                _clientState.IsLoggedIn,
+                _charaSelectTitleBackgroundSessionActive,
+                _activeCharaSelectSceneGeneration > 0
+                    && _charaSelectCameraAdapter.RuntimeState.SceneGeneration == _activeCharaSelectSceneGeneration,
+                _charaSelectCameraAdapter.State,
+                _charaSelectCameraAdapter.RuntimeState,
+                currentMapAvailable ? currentMap : GameLobbyType.None,
+                resolvedMap))
+        {
+            skippedReason = BuildPhase2GGenerationOverrideSkippedReason();
+            return false;
+        }
+
+        var baseCurve = _charaSelectCameraAdapter.RuntimeState.CurveAtRecord!.Value;
+        var cameraProfile = ResolveCurrentTitleBackgroundCameraProfile();
+        curve = cameraProfile.HasProfile
+            ? TitleBackgroundCharaSelectCameraLogic.ApplyCameraProfileCurveOffset(baseCurve, cameraProfile)
+            : TitleBackgroundCharaSelectCameraLogic.ApplyCameraFramingOffset(
+                baseCurve,
+                _configuration.TitleBackgroundCharaSelectCameraFramingMode);
+        skippedReason = string.Empty;
+        return true;
+    }
+
+    private string BuildPhase2GGenerationOverrideSkippedReason()
+    {
+        if (_hookLifecycle.State != TitleBackgroundServiceState.Ready)
+        {
+            return "service-not-ready";
+        }
+
+        if (IsHookProbeMode())
+        {
+            return "hook-probe";
+        }
+
+        if (!IsSceneOverrideEnabled())
+        {
+            return "scene-override-disabled";
+        }
+
+        if (_clientState.IsLoggedIn)
+        {
+            return "logged-in-context";
+        }
+
+        if (!_charaSelectTitleBackgroundSessionActive)
+        {
+            return "inactive-chara-select-session";
+        }
+
+        if (!_charaSelectCameraAdapter.IsArmed)
+        {
+            return "adapter-not-armed";
+        }
+
+        if (_charaSelectCameraAdapter.State is not TitleBackgroundCharaSelectCameraAdapterState.SceneLoaded
+            and not TitleBackgroundCharaSelectCameraAdapterState.Active)
+        {
+            return $"adapter-state-{_charaSelectCameraAdapter.State}";
+        }
+
+        if (_charaSelectCameraAdapter.RuntimeState.SceneGeneration <= 0)
+        {
+            return "scene-generation-empty";
+        }
+
+        if (!_charaSelectCameraAdapter.RuntimeState.HasCameraPose)
+        {
+            return "runtime-pose-incomplete";
+        }
+
+        if (!_charaSelectCameraAdapter.RuntimeState.CurveAtRecord.HasValue)
+        {
+            return "runtime-curve-empty";
+        }
+
+        if (_activeCharaSelectSceneGeneration <= 0
+            || _charaSelectCameraAdapter.RuntimeState.SceneGeneration != _activeCharaSelectSceneGeneration)
+        {
+            return "scene-generation-mismatch";
+        }
+
+        var currentMapAvailable = TryReadCurrentLobbyMap(out var currentMap);
+        var resolvedMap = ResolveSceneReadySignalLobbyMap();
+        if (!(currentMapAvailable && TitleBackgroundCharaSelectCameraLogic.IsCharaSelectOrTitleBackgroundMap(currentMap))
+            && !TitleBackgroundCharaSelectCameraLogic.IsCharaSelectOrTitleBackgroundMap(resolvedMap))
+        {
+            return "not-chara-select-or-title-background";
+        }
+
+        return "unknown";
+    }
+
+    private void MarkPhase2GGenerationOverrideApplied(int? frame, string status)
+    {
+        _phaseRecording.Phase2GGenerationOverrideLastAppliedFrame = frame;
+        _phaseRecording.Phase2GGenerationOverrideLastAppliedSceneGeneration = _charaSelectCameraAdapter.RuntimeState.SceneGeneration;
+        _phaseRecording.Phase2GGenerationOverrideLastStatus = status;
+        _phaseRecording.Phase2GGenerationOverrideLastSkippedReason = string.Empty;
+    }
+
+    private static void WriteCurvePointY(nint lobbyCameraAddress, int offset, float value)
+    {
+        var point = (CurvePoint*)((byte*)lobbyCameraAddress + offset);
+        point->Y = TitleBackgroundPreset.SanitizeCoordinate(value);
+    }
+
+    // V2 production path の framing 書込コア。scene-ready と、その後の bounded retry/settle ウィンドウ内
+    // からのみ呼ばれる。書くのは LobbyCamera の入力 params（DirH/DirV/Distance/InterpDistance/FoV）だけで、
+    // SceneCamera.Position は絶対に書かない。毎フレーム reassert ではなく有限回で恒久停止する。
+    private bool TryApplyV2Framing(int frame)
+    {
+        if (!IsV2Active)
+        {
+            return false;
+        }
+
+        TryReadCurrentLobbyMap(out var currentMap);
+        // legacy saved-view/facing の run 抑止（IsSavedViewSuppressedByAutomaticRun）は V2 framing gate へ
+        // 渡さない。one-click 実機確認 run 中こそ V2 framing を適用して構図を確認する必要があるため。
+        var gate = TitleBackgroundV2Logic.ShouldApplyFraming(
+            v2Active: true,
+            serviceReady: _hookLifecycle.State == TitleBackgroundServiceState.Ready,
+            hookProbeMode: IsHookProbeMode(),
+            loggedIn: _clientState.IsLoggedIn,
+            charaSelectSessionActive: _charaSelectTitleBackgroundSessionActive,
+            activeSceneGeneration: _activeCharaSelectSceneGeneration,
+            runtimeSceneGeneration: _charaSelectCameraAdapter.RuntimeState.SceneGeneration,
+            boundedWindowOpen: _v2.ShouldAttemptFraming(
+                _activeCharaSelectSceneGeneration,
+                _charaSelectCameraAdapter.RuntimeState.SceneGeneration),
+            currentMap: currentMap);
+
+        switch (gate.Decision)
+        {
+            case TitleBackgroundV2FramingDecision.Stop:
+                _v2.CloseWindow(gate.Reason);
+                if (_clientState.IsLoggedIn)
+                {
+                    _v2.MarkPostLoginWritesStopped();
+                }
+
+                RecordTransitionEvent("v2 framing stopped", gate.Reason);
+                return false;
+            case TitleBackgroundV2FramingDecision.Skip:
+                return false;
+        }
+
+        var pose = TitleBackgroundV2Logic.ResolveFramingPose(
+            ResolveCurrentOverrideCandidate().Id,
+            _configuration.TitleBackgroundCharaSelectCameraFramingMode,
+            _configuration.TitleBackgroundFovY);
+
+        var applied = TryApplyLobbyCameraPose(pose.Yaw, pose.Pitch, pose.Distance, pose.FovY, out var errorMessage);
+        _v2.RecordFramingAttempt(applied, frame, applied ? "applied-scene-ready" : $"failed:{errorMessage}");
+        if (applied)
+        {
+            _v2.RecordAppliedPose(pose.Yaw, pose.Pitch, pose.Distance, pose.FovY);
+            RecordTransitionEvent("v2 framing applied", $"frame={frame}");
+        }
+        else
+        {
+            RecordTransitionEvent("v2 framing failed", errorMessage);
+        }
+
+        return applied;
+    }
+
+    // Framework.Update から呼ぶ bounded retry/settle。ウィンドウが開いている間だけ書き、
+    // 予算を使い切ったら _v2 側が WindowClosed=true にして以後は no-op。
+    private void MaintainV2FramingWindow()
+    {
+        try
+        {
+            if (!IsV2Active)
+            {
+                return;
+            }
+
+            // login 後は V2 native 書込を即停止（post-login leak 防止）。
+            if (_clientState.IsLoggedIn)
+            {
+                if (!_v2.WindowClosed)
+                {
+                    _v2.CloseWindow("logged-in");
+                }
+
+                _v2.MarkPostLoginWritesStopped();
+                return;
+            }
+
+            if (!_v2.ShouldAttemptFraming(
+                    _activeCharaSelectSceneGeneration,
+                    _charaSelectCameraAdapter.RuntimeState.SceneGeneration))
+            {
+                return;
+            }
+
+            TryApplyV2Framing(GetCurrentPhase2CFrame() ?? _v2.FramingAttemptCount);
+        }
+        catch (Exception ex)
+        {
+            _v2.CloseWindow($"exception:{ex.GetType().Name}");
+            MarkRuntimeError(ex, nameof(MaintainV2FramingWindow));
+        }
+    }
+
+    private void OnFrameworkUpdate(IFramework _)
+    {
+        if (_hookLifecycle.Disposed)
+        {
+            return;
+        }
+
+        // OneClick の source-backed layout は logout 前の bounded retry 中だけ再取得する。
+        // placement / V2 / environment の既存 runtime は source gate 完了まで進めない。
+        if (TryProcessPendingOneClickSourceCapture())
+        {
+            return;
+        }
+
+        // Framework.Updateでは停止判定だけを行う。pose書込はcurve original後に限定する。
+        StopSavedViewPoseMaintainIfInvalid();
+        if (TryReadCurrentLobbyMap(out var currentMap))
+        {
+            EndCharaSelectTitleBackgroundSessionIfNeeded(currentMap, "framework-update");
+        }
+
+        // V2 production path の bounded framing retry/settle。ウィンドウ（retry+settle 予算）を
+        // 使い切ると当該 scene generation では二度と書かない。login/session 終了でも即停止。
+        MaintainV2FramingWindow();
+
+        CapturePhase2CTimelineOnFrameworkUpdate();
+        CaptureCameraProbeTimelineOnFrameworkUpdate();
+        CapturePreLoginCameraOnFrameworkUpdate();
+        CaptureViewReplayTraceOnFrameworkUpdate();
+        MaintainCharaSelectCharacterPlacement();
+        // canonical actor の resolve -> capture -> write -> readback は、同じ Framework frame の
+        // MaintainTitleEditInformedCharaSelectPlacement 内で完結させる。別 resolve は行わない。
+        MaintainTitleEditInformedCharaSelectPlacement();
+
+        MaintainCharaSelectEnvironmentNoon();
+        MaintainCharaSelectEnvironmentClearSky();
+        // FRU candidate 固有: 戦闘用 gimmick / VFX telegraph の抑止（pre-login CharaSelect のみ）。
+        MaintainFruSceneObjectSuppression();
+        UpdateSelfTestOnFrameworkUpdate();
+        UpdateAutomaticQuickCheck();
+    }
+}

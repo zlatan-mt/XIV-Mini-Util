@@ -1,0 +1,641 @@
+// Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundCharaSelectAnchor.cs
+// Description: Character Select の陸上アンカー（固定立ち位置）解決ロジック
+// Reason: カメラ非干渉を保ったまま、湖上ではなく候補固有の陸上地点へキャラを配置する判定を実機なしでテスト可能にするため
+using System.Numerics;
+
+namespace XivMiniUtil.Services.TitleBackground;
+
+public enum TitleBackgroundCharaSelectAnchorAxis
+{
+    X,
+    Y,
+    Z,
+    Rotation,
+}
+
+// capture ボタンの有効/無効と、無効時にユーザーへ出す理由。
+// UI が押下可否と文言を一貫して出すための純粋判定。
+internal enum TitleBackgroundAnchorCaptureAvailability
+{
+    Available,
+    NotCharaSelect,
+    LoggedIn,
+}
+
+// Simple UI「現在地をキャラの立ち位置に保存（実験）」ボタンの押下可否と理由。
+// ログイン中・候補確定・現在 territory が候補と一致のときだけ保存できる。
+internal enum TitleBackgroundStandingCaptureAvailability
+{
+    Available,
+    NotLoggedIn,
+    NoCandidate,
+    TerritoryMismatch,
+}
+
+internal static class TitleBackgroundAnchorCaptureGate
+{
+    public static TitleBackgroundAnchorCaptureAvailability Evaluate(bool isLoggedIn, bool isCharaSelect)
+    {
+        if (isLoggedIn)
+        {
+            return TitleBackgroundAnchorCaptureAvailability.LoggedIn;
+        }
+
+        if (!isCharaSelect)
+        {
+            return TitleBackgroundAnchorCaptureAvailability.NotCharaSelect;
+        }
+
+        return TitleBackgroundAnchorCaptureAvailability.Available;
+    }
+
+    public static bool IsCaptureEnabled(TitleBackgroundAnchorCaptureAvailability availability)
+    {
+        return availability == TitleBackgroundAnchorCaptureAvailability.Available;
+    }
+}
+
+// layer 番号順送り（layer 一覧が取得できない場合の必須フォールバック）。
+// 既知の有効値リストが無いので ±1 で素朴に増減し、0 を下限にする。
+internal static class TitleBackgroundLayerStepLogic
+{
+    public static uint Step(uint current, int direction)
+    {
+        if (direction < 0)
+        {
+            return current == 0 ? 0 : current - 1;
+        }
+
+        if (direction > 0)
+        {
+            return current >= uint.MaxValue ? current : current + 1;
+        }
+
+        return current;
+    }
+}
+
+// 候補固有の陸上アンカー。位置はゲーム内 capture で確定し、nudge で微調整する。
+// Rotation はアンカーcapture互換のため保持する。保存view利用時のfacingはこの値ではなく、
+// 保存DirHから算出した固定yawを既存placement slotで適用する。
+internal readonly record struct TitleBackgroundCharaSelectAnchor(
+    bool Enabled,
+    string CandidateId,
+    Vector3 Position,
+    float Rotation)
+{
+    public static TitleBackgroundCharaSelectAnchor None { get; } =
+        new(false, string.Empty, Vector3.Zero, 0f);
+
+    public bool HasUsableAnchor =>
+        Enabled
+        && TitleBackgroundCameraMath.IsFiniteVector(Position)
+        && float.IsFinite(Rotation);
+}
+
+internal readonly record struct TitleBackgroundCharaSelectPlacementResolution(
+    Vector3 Target,
+    string Source,
+    bool UsedAnchor);
+
+// FixOn detour から呼ぶ焦点 override の純粋判定。
+// camera 位置と fovY はゲーム値を尊重し、focus（注視点）だけを差し替える。
+internal readonly record struct TitleBackgroundFixOnFocusResolution(
+    bool ShouldOverride,
+    Vector3 Focus,
+    string Source);
+
+// アンカー取得元のフレーム種別。診断で world 座標と lobby 座標を混同しないために使う。
+internal static class TitleBackgroundCharaSelectAnchorFrame
+{
+    // ログイン中の LocalPlayer.Position（ワールド座標）。lobby 空間とは別フレームの可能性がある。
+    public const string World = "world";
+    // CharaSelect のロビー空間から直接取得した座標。
+    public const string LobbyNative = "lobby-native";
+    // CharaSelect 中に native draw 位置を読んだ値。placement 強制配置中は fallback の再保存になる。
+    public const string CharaSelectFallback = "chara-select-fallback";
+    public const string Unknown = "unknown";
+
+    public static bool IsPlacementSupported(string? frame)
+    {
+        return string.Equals(frame, LobbyNative, StringComparison.Ordinal)
+            || string.Equals(frame, CharaSelectFallback, StringComparison.Ordinal);
+    }
+
+    // 地面 provenance が明確な frame か。placement-supported より厳しい。
+    // CharaSelectFallback は camera-focus で水上へ強制配置された座標の再保存の可能性があり、
+    // World（実験経路）/ Unknown も出所が確定していないため、地面確認済みとしては扱わない。
+    // 現状、明確な地面 provenance を持つのは lobby 空間から直接取得した LobbyNative のみ。
+    public static bool HasGroundProvenance(string? frame)
+    {
+        return string.Equals(frame, LobbyNative, StringComparison.Ordinal);
+    }
+}
+
+// 問題4: world 座標（ログイン中の LocalPlayer.Position）を CharaSelect のキャラ配置へ
+// experimental に流すための判定理由。実機で陸上一致が未確認のため fail-closed が原則。
+internal enum TitleBackgroundExperimentalWorldPlacementGate
+{
+    Eligible,
+    Disabled,
+    AnchorUnusable,
+    NotWorldFrame,
+    CandidateUnknownOrEmpty,
+    CandidateMismatch,
+    NoSavedTerritory,
+    TerritoryMismatch,
+}
+
+// world 座標を experimental に適用してよいかの純粋判定。安全条件を fail-closed 優先順で評価し、
+// すべて満たすときだけ Eligible を返す。camera/FixOn には一切関与せず、キャラ配置経路専用。
+internal static class TitleBackgroundExperimentalWorldPlacementLogic
+{
+    // Phase 0B（実機での陸上成立確認）は 2026-07-03 に完了（3点・残差0.002、world/lobby は恒等変換、
+    // 実機目視も全run一致）。
+    // これにより永続 config 経路（Evaluate の fail-closed gate を通った場合のみ）を通常セッションでも
+    // 有効化する。Evaluate 自体・fail-closed 正規化・ground provenance 判定は本フラグでは変更しない。
+    // static readonly にして「const による到達不能コード警告」を避ける。
+    public static readonly bool PersistentApplyEnabled = true;
+
+    public static TitleBackgroundExperimentalWorldPlacementGate Evaluate(
+        bool experimentalEnabled,
+        bool anchorEnabled,
+        Vector3 anchorPosition,
+        string? anchorFrame,
+        string? anchorCandidateId,
+        uint savedTerritoryTypeId,
+        string? activeCandidateId,
+        uint activeCandidateTerritoryId)
+    {
+        if (!experimentalEnabled)
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.Disabled;
+        }
+
+        if (!anchorEnabled || !TitleBackgroundCameraMath.IsFiniteVector(anchorPosition))
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.AnchorUnusable;
+        }
+
+        if (!string.Equals(anchorFrame, TitleBackgroundCharaSelectAnchorFrame.World, StringComparison.Ordinal))
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.NotWorldFrame;
+        }
+
+        var normalizedAnchorCandidate =
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(anchorCandidateId);
+        var normalizedActiveCandidate =
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(activeCandidateId);
+        if (string.IsNullOrEmpty(normalizedAnchorCandidate) || string.IsNullOrEmpty(normalizedActiveCandidate))
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.CandidateUnknownOrEmpty;
+        }
+
+        if (!string.Equals(normalizedAnchorCandidate, normalizedActiveCandidate, StringComparison.Ordinal))
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.CandidateMismatch;
+        }
+
+        if (savedTerritoryTypeId == 0)
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.NoSavedTerritory;
+        }
+
+        // active candidate が territory 不明（0）なら照合できないので拒否。
+        if (activeCandidateTerritoryId == 0 || savedTerritoryTypeId != activeCandidateTerritoryId)
+        {
+            return TitleBackgroundExperimentalWorldPlacementGate.TerritoryMismatch;
+        }
+
+        return TitleBackgroundExperimentalWorldPlacementGate.Eligible;
+    }
+
+    public static bool IsEligible(TitleBackgroundExperimentalWorldPlacementGate gate)
+    {
+        return gate == TitleBackgroundExperimentalWorldPlacementGate.Eligible;
+    }
+
+    public static string DescribeReason(TitleBackgroundExperimentalWorldPlacementGate gate)
+    {
+        return gate switch
+        {
+            TitleBackgroundExperimentalWorldPlacementGate.Eligible => "eligible",
+            TitleBackgroundExperimentalWorldPlacementGate.Disabled => "disabled",
+            TitleBackgroundExperimentalWorldPlacementGate.AnchorUnusable => "anchor-unusable",
+            TitleBackgroundExperimentalWorldPlacementGate.NotWorldFrame => "not-world-frame",
+            TitleBackgroundExperimentalWorldPlacementGate.CandidateUnknownOrEmpty => "candidate-unknown",
+            TitleBackgroundExperimentalWorldPlacementGate.CandidateMismatch => "candidate-mismatch",
+            TitleBackgroundExperimentalWorldPlacementGate.NoSavedTerritory => "no-saved-territory",
+            TitleBackgroundExperimentalWorldPlacementGate.TerritoryMismatch => "territory-mismatch",
+            _ => "unknown",
+        };
+    }
+}
+
+// 配置の最終決定（Target/Source に加え、実際に選ばれたアンカーの effective frame を持つ）。
+// EffectiveFrame は診断の provenance 判定（HasGroundProvenance）へ正しい frame を渡すために必要。
+internal readonly record struct TitleBackgroundCharaSelectPlacementDecision(
+    Vector3 Target,
+    string Source,
+    bool UsedAnchor,
+    string EffectiveFrame);
+
+// 「今の見え方を保存」した CharaSelect カメラ。pose 付きはFixOn自然焦点に対する相対構図、
+// pose 無しの旧形式だけがscene-local絶対camera/focus値（TitleEdit相当）を使う。
+// PoseCaptured/DirH/DirV/Distance は保存時のネイティブ LobbyCamera pose（runtime restore と同じフィールド群）。
+// エンジンは camera 位置を DirH/DirV/Distance＋焦点から毎フレーム再導出するため（view.trace 実測）、
+// camera 位置形式の FixOn 上書きは数フレームで負ける。pose 形式の復元が構図持続の本命で、
+// PoseCaptured=false の旧保存 view は pose 復元を行わない（後方互換）。
+internal readonly record struct TitleBackgroundCharaSelectView(
+    bool Enabled,
+    string CandidateId,
+    Vector3 Camera,
+    Vector3 Focus,
+    float FovY,
+    bool PoseCaptured = false,
+    float DirH = 0f,
+    float DirV = 0f,
+    float Distance = 0f)
+{
+    public static TitleBackgroundCharaSelectView None { get; } =
+        new(false, string.Empty, Vector3.Zero, Vector3.Zero, TitleBackgroundPreset.DefaultFovY);
+
+    public bool HasUsableView =>
+        Enabled
+        && TitleBackgroundCameraMath.IsFiniteVector(Camera)
+        && TitleBackgroundCameraMath.IsFiniteVector(Focus)
+        && float.IsFinite(FovY)
+        && FovY > 0f;
+
+    public bool HasUsablePose =>
+        PoseCaptured
+        && float.IsFinite(DirH)
+        && float.IsFinite(DirV)
+        && float.IsFinite(Distance)
+        && Distance > 0f;
+}
+
+internal readonly record struct TitleBackgroundFixOnViewResolution(
+    bool ShouldOverride,
+    Vector3 Camera,
+    Vector3 Focus,
+    float FovY,
+    string Source,
+    string ApplicationMode);
+
+// FixOn detour から呼ぶ「見え方」適用の純粋判定。pose付きは自然FixOn後の相対pose、
+// pose無しの旧viewだけはTitleEdit同様の絶対camera/focus/fovを選ぶ。候補は非空・完全一致のみ。
+internal static class TitleBackgroundFixOnViewOverrideLogic
+{
+    public const string ViewSource = "view";
+    public const string PassthroughSource = "passthrough";
+    public const string ApplicationModePassthrough = "passthrough";
+    public const string ApplicationModeDelayedPose = "delayed-pose";
+    public const string ApplicationModeLegacyAbsolute = "legacy-absolute";
+
+    public static TitleBackgroundFixOnViewResolution Resolve(
+        bool featureEnabled,
+        TitleBackgroundCharaSelectView view,
+        string? activeCandidateId,
+        Vector3 observedCamera,
+        Vector3 observedFocus,
+        float observedFovY)
+    {
+        if (featureEnabled
+            && view.HasUsableView
+            && MatchesCandidateStrict(view.CandidateId, activeCandidateId))
+        {
+            return new TitleBackgroundFixOnViewResolution(
+                true,
+                view.Camera,
+                view.Focus,
+                view.FovY,
+                ViewSource,
+                view.HasUsablePose ? ApplicationModeDelayedPose : ApplicationModeLegacyAbsolute);
+        }
+
+        return new TitleBackgroundFixOnViewResolution(
+            false,
+            observedCamera,
+            observedFocus,
+            observedFovY,
+            PassthroughSource,
+            ApplicationModePassthrough);
+    }
+
+    // 安全側に倒し、空 CandidateId のワイルドカード一致は許さない（別背景に適用させない）。
+    private static bool MatchesCandidateStrict(string viewCandidateId, string? activeCandidateId)
+    {
+        var normalized =
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(viewCandidateId);
+        if (string.IsNullOrEmpty(normalized))
+        {
+            return false;
+        }
+
+        return string.Equals(
+            normalized,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(activeCandidateId),
+            StringComparison.Ordinal);
+    }
+
+    // scene load 後にカメラ pose (yaw/pitch/distance 等) を書く経路向けの譲歩判定。
+    // FixOn 側の view override 成立条件（featureEnabled && view.HasUsableView && candidate 正規化一致）と
+    // 完全に同一の判定にすることで、「view override は勝ったのに runtime restore がまた上書きする」
+    // 非対称を作らない。保存 view が使用可能かつ active candidate と一致するときだけ true を返し、
+    // 呼び出し側はその scene generation でのカメラ pose 書込みをスキップまたは view pose 適用へ切り替える。
+    public static bool ShouldYieldCameraPoseToSavedView(
+        bool viewEnabled,
+        TitleBackgroundCharaSelectView view,
+        string? activeCandidateId)
+    {
+        return viewEnabled
+            && view.HasUsableView
+            && MatchesCandidateStrict(view.CandidateId, activeCandidateId);
+    }
+
+    // scene load 後の runtime camera restore 経路の決定（3値）。
+    // - ProceedRuntimeRestore: view 非成立（または run 中の抑止）→ 従来の runtime restore を実行する。
+    // - DeferSavedViewPoseToFixOn: pose 付き view が成立 → scene-readyでは書かず、FixOn originalが自然焦点を
+    //   確定した直後のone-shot適用へ委ねる。
+    // - YieldNoPose: pose 無しの旧保存 view が成立 → 従来どおり譲る（後方互換。FixOn の camera/focus
+    //   override に任せる。再保存すれば pose 付きへ昇格する）。
+    // view 成立条件は ShouldYieldCameraPoseToSavedView（= FixOn 側 Resolve の成立条件）と同一。
+    public const string RestoreDecisionProceedRuntimeRestore = "proceed-runtime-restore";
+    public const string RestoreDecisionDeferSavedViewPoseToFixOn = "defer-saved-view-pose-to-fixon";
+    public const string RestoreDecisionYieldNoPose = "yield-no-pose";
+
+    public static string ResolveRuntimeCameraRestoreDecision(
+        bool suppressedByAutomaticRun,
+        bool viewEnabled,
+        TitleBackgroundCharaSelectView view,
+        string? activeCandidateId)
+    {
+        if (suppressedByAutomaticRun)
+        {
+            return RestoreDecisionProceedRuntimeRestore;
+        }
+
+        if (!ShouldYieldCameraPoseToSavedView(viewEnabled, view, activeCandidateId))
+        {
+            return RestoreDecisionProceedRuntimeRestore;
+        }
+
+        return view.HasUsablePose
+            ? RestoreDecisionDeferSavedViewPoseToFixOn
+            : RestoreDecisionYieldNoPose;
+    }
+}
+
+internal static class TitleBackgroundFixOnFocusOverrideLogic
+{
+    public const string AnchorSource = "anchor";
+    public const string PassthroughSource = "passthrough";
+
+    // 診断用: 焦点 override の適用可否理由を1語で返す純粋関数。
+    // 適用条件（feature ON / passive OFF / 実行コンテキスト ready）と完全に一致し、
+    // "ready" を返すときだけ detour が override を適用する。
+    public const string GateReady = "ready";
+    public const string GateFeatureOff = "feature-off";
+    public const string GatePassivePrecedence = "passive-precedence";
+
+    public static string DescribeGateReason(
+        bool passiveObservationEnabled,
+        bool focusAnchorOverrideEnabled,
+        bool contextReady,
+        string contextReason)
+    {
+        if (!focusAnchorOverrideEnabled)
+        {
+            return GateFeatureOff;
+        }
+
+        if (passiveObservationEnabled)
+        {
+            return GatePassivePrecedence;
+        }
+
+        return contextReady ? GateReady : contextReason;
+    }
+
+    // passive 観測（上書きしない）を最優先する。passive ON のときは UI に「override なし」と
+    // 表示されている以上、focus override は絶対に行わない。
+    public static bool ShouldConsiderFocusOverride(
+        bool passiveObservationEnabled,
+        bool focusAnchorOverrideEnabled)
+    {
+        return focusAnchorOverrideEnabled && !passiveObservationEnabled;
+    }
+
+    // FixOn はシーン読み込みの最中に1回発火し、その時点で CurrentLobbyMap は None へ戻り得る。
+    // よって CurrentLobbyMap には依存せず、LoadLobbyScene 時点で original 呼び出し前に確定する
+    // セッション状態（session active / scene generation の一致 / CharaSelect セッション）でゲートする。
+    // bridgeActive は呼び出し側で composition bridge 設定をまとめて評価して渡す。
+    public static bool IsExecutionContextReady(
+        bool isLoggedIn,
+        bool serviceReady,
+        bool bridgeActive,
+        bool sessionActive,
+        int activeSceneGeneration,
+        int currentSceneGeneration,
+        bool charaSelectSessionLobby)
+    {
+        return !isLoggedIn
+            && serviceReady
+            && bridgeActive
+            && sessionActive
+            && activeSceneGeneration > 0
+            && currentSceneGeneration == activeSceneGeneration
+            && charaSelectSessionLobby;
+    }
+
+    // 専用フラグ ON かつアンカーが使え、かつ現在候補に「非空・完全一致」するときだけ、
+    // ゲームが渡してきた焦点を保存済み陸上アンカー由来の座標へ差し替える。
+    // それ以外は observedFocus をそのまま通す（passive 観測と同じ非干渉）。
+    // アンカーはキャラの足元座標なので、焦点はキャラ胴体（足元 + bodyDrop）を向くよう Y を持ち上げ、
+    // 水平は X/Z をアンカーへ寄せる。これで「足元を見下ろす」構図を避ける。
+    public static TitleBackgroundFixOnFocusResolution Resolve(
+        bool featureEnabled,
+        TitleBackgroundCharaSelectAnchor anchor,
+        string? activeCandidateId,
+        Vector3 observedFocus,
+        float bodyDrop)
+    {
+        if (featureEnabled
+            && anchor.HasUsableAnchor
+            && TitleBackgroundCameraMath.IsFiniteVector(anchor.Position)
+            && float.IsFinite(bodyDrop)
+            && MatchesCandidateStrict(anchor.CandidateId, activeCandidateId))
+        {
+            var focus = new Vector3(
+                anchor.Position.X,
+                anchor.Position.Y + bodyDrop,
+                anchor.Position.Z);
+            if (TitleBackgroundCameraMath.IsFiniteVector(focus))
+            {
+                return new TitleBackgroundFixOnFocusResolution(true, focus, AnchorSource);
+            }
+        }
+
+        return new TitleBackgroundFixOnFocusResolution(false, observedFocus, PassthroughSource);
+    }
+
+    // カメラ焦点 override は安全側に倒し、空 CandidateId のワイルドカード一致を許さない。
+    // 設定移行や手動編集で空 ID の有効アンカーが残っても、別背景の焦点を書き換えないようにする。
+    private static bool MatchesCandidateStrict(string anchorCandidateId, string? activeCandidateId)
+    {
+        var normalizedAnchor =
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(anchorCandidateId);
+        if (string.IsNullOrEmpty(normalizedAnchor))
+        {
+            return false;
+        }
+
+        return string.Equals(
+            normalizedAnchor,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(activeCandidateId),
+            StringComparison.Ordinal);
+    }
+}
+
+internal static class TitleBackgroundCharaSelectAnchorLogic
+{
+    public const string AnchorSource = "anchor";
+    public const string CameraFocusSource = "camera-focus";
+    // experimental world 座標由来の配置（anchor / camera-focus と区別し、ground-verified にしない）。
+    public const string WorldExperimentalSource = "world-experimental";
+
+    public const float DefaultPositionNudgeStep = 0.1f;
+
+    // 5 度ぶんのラジアン。回転の微調整単位（適用は将来対応）。
+    public const float DefaultRotationNudgeStep = 0.0872664626f;
+
+    public static TitleBackgroundCharaSelectAnchor CaptureFromDrawPosition(
+        string? candidateId,
+        Vector3 position,
+        float rotation)
+    {
+        if (!TitleBackgroundCameraMath.IsFiniteVector(position) || !float.IsFinite(rotation))
+        {
+            return TitleBackgroundCharaSelectAnchor.None;
+        }
+
+        return new TitleBackgroundCharaSelectAnchor(
+            true,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(candidateId),
+            position,
+            TitleBackgroundCharaSelectCameraLogic.NormalizeRadians(rotation));
+    }
+
+    public static TitleBackgroundCharaSelectAnchor ApplyNudge(
+        TitleBackgroundCharaSelectAnchor anchor,
+        TitleBackgroundCharaSelectAnchorAxis axis,
+        float delta)
+    {
+        if (!float.IsFinite(delta))
+        {
+            return anchor;
+        }
+
+        var position = anchor.Position;
+        var rotation = anchor.Rotation;
+        switch (axis)
+        {
+            case TitleBackgroundCharaSelectAnchorAxis.X:
+                position.X += delta;
+                break;
+            case TitleBackgroundCharaSelectAnchorAxis.Y:
+                position.Y += delta;
+                break;
+            case TitleBackgroundCharaSelectAnchorAxis.Z:
+                position.Z += delta;
+                break;
+            case TitleBackgroundCharaSelectAnchorAxis.Rotation:
+                rotation = TitleBackgroundCharaSelectCameraLogic.NormalizeRadians(rotation + delta);
+                break;
+        }
+
+        if (!TitleBackgroundCameraMath.IsFiniteVector(position) || !float.IsFinite(rotation))
+        {
+            return anchor;
+        }
+
+        // nudge は既存アンカーを有効化したまま編集する（capture 前の nudge は無効のまま）。
+        return anchor with { Position = position, Rotation = rotation };
+    }
+
+    // placement の毎フレーム呼び出しから使う。アンカーが使え、かつ現在の候補に一致するなら
+    // アンカー固定座標を返す。そうでなければ従来どおりカメラ注視点ベースのフォールバックを返す。
+    public static TitleBackgroundCharaSelectPlacementResolution ResolvePlacementTarget(
+        TitleBackgroundCharaSelectAnchor anchor,
+        string? activeCandidateId,
+        Vector3 cameraLookAt,
+        float bodyDrop)
+    {
+        if (anchor.HasUsableAnchor && AnchorMatchesCandidate(anchor, activeCandidateId))
+        {
+            return new TitleBackgroundCharaSelectPlacementResolution(anchor.Position, AnchorSource, true);
+        }
+
+        var fallback = new Vector3(cameraLookAt.X, cameraLookAt.Y - bodyDrop, cameraLookAt.Z);
+        return new TitleBackgroundCharaSelectPlacementResolution(fallback, CameraFocusSource, false);
+    }
+
+    // 配置の優先順位を明示する純粋関数（problem 4）。
+    // 1) experimental World（呼び出し側が territory/candidate を gate 済みのときのみ true）
+    // 2) 既存の placement-supported アンカー（LobbyNative / CharaSelectFallback）
+    // 3) camera-focus フォールバック
+    // World が無効でも 2) の既存アンカーは従来どおり使われる（巻き添え無効化を防ぐ）。
+    public static TitleBackgroundCharaSelectPlacementDecision ResolvePlacementWithExperimentalWorld(
+        bool worldExperimentalEligible,
+        Vector3 worldPosition,
+        TitleBackgroundCharaSelectAnchor supportedAnchor,
+        string? supportedFrame,
+        string? activeCandidateId,
+        Vector3 cameraLookAt,
+        float bodyDrop)
+    {
+        if (worldExperimentalEligible && TitleBackgroundCameraMath.IsFiniteVector(worldPosition))
+        {
+            return new TitleBackgroundCharaSelectPlacementDecision(
+                worldPosition,
+                WorldExperimentalSource,
+                true,
+                TitleBackgroundCharaSelectAnchorFrame.World);
+        }
+
+        if (supportedAnchor.HasUsableAnchor && AnchorMatchesCandidate(supportedAnchor, activeCandidateId))
+        {
+            return new TitleBackgroundCharaSelectPlacementDecision(
+                supportedAnchor.Position,
+                AnchorSource,
+                true,
+                string.IsNullOrWhiteSpace(supportedFrame)
+                    ? TitleBackgroundCharaSelectAnchorFrame.Unknown
+                    : supportedFrame);
+        }
+
+        var fallback = new Vector3(cameraLookAt.X, cameraLookAt.Y - bodyDrop, cameraLookAt.Z);
+        return new TitleBackgroundCharaSelectPlacementDecision(
+            fallback,
+            CameraFocusSource,
+            false,
+            TitleBackgroundCharaSelectAnchorFrame.Unknown);
+    }
+
+    public static bool AnchorMatchesCandidate(
+        TitleBackgroundCharaSelectAnchor anchor,
+        string? activeCandidateId)
+    {
+        // CandidateId が空のアンカーは、どの候補にも適用される（手動 capture 後の汎用扱い）。
+        if (string.IsNullOrEmpty(anchor.CandidateId))
+        {
+            return true;
+        }
+
+        return string.Equals(
+            anchor.CandidateId,
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(activeCandidateId),
+            StringComparison.Ordinal);
+    }
+}

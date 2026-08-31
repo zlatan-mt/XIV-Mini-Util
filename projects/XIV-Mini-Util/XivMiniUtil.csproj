@@ -1,0 +1,72 @@
+<!-- Path: projects/XIV-Mini-Util/XivMiniUtil.csproj -->
+<!-- Description: Dalamudプラグインのビルド設定を定義する -->
+<!-- Reason: .NET 10とDalamud.NET.Sdkでプラグインを生成するため -->
+<!-- RELEVANT FILES: projects/XIV-Mini-Util/Plugin.cs, projects/XIV-Mini-Util/Configuration.cs, projects/XIV-Mini-Util/Windows/MainWindow.cs -->
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources>
+    <NuGetAudit>false</NuGetAudit>
+    <DalamudPluginInternalName>XivMiniUtil</DalamudPluginInternalName>
+    <DalamudPluginName>XIV Mini Util</DalamudPluginName>
+    <DalamudPluginAuthor>zlatan-mt</DalamudPluginAuthor>
+    <DalamudPluginDescription>マテリア精製とアイテム分解を支援するミニユーティリティ。Dalamud API 15 Testing 対応。</DalamudPluginDescription>
+    <Name>XIV Mini Util</Name>
+    <Author>zlatan-mt</Author>
+    <Description>マテリア精製とアイテム分解をワンクリックで進めるためのミニユーティリティです。対象アイテムの自動選択、確認ダイアログ操作、ジョブ条件チェック、高レベル警告を提供します。</Description>
+    <Punchline>Materia精製と分解を手早く支援します。</Punchline>
+    <InternalName>XivMiniUtil</InternalName>
+    <AssemblyName>XivMiniUtil</AssemblyName>
+    <AssemblyVersion>0.4.0.0</AssemblyVersion>
+    <Version>0.4.0</Version>
+    <PackageProjectUrl>https://github.com/zlatan-mt/XIV-Mini-Util</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/zlatan-mt/XIV-Mini-Util</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <ApplicableVersion>any</ApplicableVersion>
+    <DalamudApiLevel>15</DalamudApiLevel>
+    <Tags>utility;materia;desynth;automation</Tags>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(OS)' != 'Windows_NT'">
+    <!-- WSL/Linux 上の Dalamud Hook 環境では一部バインディング DLL が配布されないため抑制 -->
+    <NoWarn>$(NoWarn);MSB3245</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Dalamud.Bindings.ImGui">
+      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <DevPluginOutputDir Condition="'$(APPDATA)' != ''">$(APPDATA)\XIVLauncher\devPlugins\XivMiniUtil\</DevPluginOutputDir>
+    <DevPluginOutputDir Condition="'$(APPDATA)' == ''">/tmp/XivMiniUtil/</DevPluginOutputDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <DalamudPluginInternalName>XivMiniUtil.Dev</DalamudPluginInternalName>
+    <DalamudPluginName>XIV Mini Util (Dev)</DalamudPluginName>
+    <InternalName>XivMiniUtil.Dev</InternalName>
+    <AssemblyName>XivMiniUtil.Dev</AssemblyName>
+    <DevPluginOutputDir Condition="'$(APPDATA)' != ''">$(APPDATA)\XIVLauncher\devPlugins\XivMiniUtil.Dev\</DevPluginOutputDir>
+    <DevPluginOutputDir Condition="'$(APPDATA)' == ''">/tmp/XivMiniUtil.Dev/</DevPluginOutputDir>
+  </PropertyGroup>
+
+  <Target Name="CopyDevPluginOutput" AfterTargets="Build" Condition="'$(DevPluginOutputDir)' != ''">
+    <MakeDir Directories="$(DevPluginOutputDir)" Condition="!Exists('$(DevPluginOutputDir)')" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DevPluginOutputDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetDir)$(AssemblyName).json"
+          DestinationFiles="$(DevPluginOutputDir)manifest.json"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(TargetDir)$(AssemblyName).json')" />
+    <Copy SourceFiles="$(TargetDir)$(AssemblyName).json"
+          DestinationFiles="$(DevPluginOutputDir)$(AssemblyName).json"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(TargetDir)$(AssemblyName).json')" />
+  </Target>
+
+</Project>

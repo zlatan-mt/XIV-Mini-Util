@@ -1,0 +1,96 @@
+# Path: .gitignore
+# Description: ビルド成果物やローカル環境ファイルを除外する
+# Reason: リポジトリをクリーンに保つため
+# RELEVANT FILES: projects/XIV-Mini-Util/XivMiniUtil.csproj, README.md
+# Build results and local tool outputs
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+artifacts/
+publish/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.csproj.user
+
+# Rider
+.idea/
+*.sln.iml
+
+# VS Code
+.vscode/
+
+# User-specific files
+*.rsuser
+*.userprefs
+
+# Build logs
+*.log
+msbuild*.binlog
+*.binlog
+*.pidb
+*.cache
+*.tmp
+
+# Test results
+[Tt]est[Rr]esult*/
+*.trx
+coverage/
+
+# Dalamud plugin output
+*.zip
+/dist/
+
+# OS generated
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup files
+*~
+*.bak
+*.swp
+
+# Local caches
+.cache/
+.tmp/
+
+# ReSharper
+_ReSharper*/
+*.DotSettings.user
+
+# Local AI tool files
+.claude/
+.codex
+.codex/
+.cursor/
+.gemini/
+GEMINI.md
+CLAUDE.md
+.kiro/
+.skillportrc
+
+# Local environment
+.dotnet_home/
+.devplugins/
+mp3/
+
+# External dependencies (managed separately)
+projects/FFXIVClientStructs/
+projects/ECommons/
+projects/DailyRoutines.ModulesPublic/
+
+# Temporary planning files
+plans/
+docs/notes/codex-*.md
+docs/notes/codex-*.html

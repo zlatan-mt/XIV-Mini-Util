@@ -1,0 +1,32 @@
+[
+  {
+    "Author": "zlatan-mt",
+    "Name": "XIV Mini Util",
+    "Punchline": "Materia精製と分解を手早く支援します。",
+    "Description": "マテリア精製とアイテム分解、NPC販売場所検索を支援するミニユーティリティです。",
+    "InternalName": "XivMiniUtil",
+    "AssemblyVersion": "0.4.0.0",
+    "TestingAssemblyVersion": "0.4.0.0",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 15,
+    "TestingDalamudApiLevel": 15,
+    "Tags": [
+      "utility",
+      "materia",
+      "desynth",
+      "shop"
+    ],
+    "IsHide": false,
+    "IsTestingExclusive": false,
+    "DownloadCount": 0,
+    "RepoUrl": "https://github.com/zlatan-mt/XIV-Mini-Util",
+    "IconUrl": "https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/images/icon.png",
+    "ImageUrls": [],
+    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.0/XivMiniUtil.zip",
+    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.0/XivMiniUtil.zip",
+    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.0/XivMiniUtil.zip",
+    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.0/XivMiniUtil.zip",
+    "Changelog": "0.3.7以降のまとめ。キャラ選択画面でキャラ別の保存エモート再生とログイン背景の変更に対応（背景ごとに調整した時刻・天候を適用、1クリック確認、失敗時は安全側で自動停止、Elpisの花畑やFRUクリア後ステージなど収録背景）。装着マテリアの右クリック連続回収と安全ガード・確認フローを整備。潜水艦の複数キャラ横断・帰投サマリーを追加。",
+    "LastUpdate": 1788185917
+  }
+]
