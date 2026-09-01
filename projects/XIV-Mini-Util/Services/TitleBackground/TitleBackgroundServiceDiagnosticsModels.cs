@@ -94,19 +94,6 @@ internal readonly record struct TitleBackgroundPhase2CVerdicts(
     string DistancePostRestoreStability,
     string TiltOffsetPostApplyObservableEffect);
 
-internal readonly record struct TitleBackgroundSelfTestVerdict(bool Pass, string Reason)
-{
-    public static TitleBackgroundSelfTestVerdict Success()
-    {
-        return new TitleBackgroundSelfTestVerdict(true, string.Empty);
-    }
-
-    public static TitleBackgroundSelfTestVerdict Fail(string reason)
-    {
-        return new TitleBackgroundSelfTestVerdict(false, reason);
-    }
-}
-
 internal readonly record struct TitleBackgroundPhase2CTimelineSnapshot(
     int Frame,
     bool ActiveCameraCaptured,

@@ -11,7 +11,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
     {
         if (_probeTimeline.CameraProbeSession != null)
         {
-            return ["[Probe] camera probe is armed; run /xmutbgcamprobe restore before starting hook probe."];
+            return ["[Probe] camera probe is armed; restore it before starting hook probe."];
         }
 
         if (_probeTimeline.ActiveProbeSession != null)
@@ -111,12 +111,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
     {
         if (_probeTimeline.ActiveProbeSession != null)
         {
-            return ["[CameraProbe] hook probe is active; run /xmutbgprobe off before arming camera probe."];
+            return ["[CameraProbe] hook probe is active; stop it before arming camera probe."];
         }
 
         if (_probeTimeline.CameraProbeSession != null)
         {
-            return ["[CameraProbe] already armed; run /xmutbgcamprobe restore before arming again."];
+            return ["[CameraProbe] already armed; restore camera probe before arming again."];
         }
 
         var baselineCamera = new Vector3(
@@ -167,7 +167,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 $"[CameraProbe] probeFocus={FormatVector(probeFocus)}",
                 $"[CameraProbe] expectedCameraYDelta={FormatFloat(probeCamera.Y - baselineCamera.Y)}",
                 $"[CameraProbe] expectedFocusYDelta={FormatFloat(probeFocus.Y - baselineFocus.Y)}",
-                "[CameraProbe] next=logout -> character select -> login -> /xmutbgcamprobe report",
+                "[CameraProbe] next=logout -> character select -> login -> collect the automatic report",
             ];
         }
         catch (Exception ex)

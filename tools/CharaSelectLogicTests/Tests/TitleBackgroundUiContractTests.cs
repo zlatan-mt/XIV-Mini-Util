@@ -120,18 +120,13 @@ Test(329, "settings tab is split into title background partial", () =>
     var root = FindRepositoryRoot();
     var tbFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackground.cs");
     var mainFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs");
-    var diagFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackgroundDiagnostics.cs");
     var tbText = File.ReadAllText(tbFile);
-    var diagText = File.ReadAllText(diagFile);
     var mainText = File.ReadAllText(mainFile);
-    // 通常画面は最小、診断は別ファイルへ物理分割。通常ファイルに診断系メソッドを残さない。
+    // 通常画面は最小化し、不要になった開発者向け診断UIはファイルごと削除する。
     return tbText.Contains("private void DrawTitleBackgroundSettings()", StringComparison.Ordinal)
         && !tbText.Contains("DrawTitleBackgroundSimplePanel", StringComparison.Ordinal)
         && !tbText.Contains("ClearTitleBackgroundInputs", StringComparison.Ordinal)
-        && diagText.Contains("private void DrawTitleBackgroundDiagnostics()", StringComparison.Ordinal)
-        && !diagText.Contains("ClearTitleBackgroundInputs", StringComparison.Ordinal)
-        && !diagText.Contains("CollapsingHeader", StringComparison.Ordinal)
-        && File.ReadAllLines(diagFile).Length < 100
+        && !File.Exists(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackgroundDiagnostics.cs"))
         && !mainText.Contains("private void DrawTitleBackgroundSettings()", StringComparison.Ordinal);
 });
 
@@ -291,22 +286,22 @@ Test(404, "repository contract keeps one-click verification and minimal visible 
     var agentsPath = Path.Combine(root, "AGENTS.md");
     var gitignore = File.ReadAllText(Path.Combine(root, ".gitignore"));
     var agents = File.ReadAllText(agentsPath);
-    var diagnosticsPath = Path.Combine(
+    var settingsPath = Path.Combine(
         root,
         "projects",
         "XIV-Mini-Util",
         "Windows",
         "Components",
-        "SettingsTab.TitleBackgroundDiagnostics.cs");
-    var diagnostics = File.ReadAllText(diagnosticsPath);
+        "SettingsTab.cs");
+    var settings = File.ReadAllText(settingsPath);
 
     return !gitignore
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
             .Any(line => string.Equals(line.Trim(), "AGENTS.md", StringComparison.Ordinal))
         && agents.Contains("原則として1回の操作または1回の対象フロー", StringComparison.Ordinal)
-        && File.ReadAllLines(diagnosticsPath).Length < 100
-        && !diagnostics.Contains("CollapsingHeader", StringComparison.Ordinal)
-        && !diagnostics.Contains("TreeNode", StringComparison.Ordinal);
+        && !File.Exists(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackgroundDiagnostics.cs"))
+        && !settings.Contains("Title背景 診断（開発者）", StringComparison.Ordinal)
+        && !settings.Contains("DrawTitleBackgroundDiagnostics", StringComparison.Ordinal);
 });
 
 Test(405, "title background OFF clears the V2 production flag without adding a normal-screen control", () =>

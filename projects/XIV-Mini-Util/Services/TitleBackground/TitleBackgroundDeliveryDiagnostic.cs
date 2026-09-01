@@ -1,6 +1,6 @@
 // Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundDeliveryDiagnostic.cs
 // Description: Character Select 背景配送 MVP の互換性・fallback・安全判定をまとめる
-// Reason: 実機 write を増やさずに Phase 2N の配送状態を /xmutbgdiag とテストで判断するため
+// Reason: 実機 write を増やさずに Phase 2N の配送状態を自動レポートとテストで判断するため
 using System.Numerics;
 using XivMiniUtil.Services.Common;
 
@@ -842,7 +842,7 @@ internal static class TitleBackgroundDeliveryDiagnostic
                 ? "preset has no Character Select compatibility metadata yet"
                 : "custom override target has no Character Select compatibility metadata yet",
             TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly,
-            "requires one real-game /xmutbgdiag capture",
+            "requires one real-game internal diagnostic capture",
             true,
             false);
     }

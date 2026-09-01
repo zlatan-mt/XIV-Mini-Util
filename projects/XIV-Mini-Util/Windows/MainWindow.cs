@@ -49,13 +49,13 @@ public sealed class MainWindow : Window, IDisposable
         TitleScreenBackgroundService titleScreenBackgroundService,
         bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
-        : base($"XIV Mini Util [{BuildInfo}]")
+        : base("XIV Mini Util")
     {
         _homeTab = new HomeTab(configuration, materiaService, materiaRetrievalService, desynthService, inventoryCacheService, materiaFeatureEnabled, desynthFeatureEnabled);
         _searchTab = new SearchTab(shopDataCache, shopSearchService);
         _checklistTab = new ChecklistTab(configuration, checklistService);
         _submarineTab = new SubmarineTab(configuration, submarineDataStorage);
-        _settingsTab = new SettingsTab(configuration, materiaService, desynthService, shopDataCache, discordService, checklistService, dutyReadyNotificationService, charaSelectService, titleScreenBackgroundService, materiaFeatureEnabled, desynthFeatureEnabled);
+        _settingsTab = new SettingsTab(configuration, shopDataCache, discordService, dutyReadyNotificationService, charaSelectService, titleScreenBackgroundService, desynthFeatureEnabled);
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -80,7 +80,7 @@ public sealed class MainWindow : Window, IDisposable
     {
         if (ImGui.BeginTabBar("MainTabs"))
         {
-            var homeOpen = ImGui.BeginTabItem("Home");
+            var homeOpen = ImGui.BeginTabItem("ホーム");
             if (homeOpen)
             {
                 _homeTab.SetVisible(true);
@@ -92,26 +92,26 @@ public sealed class MainWindow : Window, IDisposable
                 _homeTab.SetVisible(false);
             }
 
-            if (ImGui.BeginTabItem("Search"))
+            if (ImGui.BeginTabItem("検索"))
             {
                 _searchTab.Draw();
                 ImGui.EndTabItem();
             }
 
-            if (ImGui.BeginTabItem("Checklist"))
+            if (ImGui.BeginTabItem("チェックリスト"))
             {
                 _checklistTab.Draw();
                 ImGui.EndTabItem();
             }
 
-            if (ImGui.BeginTabItem("Submarines"))
+            if (ImGui.BeginTabItem("潜水艦"))
             {
                 _submarineTab.Draw();
                 ImGui.EndTabItem();
             }
 
             var settingsFlags = _selectSettingsTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
-            if (ImGui.BeginTabItem("Settings", settingsFlags))
+            if (ImGui.BeginTabItem("設定", settingsFlags))
             {
                 _selectSettingsTab = false;
                 _settingsTab.Draw();

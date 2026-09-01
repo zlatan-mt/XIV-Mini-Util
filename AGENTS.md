@@ -10,6 +10,19 @@
 - 変更前に対象ファイル、影響範囲、確認方法を短く確認する。
 - コメントは必要最小限にし、コードだけでは意図が読み取りにくい箇所に限る。
 
+## Repository identity guard
+
+- このリポジトリの canonical は `zlatan-mt/XIV-Mini-Util`（`https://github.com/zlatan-mt/XIV-Mini-Util.git`）だけとする。
+- XIV Mini Util の実装・調査・GitHub確認を始める前に、次の3点を実行する。
+
+  ```powershell
+  git remote get-url origin
+  gh repo view --json nameWithOwner
+  git rev-parse origin/main
+  ```
+
+- `origin` と `nameWithOwner` が canonical と一致し、対象の main SHA を取得できない場合は作業を開始しない。別 repository の履歴、branch、PR、checkout を base や reference として使用しない。
+
 ## プロジェクト概要
 
 - 対象: Dalamud API 15 / .NET 10

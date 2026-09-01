@@ -31,8 +31,6 @@ public sealed class DutyReadyNotificationService : IDisposable
     private bool _isRinging;
     private DateTime _ringingStartedAt;
     private DateTime _lastPlayedAt;
-    private CancellationTokenSource? _testPlaybackDelayCts;
-
     public DutyReadyNotificationService(
         IFramework framework,
         Configuration configuration,
@@ -54,47 +52,14 @@ public sealed class DutyReadyNotificationService : IDisposable
 
     public void StopNotification()
     {
-        CancelPendingTestPlayback();
         StopRinging();
         StopCurrentSound();
         _mutedForCurrentVisible = IsAnyDutyReadyConfirmVisible(DateTime.UtcNow);
     }
 
-    public async Task PlayTestAfterDelayAsync(TimeSpan delay)
-    {
-        var previousCts = _testPlaybackDelayCts;
-        var currentCts = new CancellationTokenSource();
-        _testPlaybackDelayCts = currentCts;
-
-        previousCts?.Cancel();
-        previousCts?.Dispose();
-
-        try
-        {
-            await Task.Delay(delay, currentCts.Token).ConfigureAwait(false);
-            if (IsGameWindowInactive())
-            {
-                PlayOnceSafe();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        finally
-        {
-            if (ReferenceEquals(_testPlaybackDelayCts, currentCts))
-            {
-                _testPlaybackDelayCts = null;
-            }
-
-            currentCts.Dispose();
-        }
-    }
-
     public void Dispose()
     {
         _framework.Update -= OnFrameworkUpdate;
-        CancelPendingTestPlayback();
         StopRinging();
     }
 
@@ -191,13 +156,6 @@ public sealed class DutyReadyNotificationService : IDisposable
         }
 
         _isRinging = false;
-    }
-
-    private void CancelPendingTestPlayback()
-    {
-        _testPlaybackDelayCts?.Cancel();
-        _testPlaybackDelayCts?.Dispose();
-        _testPlaybackDelayCts = null;
     }
 
     private void PlayOnceSafe()

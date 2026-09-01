@@ -9,40 +9,6 @@ namespace XivMiniUtil.Windows.Components;
 
 public sealed partial class SettingsTab
 {
-    private void DrawGeneralSettings()
-    {
-        ImGui.Text("一般設定");
-        ImGui.Separator();
-        ImGui.Text("マテリア精製");
-        if (!_materiaFeatureEnabled)
-        {
-            ImGui.Text("現在は無効中です。");
-            ImGui.BeginDisabled();
-        }
-
-        var enabled = _materiaService.IsEnabled;
-        if (ImGui.Checkbox("自動精製を有効化", ref enabled) && _materiaFeatureEnabled)
-        {
-            if (enabled)
-            {
-                _materiaService.Enable();
-            }
-            else
-            {
-                _materiaService.Disable();
-            }
-        }
-
-        ImGui.Text(_materiaFeatureEnabled
-            ? (_materiaService.IsProcessing ? "状態: 処理中" : "状態: 待機中")
-            : "状態: 無効中");
-
-        if (!_materiaFeatureEnabled)
-        {
-            ImGui.EndDisabled();
-        }
-    }
-
     private void DrawDesynthSettings()
     {
         ImGui.Text("分解設定");
@@ -206,12 +172,6 @@ public sealed partial class SettingsTab
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("5秒後にテスト再生"))
-        {
-            _ = _dutyReadyNotificationService.PlayTestAfterDelayAsync(TimeSpan.FromSeconds(5));
-        }
-
-        ImGui.SameLine();
         if (ImGui.Button("通知音を停止"))
         {
             _dutyReadyNotificationService.StopNotification();
@@ -253,18 +213,8 @@ public sealed partial class SettingsTab
         }
 
         ImGui.Spacing();
-        ImGui.TextDisabled("Checklistタブで各項目の時刻・通知先を個別設定できます。");
+        ImGui.TextDisabled("チェックリストタブで各項目の時刻・通知先を個別設定できます。");
 
-        if (ImGui.Button("Daily項目を全て未完了に戻す"))
-        {
-            _checklistService.ResetItems(Models.Checklist.ChecklistFrequency.Daily);
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Weekly項目を全て未完了に戻す"))
-        {
-            _checklistService.ResetItems(Models.Checklist.ChecklistFrequency.Weekly);
-        }
     }
 
     private static string GetTargetModeLabel(DesynthTargetMode mode)

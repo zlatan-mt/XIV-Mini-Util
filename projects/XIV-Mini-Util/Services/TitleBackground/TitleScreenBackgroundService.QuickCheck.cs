@@ -1195,7 +1195,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         return
         [
             "[XMU QuickCheck] RESET",
-            "Next: run /xmutbgcheck start before the next Character Select login check.",
+            "Next: start another one-click verification from the Login Background settings.",
         ];
     }
 

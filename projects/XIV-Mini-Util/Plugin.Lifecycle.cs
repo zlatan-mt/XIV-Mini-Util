@@ -17,7 +17,6 @@ public sealed partial class Plugin
 
         _mainWindow.Dispose();
         _shopSearchResultWindow.Dispose();
-        _titleScreenBackgroundService.SelfTestCompleted -= OnTitleBackgroundSelfTestCompleted;
         _titleScreenBackgroundService.Dispose();
         _charaSelectService.Dispose();
         _dutyReadyNotificationService.Dispose();

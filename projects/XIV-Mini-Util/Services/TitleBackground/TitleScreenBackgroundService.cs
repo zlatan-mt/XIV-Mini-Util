@@ -95,8 +95,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private bool _integratedCompositionAutoEnabled;
     private string _lastCurrentLobbyMapResetReason = "none";
     private bool _postLoginDiagnosticSeen;
-    private TitleBackgroundSelfTestSession? _selfTestSession;
-    private const int SelfTestMaxFrame = 600;
     private const string DeferredOldSharlayanCandidateId = "custom:old-sharlayan-k5t1";
     private static readonly int[] CameraProbeTimelineFrames = [0, 1, 2, 4, 8, 16, 30, 60, 90, 120, 180, 240, 300, 450, 600, 900, 1200];
     private static readonly int[] Phase2FGeneratedCurveSamplingFrames = [0, 1, 2, 4, 8, 16, 30, 60, 90, 120];
@@ -177,8 +175,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         InitializeHooks();
         ApplyFromConfiguration();
     }
-
-    public event Action<string>? SelfTestCompleted;
 
     public void SetEnabled(bool enabled)
     {
@@ -2088,7 +2084,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         lines.Add($"characterDraw.preLoginDrawPosition={(_characterPlacement.LastPreLoginCharacterDrawPosition.HasValue ? FormatVector(_characterPlacement.LastPreLoginCharacterDrawPosition.Value) : "none")}");
         lines.Add($"characterDraw.preLoginDrawPositionNonZero={(_characterPlacement.LastPreLoginCharacterDrawPosition.HasValue && !TitleBackgroundCharacterSourceEvaluation.IsZeroPosition(_characterPlacement.LastPreLoginCharacterDrawPosition.Value))}");
         lines.Add($"characterDraw.preLoginDrawRotation={FormatFloat(_characterPlacement.LastPreLoginCharacterDrawRotation)}");
-        // 累積値（長期診断用）。/xmutbgdiag では従来どおり全 run の合計と最終配置を残す。
+        // 累積値（長期診断用）。診断レポートでは従来どおり全 run の合計と最終配置を残す。
         lines.Add($"characterPlace.appliedFrameCount={_characterPlacement.CharaSelectCharacterPlacementCount}");
         lines.Add($"characterPlace.lastTarget={(_characterPlacement.LastCharaSelectCharacterPlacementTarget.HasValue ? FormatVector(_characterPlacement.LastCharaSelectCharacterPlacementTarget.Value) : "none")}");
         lines.Add($"characterPlace.lastSource={FormatNone(_characterPlacement.LastCharaSelectCharacterPlacementSource)}");

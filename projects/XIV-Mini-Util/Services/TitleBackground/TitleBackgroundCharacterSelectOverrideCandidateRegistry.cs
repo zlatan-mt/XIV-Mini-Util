@@ -525,9 +525,9 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
             false,
             false,
             "manual",
-            "manual candidate is unverified; test with /xmutbgdiag and screenshots before promoting",
+            "manual candidate is unverified; use an internal diagnostic capture and screenshots before promoting",
             "selected character model is hidden with full scene override",
-            "verify-with-screenshot-and-xmutbgdiag");
+            "verify-with-internal-diagnostics");
         return true;
     }
 
@@ -584,7 +584,7 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
             false,
             "custom-override",
             "custom override target has no Character Select compatibility metadata yet",
-            "requires one real-game /xmutbgdiag capture",
+            "requires one real-game internal diagnostic capture",
             "add-bright-override-candidate");
     }
 

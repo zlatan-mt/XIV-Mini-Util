@@ -302,18 +302,6 @@ internal static class TitleBackgroundCameraProbeReport
             lastPointValueChangedFrame);
     }
 
-    public static bool IsGeneratedCurveSelfTestSuccess(
-        string sceneVerdict,
-        string generatedCurveOverrideVerdict,
-        string finalLookAtYMatchesGeneratedCurveVerdict,
-        string finalYawPitchDistanceMatchesPresetVerdict)
-    {
-        _ = finalYawPitchDistanceMatchesPresetVerdict;
-        return sceneVerdict == "observed"
-            && generatedCurveOverrideVerdict == "observed"
-            && finalLookAtYMatchesGeneratedCurveVerdict == "observed";
-    }
-
     public static bool IsGeneratedCurveOverrideSuccess(
         int setMidAttemptCount,
         int setMidAppliedCount,

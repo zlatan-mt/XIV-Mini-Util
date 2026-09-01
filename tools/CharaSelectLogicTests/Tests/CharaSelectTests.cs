@@ -455,18 +455,16 @@ Test(310, "game lobby type none remains minus one", () =>
     return (short)GameLobbyType.None == -1;
 });
 
-Test(332, "chara select service voice diagnostics extracted to partial", () =>
+Test(332, "obsolete chara select voice diagnostics entrypoint is removed", () =>
 {
     var root = FindRepositoryRoot();
     var diagFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.Diagnostics.cs");
     var mainFile = Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "CharaSelect", "CharaSelectService.cs");
-    var diagText = File.ReadAllText(diagFile);
     var mainText = File.ReadAllText(mainFile);
-    return diagText.Contains("GetVoiceDiagnosticLines", StringComparison.Ordinal)
-        && diagText.Contains("GetSceneCompositionDiagnosticLines", StringComparison.Ordinal)
-        && diagText.Contains("AppendVoiceTableDiagnostics", StringComparison.Ordinal)
-        && mainText.Contains("partial class CharaSelectService", StringComparison.Ordinal)
-        && !mainText.Contains("GetVoiceDiagnosticLines", StringComparison.Ordinal);
+    return !File.Exists(diagFile)
+        && !mainText.Contains("GetVoiceDiagnosticLines", StringComparison.Ordinal)
+        && !mainText.Contains("_lastVoiceDiagnosticLines", StringComparison.Ordinal)
+        && mainText.Contains("ResolveCharacterVoiceId(entry)", StringComparison.Ordinal);
 });
 
 Test(334, "chara select service emote and prefetch logic extracted to partials", () =>
@@ -487,6 +485,7 @@ Test(334, "chara select service emote and prefetch logic extracted to partials",
 Test(335, "plugin commands are registered through a command table", () =>
 {
     var root = FindRepositoryRoot();
+    var commandText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Plugin.Commands.cs"));
     var pluginText = string.Join(
         Environment.NewLine,
         Directory.EnumerateFiles(
@@ -499,7 +498,13 @@ Test(335, "plugin commands are registered through a command table", () =>
         && pluginText.Contains("_commandManager.AddHandler(registration.Name", StringComparison.Ordinal)
         && pluginText.Contains("_commandManager.RemoveHandler(registration.Name", StringComparison.Ordinal)
         && CountOccurrences(pluginText, "_commandManager.AddHandler(") == 1
-        && CountOccurrences(pluginText, "_commandManager.RemoveHandler(") == 1;
+        && CountOccurrences(pluginText, "_commandManager.RemoveHandler(") == 1
+        && commandText.Contains("new(CommandName, OnCommand", StringComparison.Ordinal)
+        && commandText.Contains("new(CommandAlias, OnCommand", StringComparison.Ordinal)
+        && !commandText.Contains("diag", StringComparison.OrdinalIgnoreCase)
+        && !commandText.Contains("xmutbg", StringComparison.OrdinalIgnoreCase)
+        && !commandText.Contains("xmuc", StringComparison.OrdinalIgnoreCase)
+        && !commandText.Contains("xmuv", StringComparison.OrdinalIgnoreCase);
 });
 
 Test(401, "new automatic run clears prior in-memory report state", () =>
