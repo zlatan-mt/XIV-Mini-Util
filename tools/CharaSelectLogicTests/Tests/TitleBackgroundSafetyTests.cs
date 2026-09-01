@@ -8496,18 +8496,18 @@ Test(572, "completed-run proof snapshot uses the approved anchor as target, not 
         && body.Contains("targetRotation = _charaSelectPlacement.CaptureCompleted", StringComparison.Ordinal);
 });
 
-Test(573, "FRU environment time policy uses the 15:17 clock time; other candidates keep noon", () =>
+Test(573, "FRU environment time policy uses the 13:00 clock time; other candidates keep noon", () =>
 {
     var fru = TitleBackgroundEnvironmentTimePolicy.ResolveDayTimeSeconds("custom:fru-clear-stage");
     var ilMheg = TitleBackgroundEnvironmentTimePolicy.ResolveDayTimeSeconds("custom:n4f4");
     var elpis = TitleBackgroundEnvironmentTimePolicy.ResolveDayTimeSeconds("custom:ultima-thule-elpis");
 
-    return fru == (15f * 3600f) + (17f * 60f)
-        && fru == 55020f
+    return fru == (13f * 3600f)
+        && fru == 46800f
         && ilMheg == TitleBackgroundEnvironmentNoonWriter.NoonDayTimeSeconds
         && elpis == TitleBackgroundEnvironmentNoonWriter.NoonDayTimeSeconds
         && ilMheg == 43200f
-        && TitleBackgroundEnvironmentTimePolicy.ResolvePolicyName("custom:fru-clear-stage") == "fru-clock-15-17"
+        && TitleBackgroundEnvironmentTimePolicy.ResolvePolicyName("custom:fru-clear-stage") == "fru-clock-13-00"
         && TitleBackgroundEnvironmentTimePolicy.ResolvePolicyName("custom:n4f4") == "noon"
         // FRU weather policy is unchanged: still Clear Skies (id 1).
         && TitleBackgroundEnvironmentWeatherPolicy.ResolveRequestedWeatherId("custom:fru-clear-stage")

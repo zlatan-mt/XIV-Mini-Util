@@ -4,7 +4,8 @@
 
 Character Select の `FRU クリア後ステージ` で欠けている可能性が高い **FRU本来の ambient VFX（花びら等）** を、既存の安全契約・配置・カメラ・戦闘ギミック抑止を維持したまま source-backed に特定し、安全に可能なら最小範囲だけ復元する。
 
-この task では **明るさ・時刻調整は行わない**。VFX復元後の実機結果でまだ暗い場合のみ、別 task として lighting/time tuning を検討する。
+この task の現行 checkpoint では、FRU の固定時刻だけを 13:00 ET へ変更する単独 production trial を行う。
+時刻 sweep、VFX有効化、lighting/time の native write は行わない。
 
 Canonical repository は `zlatan-mt/XIV-Mini-Util` のみ。旧 archive repository は一切参照しない。
 
@@ -27,10 +28,12 @@ FRU candidate stable contract:
 - layer: `0` explicit
 - approved static anchor: `(100, 0, 100)`
 - weather: Clear Skies / row 1
-- time: 15:17 ET (`DayTimeSeconds=55020`)
+- time trial: 13:00 ET (`DayTimeSeconds=46800`)
+- historical baseline: 15:17 ET (`DayTimeSeconds=55020`)
 - existing FRU placement / suppression real-game verification: PASS
 
-Current 15:17 is the MiniUtil stable value adopted after noon produced white-out in real-game validation. Do not change it in this task.
+13:00 is the upstream-authorized single time-only production trial. The historical noon white-out was not isolated as a time-only cause,
+so do not run a repeated 12:00/14:00/etc. time sweep.
 
 ## Checkpoint 1 — COMPLETE
 
@@ -38,7 +41,7 @@ A FRU-only read-only VFX inventory is already integrated into the existing OneCl
 
 Real-game OneClick evidence:
 - pre-login weather requested/readback: `1 / 1`
-- pre-login time requested/readback: `55020 / 55020`
+- historical pre-login time requested/readback: `55020 / 55020` (旧15:17 run)
 - `verify.environment=PASS`
 - VFX total: `248`
 - active: `1`
@@ -195,7 +198,8 @@ At the end of Checkpoint 2, stop and return a candidate table with approximately
 
 The target is a **small candidate set (ideally 1–a few VFX)**. If evidence only supports a giant blanket Active-state replay, report `HUMAN_DECISION_REQUIRED` and stop.
 
-Checkpoint 2 does not run Sol Review yet unless upstream explicitly asks. It does not merge and does not modify brightness/time/weather.
+Checkpoint 2 was read-only and did not run Sol Review, merge, or modify brightness/time/weather. The revised time-only trial below is the
+explicitly authorized follow-up in this same PR.
 
 ## Conditional Checkpoint 3 — Minimal VFX restore
 
@@ -224,18 +228,36 @@ Do not:
 
 If a correct authentic effect demonstrably requires untyped vfunc54 or trigger-index mutation, stop as `HUMAN_DECISION_REQUIRED`; do not silently copy TitleEdit native offsets.
 
-## Lighting/time follow-up
+## Revised checkpoint — time-only production trial
 
-Only after a VFX restore is real-game validated should perceived brightness be reconsidered.
+The VFX inventory and TitleEdit correlation did not produce a source-backed inactive ambient candidate. Apply the smallest authorized change:
 
-If the result is still too dark/flat, create a separate task. PR #3 does not change:
-- FRU 15:17
+- FRU fixed time: **13:00 ET** (`DayTimeSeconds=46800`)
+- Clear Skies row 1 remains unchanged
+- scene / camera / placement / static anchor / suppression remain unchanged
+- VFX state remains unchanged; **VFX writes=0**
+- no time sweep, new UI/config/button/command, or Light/EnvSpace/SharedGroup write
+
+After automated validation and push, perform one real-game OneClick only:
+`1クリック → logout → Character Selectで見た目確認 → login → auto-copied report`
+
+Acceptance readback:
+- pre-login weather: `1`
+- pre-login time: `46800`
+- no white-out or obvious overexposure
+- daylight/brightness is closer to the authentic post-clear field than the old 15:17 result
+- login completes normally and no post-login write/leak remains
+
+If 13:00 is still slightly dark, stop time tuning and use a separate read-only non-VFX layout comparison with priority `Light → EnvSpace → SharedGroup`.
+
+Historical evidence remains documented, but PR #3's current trial no longer treats the old 15:17 value as immutable:
+- old FRU 15:17 readback (`55020`)
 - Clear Skies row 1
 - exposure / EnvSet / unknown lighting fields
 
 ## Validation
 
-Checkpoint 2 automated minimum:
+Current time-only trial automated minimum:
 
 ```powershell
 dotnet run --project tools/CharaSelectLogicTests
@@ -250,12 +272,12 @@ Add automated tests only for small pure logic introduced by this checkpoint, for
 
 Do not add coverage-driven matrices or full E2E.
 
-Real-game validation for Checkpoint 2 is needed only if the report shape/typed runtime inventory changed materially; if required, preserve the existing one-click contract:
-`1クリック → logout → login → 自動コピーされたreportを貼る`
+Real-game validation after this push is one existing one-click contract:
+`1クリック → logout → Character Selectで見た目確認 → login → 自動コピーされたreportを貼る`
 
 ## Out of scope
 
-- brightness/time tuning
+- repeated time sweep or additional time trials
 - generic layout Active/Inactive replay
 - TitleEdit full preset engine port
 - blanket Active UUID replay

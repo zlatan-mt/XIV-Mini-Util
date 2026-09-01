@@ -230,9 +230,10 @@ internal static class TitleBackgroundCharacterSelectOverrideCandidateRegistry
     // Bg=ex3/01_nvt_n4/goe/n4gw/level/n4gw, WeatherRate slot=1=Clear Skies）。
     // character 配置は user-approved static anchor (100,0,100)（FRU アリーナ中心の floor。
     // n4gw に PositionMarker は存在しないため source-backed marker ではない）。
-    // 実機 OneClick で PASS 済み（clear-stage visual / gimmick clutter 解消 / lighting white-out 解消 /
-    // anchor + position/rotation readback / suppression stable / pre-login weather=1 & DayTimeSeconds=55020
-    // readback 一致 / login-safe / post-login leak none / placement promotion persisted）。
+    // 旧15:17条件の実機 OneClick で PASS 済み（clear-stage visual / gimmick clutter 解消 /
+    // lighting white-out 解消 / anchor + position/rotation readback / suppression stable /
+    // pre-login weather=1 & DayTimeSeconds=55020 readback 一致 / login-safe /
+    // post-login leak none / placement promotion persisted）。13:00 は時刻のみを変更した次回試行で確認する。
     private static readonly TitleBackgroundCharacterSelectOverrideCandidate FruClearStage = new(
         FruCandidateId,
         "FRU クリア後ステージ",
