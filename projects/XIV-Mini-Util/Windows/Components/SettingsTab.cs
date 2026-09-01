@@ -8,10 +8,7 @@ using ImGuiInputTextFlags = Dalamud.Bindings.ImGui.ImGuiInputTextFlags;
 using ImGuiTableColumnFlags = Dalamud.Bindings.ImGui.ImGuiTableColumnFlags;
 using ImGuiTableFlags = Dalamud.Bindings.ImGui.ImGuiTableFlags;
 using ImGuiWindowFlags = Dalamud.Bindings.ImGui.ImGuiWindowFlags;
-using XivMiniUtil.Services.Desynth;
-using XivMiniUtil.Services.Materia;
 using XivMiniUtil.Services.CharaSelect;
-using XivMiniUtil.Services.Checklist;
 using XivMiniUtil.Services.Notification;
 using XivMiniUtil.Services.Shop;
 using XivMiniUtil.Services.TitleBackground;
@@ -21,15 +18,11 @@ namespace XivMiniUtil.Windows.Components;
 public sealed partial class SettingsTab : ITabComponent
 {
     private readonly Configuration _configuration;
-    private readonly MateriaExtractService _materiaService;
-    private readonly DesynthService _desynthService;
     private readonly ShopDataCache _shopDataCache;
     private readonly DiscordService _discordService;
-    private readonly ChecklistService _checklistService;
     private readonly DutyReadyNotificationService _dutyReadyNotificationService;
     private readonly CharaSelectService _charaSelectService;
     private readonly TitleScreenBackgroundService _titleScreenBackgroundService;
-    private readonly bool _materiaFeatureEnabled;
     private readonly bool _desynthFeatureEnabled;
 
     private int _settingsCategoryIndex;
@@ -43,34 +36,24 @@ public sealed partial class SettingsTab : ITabComponent
     private Configuration? _pendingImportConfig;
     private string? _configIoMessage;
     private Vector4 _configIoMessageColor = new(0.9f, 0.9f, 0.9f, 1f);
-    private string _titleBackgroundAnchorMessage = string.Empty;
-    private Vector4 _titleBackgroundAnchorMessageColor = new(0.7f, 0.7f, 0.7f, 1f);
 
     // Submarine Settings State
 
     public SettingsTab(
         Configuration configuration,
-        MateriaExtractService materiaService,
-        DesynthService desynthService,
         ShopDataCache shopDataCache,
         DiscordService discordService,
-        ChecklistService checklistService,
         DutyReadyNotificationService dutyReadyNotificationService,
         CharaSelectService charaSelectService,
         TitleScreenBackgroundService titleScreenBackgroundService,
-        bool materiaFeatureEnabled,
         bool desynthFeatureEnabled)
     {
         _configuration = configuration;
-        _materiaService = materiaService;
-        _desynthService = desynthService;
         _shopDataCache = shopDataCache;
         _discordService = discordService;
-        _checklistService = checklistService;
         _dutyReadyNotificationService = dutyReadyNotificationService;
         _charaSelectService = charaSelectService;
         _titleScreenBackgroundService = titleScreenBackgroundService;
-        _materiaFeatureEnabled = materiaFeatureEnabled;
         _desynthFeatureEnabled = desynthFeatureEnabled;
     }
 
@@ -91,8 +74,6 @@ public sealed partial class SettingsTab : ITabComponent
             ImGui.EndTable();
         }
 
-        ImGui.Separator();
-        DrawConfigIoSection();
     }
 
     public void Dispose()
@@ -103,15 +84,14 @@ public sealed partial class SettingsTab : ITabComponent
     {
         var categories = new[]
         {
-            _materiaFeatureEnabled ? "General & Materia" : "General & Materia (無効中)",
-            _desynthFeatureEnabled ? "Desynthesis" : "Desynthesis (無効中)",
-            "Shop Search",
-            "Checklist",
+            _desynthFeatureEnabled ? "分解" : "分解（無効中）",
+            "ショップ検索",
+            "チェックリスト",
             "シャキ通知",
             "ログイン背景",
-            "キャラ選択 エモート",
-            "Title背景 診断（開発者）",
-            "Submarines",
+            "キャラ選択",
+            "潜水艦",
+            "バックアップ",
         };
 
         if (ImGui.BeginChild("SettingsCategories", new Vector2(0, 0), true))
@@ -135,34 +115,31 @@ public sealed partial class SettingsTab : ITabComponent
         switch (_settingsCategoryIndex)
         {
             case 0:
-                DrawGeneralSettings();
-                break;
-            case 1:
                 DrawDesynthSettings();
                 break;
-            case 2:
+            case 1:
                 DrawShopSearchSettings();
                 break;
-            case 3:
+            case 2:
                 DrawChecklistSettings();
                 break;
-            case 4:
+            case 3:
                 DrawDutyReadySettings();
                 break;
-            case 5:
+            case 4:
                 DrawTitleBackgroundSettings();
                 break;
-            case 6:
+            case 5:
                 DrawCharaSelectEmoteSettings();
                 break;
-            case 7:
-                DrawTitleBackgroundDiagnostics();
-                break;
-            case 8:
+            case 6:
                 DrawSubmarineSettings();
                 break;
+            case 7:
+                DrawConfigIoSection();
+                break;
             default:
-                DrawGeneralSettings();
+                DrawDesynthSettings();
                 break;
         }
 

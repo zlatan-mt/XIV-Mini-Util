@@ -25,7 +25,7 @@ public sealed class ChecklistTab : ITabComponent
     {
         if (!_configuration.ChecklistFeatureEnabled)
         {
-            ImGui.Text("チェックリスト機能は無効です。SettingsのChecklistから有効化してください。");
+            ImGui.Text("チェックリスト機能は無効です。設定の「チェックリスト」から有効化してください。");
             return;
         }
 

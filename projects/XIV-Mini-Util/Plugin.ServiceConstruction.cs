@@ -136,8 +136,6 @@ public sealed partial class Plugin : IDalamudPlugin
             pluginInterface.ConfigDirectory.FullName,
             _configuration,
             _charaSelectService);
-        _titleScreenBackgroundService.SelfTestCompleted += OnTitleBackgroundSelfTestCompleted;
-
         _materiaService = new MateriaExtractService(
             framework,
             condition,

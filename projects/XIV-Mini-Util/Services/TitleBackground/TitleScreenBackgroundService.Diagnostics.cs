@@ -1,6 +1,6 @@
 // Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleScreenBackgroundService.Diagnostics.cs
 // Description: TitleBackground の診断レポート生成と遷移診断記録を提供する
-// Reason: /xmutbgdiag のレポート生成を TitleScreenBackgroundService の本体ロジックから分離するため
+// Reason: Title Background レポート生成を TitleScreenBackgroundService の本体ロジックから分離するため
 using System.Numerics;
 
 namespace XivMiniUtil.Services.TitleBackground;
@@ -97,7 +97,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
     {
         // 自動確認時は loginTransitionSafety / sceneReadyAcceptedMultipleTimes / post-login 異常を
         // current run 内で発生したものだけで判定する。過去の累積・sticky 履歴で current run を
-        // unsafe にしない。通常の /xmutbgdiag は累積値・累積履歴を維持して長期傾向を残す。
+        // unsafe にしない。通常の診断レポートは累積値・累積履歴を維持して長期傾向を残す。
         var runScopedVerdict = automaticInvocation && IsRunScopedQuickCheckActive();
         var verdictEventSeqStart = _quickCheckState.TransitionEventSeqStart;
         var verdictSceneReadyAcceptedCount = runScopedVerdict
@@ -386,14 +386,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
         if (!includeDetailedPhase2Diagnostics)
         {
             RecordTransitionEvent(
-                automaticInvocation ? "automatic verification diagnostic collected" : "command /xmutbgdiag executed",
+                automaticInvocation ? "automatic verification diagnostic collected" : "diagnostic collection requested",
                 "normal");
             if (_clientState.IsLoggedIn && !_postLoginDiagnosticSeen)
             {
                 _postLoginDiagnosticSeen = true;
                 RecordTransitionEvent("entering logged-in world if detectable", "first logged-in diagnostic");
                 RecordTransitionEvent(
-                    automaticInvocation ? "first post-login automatic diagnostic" : "first post-login /xmutbgdiag",
+                    automaticInvocation ? "first post-login automatic diagnostic" : "first post-login diagnostic collection",
                     "normal");
             }
         }
@@ -556,7 +556,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             : string.Empty;
         if (!includeDetailedPhase2Diagnostics)
         {
-            // Keep normal /xmutbgdiag as a long-term Phase 2G summary. Detailed timelines and call
+            // Keep normal diagnostics as a long-term Phase 2G summary. Detailed timelines and call
             // traces remain failure-only so routine checks stay short.
             return
             [
@@ -901,7 +901,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             $"currentDirV={FormatFloat(currentDirV)}",
             $"currentSceneCameraPosition={FormatVector(currentSceneCameraPosition)}",
             $"currentLookAtVector={FormatVector(currentLookAtVector)}",
-            "currentCameraObservation=report-time active camera; /xmutbgdiag normally runs after login, so this is not the character-select Phase2D camera",
+            "currentCameraObservation=report-time active camera; normal collection runs after login, so this is not the character-select Phase2D camera",
             "currentLookAtVectorMeaning=raw SceneCamera.LookAtVector; meaning unverified and not directly comparable to Phase2D after login",
             $"currentDistance={FormatFloat(currentDistance)}",
             $"currentInterpDistance={FormatFloat(currentInterpDistance)}",

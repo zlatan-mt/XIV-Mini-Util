@@ -53,7 +53,7 @@ public sealed class ShopDataCache : IDisposable
         _dataManager = dataManager;
         _pluginLog = pluginLog;
         _configuration = configuration;
-        _diagnostics = new ShopDataDiagnostics(dataManager, pluginLog, new ShopDataDiagnosticsWriter(pluginLog));
+        _diagnostics = new ShopDataDiagnostics(dataManager, pluginLog);
         _nameIndex = new ShopNameIndex(dataManager);
         _npcLocationResolver = new NpcLocationResolver(dataManager, pluginLog);
         _enpcDataShopResolver = new EnpcDataShopResolver();
@@ -498,28 +498,6 @@ public sealed class ShopDataCache : IDisposable
     }
 
     /// <summary>
-    /// 診断レポートを生成してファイルに出力
-    /// </summary>
-    public string GenerateDiagnosticsReport(string outputPath)
-    {
-        if (!_isInitialized)
-        {
-            return "ショップデータが初期化されていません。";
-        }
-        return _diagnostics.GenerateDiagnosticsReport(outputPath, _itemToLocations.Count);
-    }
-
-    /// <summary>
-    /// 位置情報なしNPCの数を取得
-    /// </summary>
-    public int GetExcludedNpcCount() => _diagnostics.ExcludedNpcCount;
-
-    /// <summary>
-    /// NPCマッチなしショップの数を取得
-    /// </summary>
-    public int GetUnmatchedShopCount() => _diagnostics.UnmatchedShopCount;
-
-    /// <summary>
     /// 検索実行時にアイテムの販売場所詳細をログ出力（デバッグ用）
     /// </summary>
     public void LogSearchDiagnostics(uint itemId)
@@ -711,9 +689,6 @@ public sealed class ShopDataCache : IDisposable
                 {
                     stats.SkipNoNpcMatch();
 
-                    // 診断用：NPCマッチなしショップを記録
-                    _diagnostics.RecordUnmatchedShopItem(shopId, itemId);
-
                     continue;
                 }
 
@@ -901,8 +876,6 @@ public sealed class ShopDataCache : IDisposable
         {
             if (!ShopLocationValidator.IsValid(npcInfo))
             {
-                // 診断用：位置情報なしNPCを記録（重複除外）
-                _diagnostics.RecordExcludedNpc(npcInfo);
                 continue;
             }
 

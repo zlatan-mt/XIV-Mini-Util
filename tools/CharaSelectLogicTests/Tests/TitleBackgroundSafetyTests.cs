@@ -1900,15 +1900,6 @@ Test(175, "title background adapter end session clears active runtime state", ()
         && !adapter.ShouldApplyLookAtY();
 });
 
-Test(176, "title background generated curve self-test treats final yaw pitch distance mismatch as non-blocking", () =>
-{
-    return TitleBackgroundCameraProbeReport.IsGeneratedCurveSelfTestSuccess(
-        sceneVerdict: "observed",
-        generatedCurveOverrideVerdict: "observed",
-        finalLookAtYMatchesGeneratedCurveVerdict: "observed",
-        finalYawPitchDistanceMatchesPresetVerdict: "not-observed");
-});
-
 Test(177, "title background generated curve success requires counts and final look at y", () =>
 {
     return TitleBackgroundCameraProbeReport.IsGeneratedCurveOverrideSuccess(
@@ -2893,13 +2884,13 @@ Test(246, "title background character placement diagnostics keep old and new key
         && serviceText.Contains("DiagnosticReportBuilder.AddPrefixAliasLines(lines, aliasStartIndex, \"phase2M.\", \"characterPlacement.\")", StringComparison.Ordinal);
 });
 
-Test(247, "title background phase2q docs mention xmutbgdiag after login", () =>
+Test(247, "title background phase2q docs use the automatic report after login", () =>
 {
     var root = FindRepositoryRoot();
     var text = File.ReadAllText(Path.Combine(root, "docs", "title-background-character-select-bright-candidates.md"));
 
-    return text.Contains("`/xmutbgdiag` cannot be run from Character Select", StringComparison.Ordinal)
-        && text.Contains("Run `/xmutbgdiag` after login", StringComparison.Ordinal)
+    return !text.Contains("/xmutbgdiag", StringComparison.Ordinal)
+        && text.Contains("automatic report", StringComparison.Ordinal)
         && text.Contains("Capture a screenshot in Character Select", StringComparison.Ordinal);
 });
 
@@ -4583,7 +4574,6 @@ Test(382, "world experimental persistent apply is unlocked and standing button s
     var normal = ExtractMethodBody(
         string.Join(Environment.NewLine, Directory.EnumerateFiles(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components"), "SettingsTab*.cs").Select(File.ReadAllText)),
         "private void DrawTitleBackgroundSettings()");
-    var diagText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackgroundDiagnostics.cs"));
     var quickCheckText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.QuickCheck.cs"));
     var completeBody = ExtractMethodBody(quickCheckText, "private void CompleteAutomaticQuickCheck(bool partial)");
     // 2026-07-03: 実機3点検証(残差0.002、world/lobby恒等)を経て PersistentApplyEnabled は解禁(true)。
@@ -4593,7 +4583,6 @@ Test(382, "world experimental persistent apply is unlocked and standing button s
     // source 検証が含まれることをソース文字列検査でロックする。
     return TitleBackgroundExperimentalWorldPlacementLogic.PersistentApplyEnabled
         && !normal.Contains("DrawTitleBackgroundSimpleStandingPositionButton", StringComparison.Ordinal)
-        && !diagText.Contains("DrawTitleBackgroundSimpleStandingPositionButton", StringComparison.Ordinal)
         && completeBody.Contains("afterRestoreBeforeReload: () =>", StringComparison.Ordinal)
         && completeBody.Contains("persistedThisRun = TryPersistRunAnchorFromCandidate(persistenceCandidate)", StringComparison.Ordinal)
         && completeBody.IndexOf("RestoreAutomaticCheckSettingsOnce(", StringComparison.Ordinal)
@@ -4991,9 +4980,8 @@ Test(441, "environment noon toggle is absent from the normal title background sc
 {
     var root = FindRepositoryRoot();
     var normalText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackground.cs"));
-    var diagnosticsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackgroundDiagnostics.cs"));
     return !normalText.Contains("TitleBackgroundEnvironmentNoonEnabled", StringComparison.Ordinal)
-        && diagnosticsText.Contains("TitleBackgroundEnvironmentNoonEnabled", StringComparison.Ordinal);
+        && !normalText.Contains("TitleBackgroundEnvironmentClearSkyEnabled", StringComparison.Ordinal);
 });
 
 Test(442, "environment time writer only writes DayTimeSeconds and never touches weather/exposure", () =>
@@ -5026,9 +5014,8 @@ Test(445, "environment clear-sky toggle is absent from the normal title backgrou
 {
     var root = FindRepositoryRoot();
     var normalText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackground.cs"));
-    var diagnosticsText = File.ReadAllText(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackgroundDiagnostics.cs"));
     return !normalText.Contains("TitleBackgroundEnvironmentClearSkyEnabled", StringComparison.Ordinal)
-        && diagnosticsText.Contains("TitleBackgroundEnvironmentClearSkyEnabled", StringComparison.Ordinal);
+        && !normalText.Contains("TitleBackgroundEnvironmentNoonEnabled", StringComparison.Ordinal);
 });
 
 Test(446, "environment weather writers only write ActiveWeather to source-backed weather constants", () =>

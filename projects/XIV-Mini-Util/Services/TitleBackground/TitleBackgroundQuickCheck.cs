@@ -1,6 +1,6 @@
 // Path: projects/XIV-Mini-Util/Services/TitleBackground/TitleBackgroundQuickCheck.cs
 // Description: Character Select 背景 QuickCheck の状態、判定、UI表示文字列をまとめる
-// Reason: /xmutbgdiag の累積診断に頼らず、1回の確認結果を OK/WARN/NG で出すため
+// Reason: 累積診断に頼らず、1回の確認結果を OK/WARN/NG で出すため
 using XivMiniUtil.Services.CharaSelect;
 
 namespace XivMiniUtil.Services.TitleBackground;

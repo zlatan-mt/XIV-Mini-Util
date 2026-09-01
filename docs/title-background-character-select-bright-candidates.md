@@ -55,9 +55,9 @@ Do not invent `territoryPath`, `territoryId`, or `layerFilterKey` from visual gu
 
 1. Select the candidate from `Character Select background candidate`.
 2. Keep `selectedPresetId=none` for custom candidates.
-3. Enter Character Select and capture a screenshot. `/xmutbgdiag` cannot be run from Character Select.
+3. Enter Character Select and capture a screenshot. The automatic report is collected after login.
 4. Login to the game world.
-5. Run `/xmutbgdiag` after login.
+5. Paste the automatically copied report after login.
 6. Confirm `phase2N.backgroundApplication.observed=True`.
 7. Confirm `phase2N.backgroundDeliveryVerdict=working-background-only-observed`.
 8. Confirm `phase2N.overrideCandidate.selectedId=<candidate id>`.
@@ -98,7 +98,7 @@ Expected user-facing diagnostics after screenshot and login:
 
 ```text
 phase2N.userMessage=Background was applied as background-only. Selected character model is expected to remain hidden.
-phase2N.userNextAction=Take screenshot in Character Select, then run /xmutbgdiag after login.
+phase2N.userNextAction=Take screenshot in Character Select, then paste the automatic report after login.
 phase2N.candidateHumanName=Old Sharlayan outdoor test
 phase2N.candidateHumanStatus=Observed / Unverified / Background-only
 transition.userMessage=No post-login scene override leak observed, but sceneReady was accepted multiple times in this session.
@@ -208,7 +208,7 @@ No safe production bright candidate is currently present in this repository, so 
 6. Re-enter Character Select if needed.
 7. Capture a screenshot in Character Select.
 8. Login to the game world.
-9. Run `/xmutbgdiag` after login.
+9. Paste the automatically copied report after login.
 
 Manual candidates are always unverified by default. If a manual candidate is good, promote it to the production registry in a later code change after human confirmation.
 
@@ -222,7 +222,7 @@ Manual candidates are always unverified by default. If a manual candidate is goo
 5. Re-enter Character Select if needed.
 6. Capture SS in Character Select.
 7. Login to the game world.
-8. Run /xmutbgdiag after login.
+8. Paste the automatically copied report after login.
 9. Check:
    - background appears
    - UI appears

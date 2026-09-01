@@ -9,7 +9,7 @@ public sealed partial class SettingsTab
 {
     private void DrawCharaSelectEmoteSettings()
     {
-        ImGui.Text("キャラ選択 エモート");
+        ImGui.Text("保存エモート");
         ImGui.Separator();
 
         var emoteEnabled = _configuration.CharaSelectEmoteEnabled;
@@ -18,7 +18,7 @@ public sealed partial class SettingsTab
             _charaSelectService.SetEmoteEnabled(emoteEnabled);
         }
 
-        ImGui.TextDisabled($"現在: {_charaSelectService.GetCurrentSelectedEmoteDisplayName()}");
+        ImGui.TextDisabled($"現在のエモート: {_charaSelectService.GetCurrentSelectedEmoteDisplayName()}");
         DrawCharaSelectEmoteAdjustment(emoteEnabled);
     }
 
@@ -29,7 +29,7 @@ public sealed partial class SettingsTab
             ImGui.BeginDisabled();
         }
 
-        ImGui.Text($"最後に記録: {_charaSelectService.GetLastRecordedEmoteDisplayName()}");
+        ImGui.Text($"記録済み: {_charaSelectService.GetLastRecordedEmoteDisplayName()}");
         if (ImGui.Button("前へ"))
         {
             _charaSelectService.SelectPreviousEmote();
@@ -59,14 +59,13 @@ public sealed partial class SettingsTab
             _charaSelectService.StartRecordingEmote();
         }
 
-        ImGui.SameLine();
-        if (ImGui.Button("現在スロットへ保存"))
+        if (ImGui.Button("上書き保存"))
         {
             _charaSelectService.SaveLastRecordedEmoteToActiveSlot();
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("追加保存"))
+        if (ImGui.Button("新規保存"))
         {
             _charaSelectService.AppendLastRecordedEmotePreset();
         }

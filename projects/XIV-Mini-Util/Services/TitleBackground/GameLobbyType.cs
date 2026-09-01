@@ -209,7 +209,7 @@ internal static class TitleBackgroundProbeReportHelper
         return status switch
         {
             "observed" => "3 hooks observed. 次は CharaSelectOnly の同一 scene smoke test を確認できます。",
-            "partial" => "未観測 hook が残っています。ログイン後の /xmutbgprobe report で callCount を再確認してください。",
+            "partial" => "未観測 hook が残っています。ログイン後の自動確認レポートを確認してください。",
             "waiting" => "まだ detour が観測されていません。設定UIで HookProbe にしてキャラ選択遷移後に再確認してください。",
             "failure" => "error を先に解消してください。",
             _ => "HookProbe + ManualDirectTextProbe と hooksEnabled を先に確認してください。",

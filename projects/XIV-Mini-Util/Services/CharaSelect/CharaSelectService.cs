@@ -66,7 +66,6 @@ public sealed unsafe partial class CharaSelectService : IDisposable
     private int _dataCenterNamePollFrame;
     private int _lastLoginPosition;
     private int _lastOverrideLoginPosition;
-    private IReadOnlyList<string> _lastVoiceDiagnosticLines = [];
     private CharaSelectSceneLastObservation _lastSceneObservation = CharaSelectSceneLastObservation.Empty;
     private CharaSelectStageProbeSnapshot _lastStageProbe = CharaSelectStageProbeSnapshot.Empty;
     private TitleBackgroundCharacterCompositionBridgeSnapshot _lastTitleBackgroundBridgeSnapshot = TitleBackgroundCharacterCompositionBridgeSnapshot.Empty;
@@ -483,7 +482,6 @@ public sealed unsafe partial class CharaSelectService : IDisposable
 
         var voiceId = ResolveCharacterVoiceId(entry);
         CharaSelectCharacterApplier.ApplyVoice(character, voiceId);
-        _lastVoiceDiagnosticLines = BuildVoiceDiagnosticLines(agent, index, normalizedIndex, entry, character, voiceId);
         CaptureStageProbe(
             agent,
             index,
@@ -842,7 +840,6 @@ public sealed unsafe partial class CharaSelectService : IDisposable
     {
         ClearReplayState();
         _currentEntry = null;
-        _lastVoiceDiagnosticLines = [];
         ClearSelectedCharacterIdentityState();
     }
 

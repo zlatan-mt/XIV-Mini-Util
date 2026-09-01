@@ -2,7 +2,7 @@
 // Description: Title背景（キャラ選択背景）の通常画面のみ。操作は 背景セレクタ(Combo) / この場所で確認を開始 /
 //              現在の構図を保存(=初期状態に戻す) の最大4個、状態行は最大6行に限定する（AGENTS.md 恒久契約）。
 // Reason: 実機確認を「1クリック→ログアウト→ログイン→レポート貼付」だけで完結させ、診断・生設定・
-//         probe 操作は通常画面に出さない。開発機能は SettingsTab.TitleBackgroundDiagnostics.cs に分離。
+//         probe 操作は通常画面に出さず、確認結果はサービスの自動レポート経路で扱う。
 using System.Numerics;
 using ImGui = Dalamud.Bindings.ImGui.ImGui;
 using XivMiniUtil.Services.TitleBackground;
@@ -17,7 +17,7 @@ public sealed partial class SettingsTab
     // 通常画面: 操作部品は最大4個、状態行は最大6行。Developer 描画メソッドは一切呼ばない。
     private void DrawTitleBackgroundSettings()
     {
-        // 操作1: 背景セレクタ（OFF / イル・メグ / エルピスの花畑）。
+        // 操作1: 背景セレクタ（OFF / イル・メグ / エルピスの花畑 / FRU クリア後ステージ）。
         //        curated 候補だけを出し、内部の生設定・診断は通常画面に出さない。
         var choices = TitleBackgroundCharaSelectPresetSelectionLogic.BuildChoices();
         var selectedIndex = TitleBackgroundCharaSelectPresetSelectionLogic.ResolveSelectedIndex(

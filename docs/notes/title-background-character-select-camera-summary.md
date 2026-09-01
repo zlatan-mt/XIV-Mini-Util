@@ -49,7 +49,7 @@ Phase 2G はこの決定源に合わせて、native generation の後に generat
 
 ## 現在の診断ポリシー
 
-通常 `/xmutbgdiag` は短い Phase 2G summary に限定する。
+通常の自動確認レポートは短い Phase 2G summary に限定する。
 
 通常診断に残す主な項目:
 
@@ -92,7 +92,7 @@ failure-only に残す主な項目:
   - direct camera maintenance ではなく generated curve points を main path にした。
 
 - `c5ba3ee` Phase 2H cleanup title background diagnostics
-  - 通常 `/xmutbgdiag` を短縮。
+  - 通常の自動確認レポートを整理。
   - 詳細 timeline/call traces を failure-only 側に残した。
   - `finalCameraStateMatchesPreset=not-observed` を非ブロック扱いにした。
 
@@ -109,7 +109,7 @@ failure-only に残す主な項目:
 - Phase 2L login-transition cleanup and diagnostic correction
   - active scene override と historical lastOverride diagnostics を分離。
   - ログイン遷移後の active CharaSelect session cleanup と Phase 2G gate を強化。
-  - 初回 `/xmutbgdiag` の累積 delta では post-login leak verdict を立てない。
+  - 初回の自動確認レポートに含まれる累積 delta では post-login leak verdict を立てない。
 
 ## 今後の判断基準
 

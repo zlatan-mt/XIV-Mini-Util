@@ -44,13 +44,6 @@ public sealed partial class SettingsTab
             _configuration.Save();
         }
 
-        var verboseLogging = _configuration.ShopDataVerboseLogging;
-        if (ImGui.Checkbox("ショップデータ詳細ログを有効化", ref verboseLogging))
-        {
-            _configuration.ShopDataVerboseLogging = verboseLogging;
-            _configuration.Save();
-        }
-
         ImGui.Spacing();
         ImGui.Text("Universalis検索");
 
