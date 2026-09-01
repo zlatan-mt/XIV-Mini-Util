@@ -176,7 +176,58 @@ internal static class TitleBackgroundCharaSelectVfxInventoryLogic
         return $"k={identity} a={(isActive ? 1 : 0)} l={(isPrimaryLoaded ? 1 : 0)} "
             + $"g={(hasGraphicsObject ? 1 : 0)} h={pathHash:x8} p={path}";
     }
+
+    // TitleEdit 互換 UUID を、ゲームの型付きフィールド（ILayoutInstance.Id.InstanceKey / SubId）から
+    // 純 managed 演算で算出する。参照: RokasKil/TitleEdit Extensions/LayoutInstance.cs
+    // `UUID = Id.InstanceKey + ((ulong)SubId << 32)`（read-only 相関のための evidence 式）。
+    // instance map key だけからの推測ではなく、これを第一ソースにする。
+    public static ulong DeriveTitleEditUuid(uint instanceKey, uint subId)
+    {
+        return instanceKey + ((ulong)subId << 32);
+    }
+
+    // 詳細診断ファイル 1 行。単一行 key=value・10 進数固定・raw pointer/address なし・
+    // local absolute path なし（primaryPath はゲーム仮想パス）・character/credential なし。
+    // pathCrc は現行 API15 に型付き公開が無いため常に "na"（raw offset は読まない）。
+    public static string FormatDetailRow(in TitleBackgroundVfxDetailEntry e)
+    {
+        var path = (e.PrimaryPath ?? string.Empty).Trim();
+        if (path.Length == 0)
+        {
+            path = "none";
+        }
+
+        return $"mapKey={e.InstanceMapKey} instanceKey={e.InstanceKey} subId={e.SubId} "
+            + $"uuid={e.TitleEditUuid} active={(e.IsActive ? 1 : 0)} loaded={(e.IsPrimaryLoaded ? 1 : 0)} "
+            + $"gfx={(e.HasGraphicsObject ? 1 : 0)} pathHash={e.PathHash:x8} pathCrc=na path={path}";
+    }
+
+    // 詳細スナップショットの決定的順序: TitleEdit UUID -> instance map key -> SubId 昇順。
+    public static int CompareDetailEntry(TitleBackgroundVfxDetailEntry a, TitleBackgroundVfxDetailEntry b)
+    {
+        var byUuid = a.TitleEditUuid.CompareTo(b.TitleEditUuid);
+        if (byUuid != 0)
+        {
+            return byUuid;
+        }
+
+        var byKey = a.InstanceMapKey.CompareTo(b.InstanceMapKey);
+        return byKey != 0 ? byKey : a.SubId.CompareTo(b.SubId);
+    }
 }
+
+// 詳細診断ファイル用に 1 VFX instance から安全に読めた最小フィールド一式（read-only スナップショット）。
+// raw pointer/address は保持しない。primaryPath はゲーム仮想パスのみ。
+internal readonly record struct TitleBackgroundVfxDetailEntry(
+    ulong InstanceMapKey,
+    uint InstanceKey,
+    uint SubId,
+    ulong TitleEditUuid,
+    bool IsActive,
+    bool IsPrimaryLoaded,
+    bool HasGraphicsObject,
+    uint PathHash,
+    string? PrimaryPath);
 
 // scene-generation 単位で bounded な read-only インベントリの run-scoped 状態。
 // candidate を跨いで永続化しない。write は 1 件も行わない（fru.vfx.writes は常に 0）。
@@ -196,6 +247,12 @@ internal sealed class TitleBackgroundCharaSelectVfxInventoryRuntimeState
 
     // 1 scene generation あたりの走査パス上限（安定しなくても閉じる。≈ 5 秒 @ 60fps）。
     public const int MaxPassesPerGeneration = 300;
+
+    // 詳細診断ファイルの 1 スナップショット行数上限。read-only 走査上限と同じ（FRU VFX は実測 ~248 件）。
+    public const int MaxDetailRows = MaxScanPerPass;
+
+    // 詳細診断ファイル名。既存の QuickCheck detail / bulk diag と同じ保存パターン（_configDirectory 直下）。
+    public const string DetailFileName = "title-background-fru-vfx-inventory.txt";
 
     // auto-copy report の allowlist と emitter の単一ソース（skill §3: 実装と allowlist の乖離防止）。
     public static readonly string[] DiagnosticKeys =
@@ -218,6 +275,9 @@ internal sealed class TitleBackgroundCharaSelectVfxInventoryRuntimeState
         "fru.vfx.graphicsObjectCount",
         "fru.vfx.readFailureCount",
         "fru.vfx.representativeCount",
+        "fru.vfx.detailFile",
+        "fru.vfx.detailStatus",
+        "fru.vfx.detailRowCount",
         "fru.vfx.rep0",
         "fru.vfx.rep1",
         "fru.vfx.rep2",
@@ -261,8 +321,18 @@ internal sealed class TitleBackgroundCharaSelectVfxInventoryRuntimeState
 
     public int RepresentativeCount => _representatives.Count;
 
+    // 詳細診断ファイル側の最新（=最後に完了した pass）スナップショット件数。
+    public int DetailSnapshotCount => _detailSnapshot.Count;
+
+    // 詳細診断ファイルの状態: not-run / pending（arm 済み未書込）/ ready（snapshot あり未書込）/
+    // empty（arm したが 0 件）/ written / write-failed。compact report にそのまま出す。
+    public string DetailStatus { get; private set; } = "not-run";
+
     private readonly List<string> _representatives = [];
     private readonly List<string> _repBuffer = [];
+    private readonly List<TitleBackgroundVfxDetailEntry> _detailSnapshot = [];
+    private readonly List<TitleBackgroundVfxDetailEntry> _detailBuffer = [];
+    private readonly HashSet<ulong> _detailSeen = [];
     private int _scannedThisPass;
     private int _prevTotalCount = -1;
     private int _prevActiveCount = -1;
@@ -296,6 +366,10 @@ internal sealed class TitleBackgroundCharaSelectVfxInventoryRuntimeState
         _stableStreak = 0;
         _representatives.Clear();
         _repBuffer.Clear();
+        _detailSnapshot.Clear();
+        _detailBuffer.Clear();
+        _detailSeen.Clear();
+        DetailStatus = "pending";
     }
 
     public bool ShouldRunPass() => !Completed;
@@ -312,10 +386,29 @@ internal sealed class TitleBackgroundCharaSelectVfxInventoryRuntimeState
         ReadFailureCount = 0;
         _scannedThisPass = 0;
         _repBuffer.Clear();
+        _detailBuffer.Clear();
+        _detailSeen.Clear();
     }
 
     // このパスでさらに走査してよいか（read-only の安全弁）。
     public bool CanScanMore() => _scannedThisPass < MaxScanPerPass;
+
+    // 詳細診断ファイル用の 1 行分を、このパスの buffer へ決定的・重複なしで積む。
+    // 重複判定は instance map key（nested map の一意キー）で行う。行数は MaxDetailRows で上限。
+    public void RecordDetail(in TitleBackgroundVfxDetailEntry entry)
+    {
+        if (_detailBuffer.Count >= MaxDetailRows)
+        {
+            return;
+        }
+
+        if (!_detailSeen.Add(entry.InstanceMapKey))
+        {
+            return;
+        }
+
+        _detailBuffer.Add(entry);
+    }
 
     // VFX instance 1 件を読めた。
     public void RecordInstance(bool isActive, bool hasPrimaryPath, bool isPrimaryLoaded, bool hasGraphicsObject)
@@ -405,6 +498,15 @@ internal sealed class TitleBackgroundCharaSelectVfxInventoryRuntimeState
         _representatives.Clear();
         _representatives.AddRange(_repBuffer);
 
+        // 詳細スナップショットも最新パスで置き換える。決定的順序へ並べ替えてから確定する。
+        _detailBuffer.Sort(TitleBackgroundCharaSelectVfxInventoryLogic.CompareDetailEntry);
+        _detailSnapshot.Clear();
+        _detailSnapshot.AddRange(_detailBuffer);
+        if (DetailStatus is not ("written" or "write-failed"))
+        {
+            DetailStatus = _detailSnapshot.Count > 0 ? "ready" : "empty";
+        }
+
         if (_prevTotalCount == TotalCount && _prevActiveCount == ActiveCount)
         {
             _stableStreak++;
@@ -467,6 +569,41 @@ internal sealed class TitleBackgroundCharaSelectVfxInventoryRuntimeState
         _stableStreak = 0;
         _representatives.Clear();
         _repBuffer.Clear();
+        _detailSnapshot.Clear();
+        _detailBuffer.Clear();
+        _detailSeen.Clear();
+        DetailStatus = "not-run";
+    }
+
+    // 詳細診断ファイルへ書けた / 書けなかったを記録する（compact report の detailStatus に反映）。
+    public void MarkDetailWritten(bool ok)
+    {
+        DetailStatus = ok ? "written" : "write-failed";
+    }
+
+    // 詳細診断ファイルの全行を組み立てる（pure。IO はしない）。
+    // scene-generation scoped・最新スナップショットのみ・決定的順序・重複なし・
+    // raw pointer/address なし・local absolute path なし・character/credential なし。
+    public IEnumerable<string> BuildDetailFileLines(string candidateId)
+    {
+        yield return "# FRU clear-stage VFX inventory (read-only snapshot; VFX writes=0)";
+        yield return $"candidate={Normalize(candidateId)}";
+        yield return $"armedSceneGeneration={ArmedSceneGeneration}";
+        yield return $"passCount={PassCount}";
+        yield return $"completed={Completed}";
+        yield return $"stopReason={Normalize(StopReason)}";
+        yield return $"totalCount={TotalCount}";
+        yield return $"activeCount={ActiveCount}";
+        yield return $"inactiveCount={InactiveCount}";
+        yield return $"readFailureCount={ReadFailureCount}";
+        yield return $"detailRowCount={_detailSnapshot.Count}";
+        yield return "writes=0";
+        yield return "uuidFormula=titleEditUuid = instanceKey + ((ulong)subId << 32)";
+        yield return "pathCrc=na (typed VfxLayoutInstance.PathCrc not exposed in the resolved API15 surface)";
+        for (var i = 0; i < _detailSnapshot.Count; i++)
+        {
+            yield return $"vfx[{i}]={TitleBackgroundCharaSelectVfxInventoryLogic.FormatDetailRow(_detailSnapshot[i])}";
+        }
     }
 
     public IEnumerable<string> BuildDiagnosticLines(string candidateId, bool candidateIsFru)
@@ -490,6 +627,10 @@ internal sealed class TitleBackgroundCharaSelectVfxInventoryRuntimeState
         yield return $"fru.vfx.graphicsObjectCount={GraphicsObjectCount}";
         yield return $"fru.vfx.readFailureCount={ReadFailureCount}";
         yield return $"fru.vfx.representativeCount={RepresentativeCount}";
+        // full 248 件の列挙は詳細診断ファイルにだけ入れる（compact report には出さない）。
+        yield return $"fru.vfx.detailFile={DetailFileName}";
+        yield return $"fru.vfx.detailStatus={Normalize(DetailStatus)}";
+        yield return $"fru.vfx.detailRowCount={DetailSnapshotCount}";
         for (var i = 0; i < MaxRepresentatives; i++)
         {
             var value = i < _representatives.Count ? _representatives[i] : "none";

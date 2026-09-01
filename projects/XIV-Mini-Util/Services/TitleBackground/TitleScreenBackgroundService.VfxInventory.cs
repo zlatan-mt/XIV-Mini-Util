@@ -160,6 +160,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
             try
             {
                 var subId = instance->SubId;
+                // 型付きフィールド（API15 build surface で利用可能）。map key からの推測ではなく
+                // これを TitleEdit UUID 導出の第一ソースにする。
+                var instanceKey = instance->Id.InstanceKey;
                 var isActive = instance->IsActive;
 
                 string primaryPath;
@@ -176,6 +179,17 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     hasPrimaryPath,
                     isPrimaryLoaded,
                     hasGraphicsObject);
+
+                _charaSelectVfxInventory.RecordDetail(new TitleBackgroundVfxDetailEntry(
+                    key,
+                    instanceKey,
+                    subId,
+                    TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(instanceKey, subId),
+                    isActive,
+                    isPrimaryLoaded,
+                    hasGraphicsObject,
+                    pathHash,
+                    primaryPath));
 
                 _charaSelectVfxInventory.OfferRepresentative(
                     TitleBackgroundCharaSelectVfxInventoryLogic.FormatRepresentative(
@@ -194,6 +208,35 @@ public sealed unsafe partial class TitleScreenBackgroundService
             {
                 _charaSelectVfxInventory.RecordReadFailure($"instance:{ex.GetType().Name}");
             }
+        }
+    }
+
+    // OneClick 完了処理（成功/失敗どちらも）で、診断レポート行を組み立てる直前に 1 回呼ぶ。
+    // 走査で既に安全に読めている最新スナップショット（最大 ~248 件）を、既存の QuickCheck detail /
+    // bulk diag と同じ保存パターンで詳細診断ファイルへ書き出す。clipboard レポートは compact のまま。
+    // VFX write は行わない。arm されていない run（hook 未準備など）ではファイルへ触れない。
+    private void SaveFruVfxInventoryDetailFile()
+    {
+        if (_charaSelectVfxInventory.DetailStatus is "not-run")
+        {
+            return;
+        }
+
+        try
+        {
+            var candidate = ResolveCurrentOverrideCandidate();
+            var lines = _charaSelectVfxInventory.BuildDetailFileLines(candidate.Id);
+            Directory.CreateDirectory(_configDirectory);
+            var path = Path.Combine(
+                _configDirectory,
+                TitleBackgroundCharaSelectVfxInventoryRuntimeState.DetailFileName);
+            File.WriteAllLines(path, lines);
+            _charaSelectVfxInventory.MarkDetailWritten(true);
+        }
+        catch (Exception ex)
+        {
+            _charaSelectVfxInventory.MarkDetailWritten(false);
+            _log.Warning(ex, "[XMU BG] Failed to write FRU VFX inventory detail file.");
         }
     }
 }

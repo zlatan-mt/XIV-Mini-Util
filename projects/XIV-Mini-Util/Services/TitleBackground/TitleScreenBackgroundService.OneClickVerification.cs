@@ -368,6 +368,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 $"reinitResult={(_hookLifecycle.State == TitleBackgroundServiceState.Ready ? "recovered" : "still-not-ready")}",
             };
 
+            // 走査済みなら失敗 run でも同一 run 内で詳細診断ファイルを保存する（arm 前失敗では no-op）。
+            SaveFruVfxInventoryDetailFile();
             var diagnosticLines = TitleBackgroundAutomaticCheckDiagnosticSelector.Select(
                 GetDiagnosticLines(automaticInvocation: true));
             var report = TitleBackgroundAutomaticCheckReportBuilder.Build(

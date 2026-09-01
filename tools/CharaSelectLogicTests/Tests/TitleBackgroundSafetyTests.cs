@@ -8903,5 +8903,120 @@ Test(582, "FRU VFX inventory report stays bounded, always states writes=0, close
         && closedOnStable && readFailTracked && hashStable && resetOk;
 });
 
+Test(583, "TitleEdit VFX UUID derivation is deterministic pure arithmetic (instanceKey + (subId << 32))", () =>
+{
+    static ulong D(uint k, uint s) => TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(k, s);
+
+    var subZeroIsInstanceKey = D(10861454u, 0u) == 10861454ul;
+    var subShiftsToHigh32 = D(7u, 6u) == 7ul + ((ulong)6u << 32);
+    var deterministic = D(123u, 45u) == D(123u, 45u);
+    var distinctBySub = D(100u, 1u) != D(100u, 2u);
+    var distinctByKey = D(1u, 5u) != D(2u, 5u);
+    // matches RokasKil/TitleEdit Extensions/LayoutInstance.cs UUID(): Id.InstanceKey + ((ulong)SubId << 32)
+    var maxSubId = D(0xABCDu, uint.MaxValue) == 0xABCDul + ((ulong)uint.MaxValue << 32);
+
+    return subZeroIsInstanceKey && subShiftsToHigh32 && deterministic
+        && distinctBySub && distinctByKey && maxSubId;
+});
+
+Test(584, "FRU VFX detail snapshot: bounded, latest-pass-wins, deterministic order, de-duplicated, cleared on reset", () =>
+{
+    const int max = TitleBackgroundCharaSelectVfxInventoryRuntimeState.MaxDetailRows;
+
+    static TitleBackgroundVfxDetailEntry E(ulong mapKey, uint instanceKey, uint subId, bool active) =>
+        new(mapKey, instanceKey, subId,
+            TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(instanceKey, subId),
+            active, true, true, 0x1234u, "bg/ex3/01_nvt_n4/common/vfx/eff/x.avfx");
+
+    var s = new TitleBackgroundCharaSelectVfxInventoryRuntimeState();
+    s.ArmForGeneration(4);
+    var pendingBeforePass = s.DetailStatus == "pending";
+
+    // pass 1: unsorted input + a duplicate map key -> snapshot sorted by uuid, duplicate dropped.
+    s.BeginPass();
+    s.RecordDetail(E(30, 300u, 0u, false));
+    s.RecordDetail(E(10, 100u, 0u, true));
+    s.RecordDetail(E(20, 200u, 0u, false));
+    s.RecordDetail(E(10, 999u, 7u, false)); // same instance map key -> ignored
+    s.EndPass();
+
+    var snap1 = s.BuildDetailFileLines("custom:fru-clear-stage").ToArray();
+    var rows1 = snap1.Where(l => l.StartsWith("vfx[", StringComparison.Ordinal)).ToArray();
+    var dedup = rows1.Length == 3 && s.DetailSnapshotCount == 3;
+    var ordered = rows1[0].Contains("instanceKey=100")
+        && rows1[1].Contains("instanceKey=200")
+        && rows1[2].Contains("instanceKey=300");
+    var readyStatus = s.DetailStatus == "ready";
+    var fileMeta = snap1.Contains("detailRowCount=3")
+        && snap1.Contains("writes=0")
+        && snap1.Any(l => l.StartsWith("pathCrc=na", StringComparison.Ordinal));
+
+    // pass 2: a different, smaller set -> latest completed pass wins (old rows gone).
+    s.BeginPass();
+    s.RecordDetail(E(50, 500u, 0u, true));
+    s.EndPass();
+    var rows2 = s.BuildDetailFileLines("custom:fru-clear-stage")
+        .Where(l => l.StartsWith("vfx[", StringComparison.Ordinal)).ToArray();
+    var latestWins = rows2.Length == 1 && rows2[0].Contains("instanceKey=500") && s.DetailSnapshotCount == 1;
+
+    // bound: snapshot never exceeds MaxDetailRows / MaxScanPerPass even when fed more.
+    var s2 = new TitleBackgroundCharaSelectVfxInventoryRuntimeState();
+    s2.ArmForGeneration(9);
+    s2.BeginPass();
+    for (var i = 0; i < max + 50; i++)
+    {
+        s2.RecordDetail(E((ulong)(i + 1), (uint)(i + 1), 0u, i % 2 == 0));
+    }
+    s2.EndPass();
+    var bounded = s2.DetailSnapshotCount <= max
+        && s2.DetailSnapshotCount <= TitleBackgroundCharaSelectVfxInventoryRuntimeState.MaxScanPerPass;
+
+    // reset clears the snapshot, status, and file body.
+    s.Reset();
+    var cleared = s.DetailSnapshotCount == 0
+        && s.DetailStatus == "not-run"
+        && !s.BuildDetailFileLines("custom:n4f4").Any(l => l.StartsWith("vfx[", StringComparison.Ordinal));
+
+    return pendingBeforePass && dedup && ordered && readyStatus && fileMeta
+        && latestWins && bounded && cleared;
+});
+
+Test(585, "compact FRU VFX report exposes only detailFile/detailStatus/detailRowCount, never the full inventory", () =>
+{
+    static TitleBackgroundVfxDetailEntry E(uint k) =>
+        new(k, k, 0u, TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(k, 0u),
+            true, true, true, 0xABCDu, "bg/ex3/01_nvt_n4/common/vfx/eff/p" + k + ".avfx");
+
+    var s = new TitleBackgroundCharaSelectVfxInventoryRuntimeState();
+    s.ArmForGeneration(4);
+    s.BeginPass();
+    for (var i = 0; i < 60; i++)
+    {
+        s.RecordInstance(isActive: i == 0, hasPrimaryPath: true, isPrimaryLoaded: true, hasGraphicsObject: true);
+        s.RecordDetail(E((uint)(i + 1)));
+    }
+    s.EndPass();
+
+    var compact = s.BuildDiagnosticLines("custom:fru-clear-stage", true).ToArray();
+
+    // the compact / clipboard report never carries per-VFX rows or the detail-file body.
+    var noFullInventory = compact.All(l =>
+        !l.StartsWith("vfx[", StringComparison.Ordinal)
+        && !l.Contains("uuidFormula", StringComparison.Ordinal)
+        && !l.Contains(" instanceKey=", StringComparison.Ordinal));
+    var boundedLines = compact.Count(l => l.StartsWith("fru.vfx.", StringComparison.Ordinal)) <= 32;
+    var hasDetailKeys =
+        compact.Contains($"fru.vfx.detailFile={TitleBackgroundCharaSelectVfxInventoryRuntimeState.DetailFileName}")
+        && compact.Any(l => l.StartsWith("fru.vfx.detailStatus=", StringComparison.Ordinal))
+        && compact.Contains("fru.vfx.detailRowCount=60");
+    // every emitted fru.vfx.* key is in the auto-copy allowlist single source (skill: no impl/allowlist drift).
+    var allowlisted = compact
+        .Where(l => l.StartsWith("fru.vfx.", StringComparison.Ordinal))
+        .Select(l => l[..l.IndexOf('=')])
+        .All(k => TitleBackgroundCharaSelectVfxInventoryRuntimeState.DiagnosticKeys.Contains(k));
+
+    return noFullInventory && boundedLines && hasDetailKeys && allowlisted;
+});
+
     }
 }
