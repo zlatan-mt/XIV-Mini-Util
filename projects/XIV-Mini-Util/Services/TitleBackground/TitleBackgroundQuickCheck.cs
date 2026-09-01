@@ -1793,7 +1793,56 @@ internal static class TitleBackgroundQuickCheckUiPresenter
     public static bool IsSimpleAutoSetupConfigured(Configuration configuration)
     {
         return IsPersistentCharaSelectPlacementConfigured(configuration)
+            || IsApprovedStaticPlacementAutoSetupConfigured(configuration)
             || IsSimpleV2AutoSetupConfigured(configuration);
+    }
+
+    // candidate metadata だけで「通常 preset 選択から approved-static production placement を
+    // 有効化してよいか」を決める純粋判定。fresh / 未promotion config でもここが true の候補は
+    // placement engine の owner にできる（runtime 側は毎 pass の pre-login scene/layout 認可を
+    // 通った approved anchor だけを使う）。現行 registry では FRU のみが該当する想定。
+    public static bool IsApprovedStaticProductionPlacementEligible(
+        TitleBackgroundCharacterSelectOverrideCandidate candidate)
+    {
+        if (!TitleBackgroundCharaSelectPresetSelectionLogic.IsCuratedCandidateId(candidate.Id))
+        {
+            return false;
+        }
+
+        if (!candidate.BackgroundUsable
+            || !candidate.CharacterExpectedVisible
+            || !candidate.VerifiedInGame
+            || candidate.RequiresSourceBackedLayout
+            || !candidate.ApprovedStaticAnchor.HasValue)
+        {
+            return false;
+        }
+
+        var anchor = candidate.ApprovedStaticAnchor.Value;
+        return float.IsFinite(anchor.X)
+            && float.IsFinite(anchor.Y)
+            && float.IsFinite(anchor.Z);
+    }
+
+    // fresh / 未promotion で approved-static placement が有効化された状態を「設定済み」と認識する。
+    // promotion 済み placement は IsPersistentCharaSelectPlacementConfigured が別途扱う。
+    public static bool IsApprovedStaticPlacementAutoSetupConfigured(Configuration configuration)
+    {
+        var selectedCandidateId = TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(
+            configuration.TitleBackgroundCharacterSelectOverrideCandidateId);
+        var placementCandidateId = TitleBackgroundCharacterSelectOverrideCandidateRegistry.NormalizeId(
+            configuration.TitleBackgroundCharaSelectPlacementCandidateId);
+        return configuration.TitleBackgroundOverrideEnabled
+            && configuration.TitleBackgroundCameraOverrideEnabled
+            && configuration.TitleBackgroundIntegratedCompositionEnabled
+            && configuration.TitleBackgroundCharaSelectPlacementEnabled
+            && !configuration.TitleBackgroundV2Enabled
+            && configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
+            && configuration.TitleBackgroundCharacterSelectBackgroundMode == TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly
+            && configuration.TitleBackgroundCharaSelectCameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
+            && string.Equals(selectedCandidateId, placementCandidateId, StringComparison.Ordinal)
+            && TitleBackgroundCharacterSelectOverrideCandidateRegistry.TryGet(selectedCandidateId, out var selectedCandidate)
+            && IsApprovedStaticProductionPlacementEligible(selectedCandidate);
     }
 
     public static bool IsPersistentCharaSelectPlacementConfigured(Configuration configuration)
@@ -1874,6 +1923,11 @@ internal static class TitleBackgroundQuickCheckUiPresenter
                 candidate,
                 existingLayoutTerritoryTypeId,
                 existingLayoutLayerFilterKey);
+        // promotion がまだ無くても、実機検証済みの approved-static candidate（現行では FRU のみ）は
+        // production placement engine の owner にする。座標は runtime の pre-login 認可済み anchor
+        // だけを使うため、ここで採取 proof / captured XYZ を偽装しない。
+        var approvedStaticProductionPlacement = IsApprovedStaticProductionPlacementEligible(candidate);
+        var usePlacement = preservePersistentPlacement || approvedStaticProductionPlacement;
         var changed = !IsSimpleAutoSetupConfigured(configuration)
             || configuration.TitleBackgroundCharacterSelectBackgroundMode != TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly
             || !string.Equals(configuration.TitleBackgroundCharacterSelectOverrideCandidateId, candidate.Id, StringComparison.Ordinal);
@@ -1889,10 +1943,11 @@ internal static class TitleBackgroundQuickCheckUiPresenter
         configuration.TitleBackgroundOverrideEnabled = true;
         configuration.TitleBackgroundCameraOverrideEnabled = true;
         configuration.TitleBackgroundIntegratedCompositionEnabled = true;
-        // 有効な promotion 済み placement は通常利用へ引き継ぐ。それ以外は verified Il Mheg V2
-        // rollback baseline を維持する。run 中の proof arm は別の runtime owner で表現する。
-        configuration.TitleBackgroundV2Enabled = !preservePersistentPlacement;
-        configuration.TitleBackgroundCharaSelectPlacementEnabled = preservePersistentPlacement;
+        // promotion 済み placement、または実機検証済み approved-static candidate は placement engine を
+        // owner にする。どちらでもない候補（Il Mheg / Elpis 等）は verified V2 rollback baseline を維持する。
+        // run 中の proof arm は別の runtime owner で表現する（config フリップではない）。
+        configuration.TitleBackgroundV2Enabled = !usePlacement;
+        configuration.TitleBackgroundCharaSelectPlacementEnabled = usePlacement;
         // placement path が消費する候補 id は「選択中の curated 候補」に恒久追従させる（run-scoped フリップではない）。
         // 候補が変わったら採取済み Position/Rotation は無効（点4: candidate 変更時 PositionCaptured=false）。
         if (!preservePersistentPlacement || !string.Equals(
