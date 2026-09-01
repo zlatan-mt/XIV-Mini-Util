@@ -8662,5 +8662,127 @@ Test(575, "FRU suppression window needs a stable streak, never stables on 0 matc
         && s6ClosedFirst && s6StillClosed && s6ReArmed && diagOk && resetOk;
 });
 
+Test(576, "fresh config + FRU normal preset enables approved-static placement without fabricating promotion", () =>
+{
+    var configuration = new Configuration();
+
+    TitleBackgroundQuickCheckUiPresenter.ApplySimpleAutoSetup(
+        configuration,
+        TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId);
+
+    var ownerFlipped = configuration.TitleBackgroundOverrideEnabled
+        && configuration.TitleBackgroundCameraOverrideEnabled
+        && configuration.TitleBackgroundIntegratedCompositionEnabled
+        && configuration.TitleBackgroundCharaSelectPlacementEnabled
+        && !configuration.TitleBackgroundV2Enabled
+        && configuration.TitleBackgroundRuntimeMode == TitleBackgroundRuntimeMode.CharaSelectOnly
+        && configuration.TitleBackgroundCharacterSelectBackgroundMode == TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly
+        && configuration.TitleBackgroundCharaSelectCameraFramingMode == TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended
+        && configuration.TitleBackgroundCharacterSelectOverrideCandidateId == "custom:fru-clear-stage"
+        && configuration.TitleBackgroundCharaSelectPlacementCandidateId == "custom:fru-clear-stage";
+
+    // OneClick promotion 相当を偽装しない: PositionCaptured は false のまま、captured XYZ / rotation は未設定。
+    var noFakePromotion = !configuration.TitleBackgroundCharaSelectPlacementPositionCaptured
+        && configuration.TitleBackgroundCharaSelectPlacementPositionX == 0f
+        && configuration.TitleBackgroundCharaSelectPlacementPositionY == 0f
+        && configuration.TitleBackgroundCharaSelectPlacementPositionZ == 0f
+        && configuration.TitleBackgroundCharaSelectPlacementRotation == 0f
+        && !TitleBackgroundQuickCheckUiPresenter.IsPersistentCharaSelectPlacementConfigured(configuration);
+
+    return ownerFlipped
+        && noFakePromotion
+        && TitleBackgroundQuickCheckUiPresenter.IsApprovedStaticPlacementAutoSetupConfigured(configuration)
+        && TitleBackgroundQuickCheckUiPresenter.IsSimpleAutoSetupConfigured(configuration);
+});
+
+Test(577, "promoted FRU placement is preserved exactly by simple auto setup", () =>
+{
+    var configuration = new Configuration
+    {
+        TitleBackgroundOverrideEnabled = true,
+        TitleBackgroundCameraOverrideEnabled = true,
+        TitleBackgroundIntegratedCompositionEnabled = true,
+        TitleBackgroundV2Enabled = false,
+        TitleBackgroundCharaSelectPlacementEnabled = true,
+        TitleBackgroundRuntimeMode = TitleBackgroundRuntimeMode.CharaSelectOnly,
+        TitleBackgroundCharacterSelectBackgroundMode = TitleBackgroundCharacterSelectBackgroundMode.CompatiblePresetOnly,
+        TitleBackgroundCharaSelectCameraFramingMode = TitleBackgroundCharaSelectCameraFramingMode.CandidateRecommended,
+        TitleBackgroundCharacterSelectOverrideCandidateId = "custom:fru-clear-stage",
+        TitleBackgroundCharaSelectPlacementCandidateId = "custom:fru-clear-stage",
+        TitleBackgroundCharaSelectPlacementPositionCaptured = true,
+        TitleBackgroundCharaSelectPlacementPositionX = 123.5f,
+        TitleBackgroundCharaSelectPlacementPositionY = 1f,
+        TitleBackgroundCharaSelectPlacementPositionZ = 98.25f,
+        TitleBackgroundCharaSelectPlacementRotation = 1.25f,
+    };
+
+    var wasPromoted = TitleBackgroundQuickCheckUiPresenter.IsPersistentCharaSelectPlacementConfigured(configuration);
+
+    TitleBackgroundQuickCheckUiPresenter.ApplySimpleAutoSetup(
+        configuration,
+        TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId);
+
+    return wasPromoted
+        && configuration.TitleBackgroundCharaSelectPlacementEnabled
+        && !configuration.TitleBackgroundV2Enabled
+        && configuration.TitleBackgroundCharaSelectPlacementPositionCaptured
+        && configuration.TitleBackgroundCharaSelectPlacementPositionX == 123.5f
+        && configuration.TitleBackgroundCharaSelectPlacementPositionY == 1f
+        && configuration.TitleBackgroundCharaSelectPlacementPositionZ == 98.25f
+        && configuration.TitleBackgroundCharaSelectPlacementRotation == 1.25f
+        && TitleBackgroundQuickCheckUiPresenter.IsPersistentCharaSelectPlacementConfigured(configuration);
+});
+
+Test(578, "Il Mheg normal preset keeps verified V2 baseline and is not approved-static eligible", () =>
+{
+    var configuration = new Configuration();
+    TitleBackgroundQuickCheckUiPresenter.ApplySimpleAutoSetup(configuration, "custom:n4f4");
+
+    TitleBackgroundCharacterSelectOverrideCandidateRegistry.TryGet("custom:n4f4", out var ilMheg);
+
+    return configuration.TitleBackgroundV2Enabled
+        && !configuration.TitleBackgroundCharaSelectPlacementEnabled
+        && !configuration.TitleBackgroundCharaSelectPlacementPositionCaptured
+        && !TitleBackgroundQuickCheckUiPresenter.IsApprovedStaticProductionPlacementEligible(ilMheg)
+        && !TitleBackgroundQuickCheckUiPresenter.IsApprovedStaticPlacementAutoSetupConfigured(configuration);
+});
+
+Test(579, "Elpis stays source-backed / OneClick-dependent and invents no static placement", () =>
+{
+    var configuration = new Configuration();
+    TitleBackgroundQuickCheckUiPresenter.ApplySimpleAutoSetup(
+        configuration,
+        TitleBackgroundCharacterSelectOverrideCandidateRegistry.ElpisCandidateId);
+
+    TitleBackgroundCharacterSelectOverrideCandidateRegistry.TryGet(
+        TitleBackgroundCharacterSelectOverrideCandidateRegistry.ElpisCandidateId,
+        out var elpis);
+
+    return elpis.RequiresSourceBackedLayout
+        && !elpis.VerifiedInGame
+        && !elpis.ApprovedStaticAnchor.HasValue
+        && !TitleBackgroundQuickCheckUiPresenter.IsApprovedStaticProductionPlacementEligible(elpis)
+        && configuration.TitleBackgroundV2Enabled
+        && !configuration.TitleBackgroundCharaSelectPlacementEnabled
+        && !configuration.TitleBackgroundCharaSelectPlacementPositionCaptured;
+});
+
+Test(580, "switching away from FRU does not leave the placement owner active for another candidate", () =>
+{
+    var configuration = new Configuration();
+    TitleBackgroundQuickCheckUiPresenter.ApplySimpleAutoSetup(
+        configuration,
+        TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId);
+    var fruEnabledPlacement = configuration.TitleBackgroundCharaSelectPlacementEnabled;
+
+    TitleBackgroundQuickCheckUiPresenter.ApplySimpleAutoSetup(configuration, "custom:n4f4");
+
+    return fruEnabledPlacement
+        && !configuration.TitleBackgroundCharaSelectPlacementEnabled
+        && configuration.TitleBackgroundV2Enabled
+        && configuration.TitleBackgroundCharaSelectPlacementCandidateId == "custom:n4f4"
+        && !configuration.TitleBackgroundCharaSelectPlacementPositionCaptured;
+});
+
     }
 }
