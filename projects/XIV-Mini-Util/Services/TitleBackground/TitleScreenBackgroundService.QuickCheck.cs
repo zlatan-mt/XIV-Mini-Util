@@ -344,6 +344,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _charaSelectSourceLayout.Reset();
             _charaSelectStaticAnchor.Reset();
             _charaSelectSceneObjectSuppression.Reset();
+            _charaSelectVfxInventory.Reset();
         }
     }
 
@@ -721,6 +722,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _charaSelectSourceLayout.Reset();
         _charaSelectStaticAnchor.Reset();
         _charaSelectSceneObjectSuppression.Reset();
+        _charaSelectVfxInventory.Reset();
         RestoreAutomaticCheckSettingsOnce("automatic-check-cancelled", reloadNativeIntegration: true);
     }
 
@@ -755,6 +757,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _charaSelectSourceLayout.Reset();
         _charaSelectStaticAnchor.Reset();
         _charaSelectSceneObjectSuppression.Reset();
+        _charaSelectVfxInventory.Reset();
         _configuration.TitleBackgroundSelectedPresetId = string.Empty;
         _configuration.TitleBackgroundCharacterSelectOverrideCandidateId = string.Empty;
         _configuration.TitleBackgroundTerritoryPath = string.Empty;
@@ -1065,6 +1068,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _charaSelectSourceLayout.Reset();
         _charaSelectStaticAnchor.Reset();
         _charaSelectSceneObjectSuppression.Reset();
+        _charaSelectVfxInventory.Reset();
         // pre-login environment snapshot（weather / time）を次 run へ持ち越さない。
         _environmentNoon.ResetRunScopedSnapshot();
         _environmentClearSky.ResetRunScopedSnapshot();
@@ -1183,6 +1187,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _charaSelectSourceLayout.Reset();
         _charaSelectStaticAnchor.Reset();
         _charaSelectSceneObjectSuppression.Reset();
+        _charaSelectVfxInventory.Reset();
         RestoreAutomaticCheckSettingsOnce("quick-check-reset", reloadNativeIntegration: true);
         _configuration.TitleBackgroundLastQuickCheckResult = TitleBackgroundQuickCheckLevel.NotRun;
         _configuration.TitleBackgroundLastQuickCheckCandidateId = string.Empty;

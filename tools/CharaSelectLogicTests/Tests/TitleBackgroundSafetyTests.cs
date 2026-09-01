@@ -8662,5 +8662,124 @@ Test(575, "FRU suppression window needs a stable streak, never stables on 0 matc
         && s6ClosedFirst && s6StillClosed && s6ReArmed && diagOk && resetOk;
 });
 
+Test(576, "FRU VFX inventory gate collects only for FRU + pre-login + exact authorized scene, else fails closed", () =>
+{
+    static TitleBackgroundVfxInventoryGate G(
+        bool candidateIsFru = true,
+        bool isLoggedIn = false,
+        bool sessionActive = true,
+        bool hookReady = true,
+        bool charaSelectMap = true,
+        int sceneGeneration = 4,
+        bool anchorAuthorized = true,
+        int anchorGeneration = 4,
+        bool activeLayoutAvailable = true,
+        int initState = 7,
+        uint loadedTerritory = 1238u,
+        uint loadedLayer = 0u)
+        => TitleBackgroundCharaSelectVfxInventoryLogic.Evaluate(
+            candidateIsFru, isLoggedIn, sessionActive, hookReady, charaSelectMap, sceneGeneration,
+            anchorAuthorized, anchorGeneration, activeLayoutAvailable, initState,
+            loadedTerritory, loadedLayer, candidateTerritoryId: 1238u, candidateLayerFilterKey: 0u).Gate;
+
+    var collects = G() == TitleBackgroundVfxInventoryGate.Collect;
+    var notFru = G(candidateIsFru: false) == TitleBackgroundVfxInventoryGate.NotFruCandidate;
+    var postLogin = G(isLoggedIn: true) == TitleBackgroundVfxInventoryGate.PostLogin;
+    var hookDown = G(hookReady: false) == TitleBackgroundVfxInventoryGate.SessionOrHookNotReady;
+    var sessionDown = G(sessionActive: false) == TitleBackgroundVfxInventoryGate.SessionOrHookNotReady;
+    var notMap = G(charaSelectMap: false) == TitleBackgroundVfxInventoryGate.NotCharaSelectMap;
+    var noGen = G(sceneGeneration: 0) == TitleBackgroundVfxInventoryGate.SceneGenerationNotObserved;
+    var notAuthorized = G(anchorAuthorized: false) == TitleBackgroundVfxInventoryGate.SceneNotAuthorized;
+    var genMismatch = G(anchorGeneration: 3) == TitleBackgroundVfxInventoryGate.SceneGenerationMismatch;
+    var layoutNotReady = G(initState: 3) == TitleBackgroundVfxInventoryGate.ActiveLayoutNotReady;
+    var layoutNull = G(activeLayoutAvailable: false) == TitleBackgroundVfxInventoryGate.ActiveLayoutNotReady;
+    var territoryMismatch = G(loadedTerritory: 999u) == TitleBackgroundVfxInventoryGate.LoadedLayoutTerritoryMismatch;
+    var layerMismatch = G(loadedLayer: 51u) == TitleBackgroundVfxInventoryGate.LoadedLayoutLayerMismatch;
+    // fail-closed: loaded territory 0 (uninitialised) is a mismatch, never Collect.
+    var zeroTerritory = G(loadedTerritory: 0u) == TitleBackgroundVfxInventoryGate.LoadedLayoutTerritoryMismatch;
+
+    return collects && notFru && postLogin && hookDown && sessionDown && notMap && noGen
+        && notAuthorized && genMismatch && layoutNotReady && layoutNull
+        && territoryMismatch && layerMismatch && zeroTerritory;
+});
+
+Test(577, "FRU VFX inventory report stays bounded, always states writes=0, closes on stable count, and resets", () =>
+{
+    const int cap = TitleBackgroundCharaSelectVfxInventoryRuntimeState.MaxRepresentatives;
+
+    var s = new TitleBackgroundCharaSelectVfxInventoryRuntimeState();
+    s.ArmForGeneration(4);
+
+    // one pass with more instances than the representative cap -> report never exceeds the cap.
+    s.BeginPass();
+    for (var i = 0; i < cap + 20; i++)
+    {
+        s.RecordInstance(isActive: i % 2 == 0, hasPrimaryPath: true, isPrimaryLoaded: true, hasGraphicsObject: true);
+        s.OfferRepresentative(
+            TitleBackgroundCharaSelectVfxInventoryLogic.FormatRepresentative(
+                ((ulong)(uint)(1000 + i) << 32) | 0u, 0u, i % 2 == 0, true, true, 0xABCDEF01u,
+                "bg/ex3/01_nvt_n4/common/vfx/eff/n4gw_petal" + i + ".avfx",
+                TitleBackgroundCharaSelectVfxInventoryRuntimeState.RepresentativePathMaxLength),
+            hasPrimaryPath: true,
+            isActive: i % 2 == 0);
+    }
+    s.EndPass();
+
+    var lines = s.BuildDiagnosticLines("custom:fru-clear-stage", true).ToArray();
+    var repLines = lines
+        .Where(l => l.StartsWith("fru.vfx.rep", StringComparison.Ordinal)
+            && l.Length > 11 && char.IsDigit(l[11]))
+        .ToArray();
+    var boundedReps = repLines.Length == cap
+        && s.RepresentativeCount <= cap
+        && lines.Contains($"fru.vfx.representativeCount={cap}");
+    var alwaysNoWrite = lines.Contains("fru.vfx.writes=0");
+    var reportsTotals = lines.Contains($"fru.vfx.totalCount={cap + 20}")
+        && lines.Any(l => l.StartsWith("fru.vfx.activeCount=", StringComparison.Ordinal))
+        && lines.Any(l => l.StartsWith("fru.vfx.primaryPathCount=", StringComparison.Ordinal))
+        && lines.Any(l => l.StartsWith("fru.vfx.graphicsObjectCount=", StringComparison.Ordinal));
+    // representative line is compact: single line, path trimmed to the configured max.
+    var repCompact = repLines.All(l =>
+        l.Length <= 24 + TitleBackgroundCharaSelectVfxInventoryRuntimeState.RepresentativePathMaxLength + 40
+        && !l.Contains('\n'));
+
+    // stable-count streak closes the window; no writes are ever recorded regardless.
+    for (var i = 0; i < TitleBackgroundCharaSelectVfxInventoryRuntimeState.StablePassTarget + 1; i++)
+    {
+        s.BeginPass();
+        s.RecordInstance(isActive: true, hasPrimaryPath: true, isPrimaryLoaded: true, hasGraphicsObject: true);
+        s.EndPass();
+    }
+    var closedOnStable = s.Completed && s.StopReason == "stable" && !s.ShouldRunPass();
+
+    // read failures are counted but never escalate to a write.
+    var s2 = new TitleBackgroundCharaSelectVfxInventoryRuntimeState();
+    s2.ArmForGeneration(9);
+    s2.BeginPass();
+    s2.RecordReadFailure("instance:AccessViolationException");
+    s2.EndPass();
+    var readFailTracked = s2.BuildDiagnosticLines("custom:fru-clear-stage", true)
+        .Contains("fru.vfx.readFailureCount=1")
+        && s2.BuildDiagnosticLines("custom:fru-clear-stage", true).Contains("fru.vfx.writes=0");
+
+    // deterministic managed path hash (stand-in identity; no raw PathCrc read).
+    var h1 = TitleBackgroundCharaSelectVfxInventoryLogic.HashPath("BG/Foo/Bar.AVFX");
+    var h2 = TitleBackgroundCharaSelectVfxInventoryLogic.HashPath("bg/foo/bar.avfx");
+    var h3 = TitleBackgroundCharaSelectVfxInventoryLogic.HashPath("bg/foo/baz.avfx");
+    var hashStable = h1 == h2 && h1 != h3;
+
+    s.Reset();
+    var afterReset = s.BuildDiagnosticLines("custom:n4f4", false).ToArray();
+    var resetOk = afterReset.Contains("fru.vfx.attempted=False")
+        && afterReset.Contains("fru.vfx.stopReason=not-run")
+        && afterReset.Contains("fru.vfx.lastGateStatus=not-run")
+        && afterReset.Contains("fru.vfx.armedSceneGeneration=-1")
+        && afterReset.Contains("fru.vfx.writes=0")
+        && afterReset.Contains("fru.vfx.representativeCount=0");
+
+    return boundedReps && alwaysNoWrite && reportsTotals && repCompact
+        && closedOnStable && readFailTracked && hashStable && resetOk;
+});
+
     }
 }

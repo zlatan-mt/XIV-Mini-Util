@@ -199,6 +199,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _charaSelectSourceLayout.Reset();
             _charaSelectStaticAnchor.Reset();
             _charaSelectSceneObjectSuppression.Reset();
+            _charaSelectVfxInventory.Reset();
             return true;
         }
 
@@ -319,6 +320,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _charaSelectSourceLayout.Reset();
         _charaSelectStaticAnchor.Reset();
         _charaSelectSceneObjectSuppression.Reset();
+        _charaSelectVfxInventory.Reset();
         EmitOneClickFailureReport(reason, userMessage);
         return ["[XMU OneClick] FAILED", userMessage];
     }
@@ -340,6 +342,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _charaSelectSourceLayout.Reset();
         _charaSelectStaticAnchor.Reset();
         _charaSelectSceneObjectSuppression.Reset();
+        _charaSelectVfxInventory.Reset();
         return ["[XMU OneClick] FAILED", resultLine];
     }
 

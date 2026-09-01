@@ -453,6 +453,9 @@ internal static class TitleBackgroundAutomaticCheckDiagnosticSelector
         // TitleEdit-informed placement path の診断キーは単一ソース（実装と allowlist の乖離防止, skill §3）。
         IncludedKeys.UnionWith(TitleBackgroundCharaSelectPlacementDiagnostics.Keys);
 
+        // FRU read-only VFX インベントリの診断キーも単一ソース（実装と allowlist の乖離防止, skill §3）。
+        IncludedKeys.UnionWith(TitleBackgroundCharaSelectVfxInventoryRuntimeState.DiagnosticKeys);
+
         foreach (var frame in BuildViewReplayTraceSampleFrames())
         {
             IncludedKeys.Add($"view.trace.sample[{frame}].status");
