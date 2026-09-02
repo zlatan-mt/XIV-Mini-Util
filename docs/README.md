@@ -17,6 +17,6 @@
 ## 補足
 
 - Title Background / Character Select の恒久的な安全契約は
-  `projects/XIV-Mini-Util/Services/TitleBackground/AGENTS.md` を正とします
+  `docs/agent-guides/title-background.md` を正とします
   （root `AGENTS.md` の同名節はそこへの短いポインタ）。
 - リファクタリング時に維持する契約は `refactoring-plan.md` の「維持する契約」節にまとめています。

@@ -1,6 +1,10 @@
-# AGENTS.md — Title Background / Character Select 恒久契約
+# Agent guide — Title Background / Character Select 恒久契約
 
-この契約は次を触るときだけ読む（root `AGENTS.md` には置かない component 固有ルール）:
+**いつ読むか**: Title Background / Character Select フィーチャーに触れるときだけ。root
+`AGENTS.md` からここへ conditional route される。この契約はフィーチャー横断で、
+1つの directory subtree に収まらないため nested `AGENTS.md` ではなく通常ドキュメントとして置く。
+
+**scope（このどれかに触れるなら読む）**:
 
 - `projects/XIV-Mini-Util/Services/TitleBackground/`
 - `projects/XIV-Mini-Util/Services/CharaSelect/`
@@ -8,7 +12,7 @@
 - `projects/XIV-Mini-Util/Configuration.TitleBackground.cs` / `Configuration.CharaSelect.cs`
 - `tools/CharaSelectLogicTests/`
 
-関連: `/title-background` skill（カメラ・配置・環境・保存view・facing・診断コードの境界と蓄積知見。実装・レビュー・実機レポート判読の前に必ず参照）。この `AGENTS.md` は skill を呼ばずに上記ファイルを編集する agent 向けの backstop。skill とこの契約が矛盾する場合は skill を優先する。
+関連: `/title-background` skill（カメラ・配置・環境・保存view・facing・診断コードの境界と蓄積知見。実装・レビュー・実機レポート判読の前に必ず参照）。このガイドは skill を呼ばずに上記ファイルを編集する agent 向けの backstop。skill とこのガイドが矛盾する場合は skill を優先する。
 
 この契約は root `AGENTS.md` の「実機確認は必要最小限の手順」より優先する。
 
