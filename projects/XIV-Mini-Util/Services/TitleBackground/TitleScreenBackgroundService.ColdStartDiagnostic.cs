@@ -448,6 +448,20 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _coldStartDiagnostic.Stop();
     }
 
+    // Reuse the existing CharaSelect Title Background session-end semantics: once the first CharaSelect
+    // was observed, a session that ends without login means the cold-start window is over. Finishing here
+    // as insufficient-evidence prevents a later CharaSelect from being mixed into this single run and
+    // avoids the diagnostic idling until the bounded timeout.
+    internal void NotifyColdStartDiagnosticTitleBackgroundSessionEnded()
+    {
+        if (!_coldStartDiagnostic.Active || !_coldStartDiagnostic.CharaSelectObserved)
+        {
+            return;
+        }
+
+        FinishColdStartDiagnostic("insufficient-evidence");
+    }
+
     internal bool TryConsumeColdStartDiagnosticClipboardText(out string text)
     {
         text = _coldStartDiagnostic.PendingClipboardText;
@@ -548,6 +562,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     private void FinishColdStartDiagnostic(string diagnosis)
     {
+        if (!_coldStartDiagnostic.Active)
+        {
+            return;
+        }
+
         var report = _coldStartDiagnostic.Complete(diagnosis);
         if (_coldStartDiagnostic.Subscribed)
         {

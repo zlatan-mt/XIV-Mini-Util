@@ -611,6 +611,9 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
 
         _hookLifecycle.Disposed = true;
         _framework.Update -= OnFrameworkUpdate;
+        // The cold-start diagnostic subscribes its own Framework.Update handler, so the service that owns
+        // that subscription must release it here rather than relying on an external Plugin-level stop call.
+        StopColdStartDiagnostic();
         if (_charaSelectService != null)
         {
             _charaSelectService.SelectedCharacterChanged -= OnCharaSelectSelectionChanged;
@@ -1694,6 +1697,12 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _lastCurrentLobbyMapResetReason = _sceneOverrideCleanupReason;
         RecordTransitionEvent("CharaSelect title background session cleanup executed", $"{_sceneOverrideCleanupReason}; source={source}");
         RecordTransitionEvent("CurrentLobbyMap reset", _lastCurrentLobbyMapResetReason);
+
+        if (reason != "world-login-transition")
+        {
+            // Session ended by leaving CharaSelect without logging in: close any in-flight cold-start run.
+            NotifyColdStartDiagnosticTitleBackgroundSessionEnded();
+        }
     }
 
     private void UpdateAutomaticProbeCounterState()

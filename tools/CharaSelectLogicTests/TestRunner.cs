@@ -7,7 +7,7 @@ internal static partial class TestRunner
 {
     public static int Run()
     {
-        var tests = new List<LogicTestCase>(443);
+        var tests = new List<LogicTestCase>(444);
         AddConfigurationTests(tests);
         AddCharaSelectTests(tests);
         AddTitleBackgroundQuickCheckTests(tests);

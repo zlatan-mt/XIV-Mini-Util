@@ -188,7 +188,7 @@ Automated validation must not be presented as real-game validation.
 
 ## Review / merge
 
-- Final implementation review: Sol Review only.
+- Final implementation review: ChatGPT / manual review on the exact final HEAD. Sol Review is not used for this task.
 - Same PR is used for diagnostic, evidence-driven repair, validation and review.
 - Do not create a replacement PR due to review/repair iterations.
 - Do not merge until the root cause is confirmed, the corresponding fix (if required) has a real-game cold-start PASS, and final reviewed HEAD matches the merge HEAD.
