@@ -17,6 +17,7 @@ public sealed partial class Plugin
 
         _mainWindow.Dispose();
         _shopSearchResultWindow.Dispose();
+        _titleScreenBackgroundService.StopColdStartDiagnostic();
         _titleScreenBackgroundService.Dispose();
         _charaSelectService.Dispose();
         _dutyReadyNotificationService.Dispose();
