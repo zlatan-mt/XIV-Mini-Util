@@ -80,6 +80,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
         _configuration = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         _configuration.Initialize(pluginInterface);
+        var titleBackgroundColdStartBefore = TitleBackgroundColdStartDiagnosticLogic.CaptureOwnerSnapshot(_configuration);
 
         var inventoryService = new InventoryService(clientState, dataManager, pluginLog);
         var inventoryCacheService = new InventoryCacheService(inventoryService, pluginLog);
@@ -136,6 +137,7 @@ public sealed partial class Plugin : IDalamudPlugin
             pluginInterface.ConfigDirectory.FullName,
             _configuration,
             _charaSelectService);
+        _titleScreenBackgroundService.StartColdStartDiagnostic(titleBackgroundColdStartBefore);
         _materiaService = new MateriaExtractService(
             framework,
             condition,
