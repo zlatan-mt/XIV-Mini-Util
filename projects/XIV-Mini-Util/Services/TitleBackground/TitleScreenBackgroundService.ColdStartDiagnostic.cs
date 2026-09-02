@@ -2,7 +2,6 @@
 // Description: FRU cold-start の first Character Select を production state のまま受動観測する。
 // Reason: OneClick / preset再選択で owner state を正規化すると再現条件を消すため、startup snapshot と
 //         first CharaSelect lifecycle を mutation なしで取得し、1回の実機runから原因を分類する。
-using System.Text;
 using Dalamud.Plugin.Services;
 using XivMiniUtil.Services.CharaSelect;
 
@@ -63,11 +62,10 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
                     configuration.TitleBackgroundV2Enabled))
             : actualOwnerOverride;
 
-        var approvedStaticPlacement =
-            TitleBackgroundQuickCheckUiPresenter.IsApprovedStaticProductionPlacementEligible(candidate);
-        var persistentPlacement =
-            TitleBackgroundQuickCheckUiPresenter.IsPersistentCharaSelectPlacementConfigured(configuration);
-        var expectedPlacement = persistentPlacement || approvedStaticPlacement;
+        // Read-only expectation: what normal curated preset setup would choose for the current candidate.
+        var expectedPlacement =
+            TitleBackgroundQuickCheckUiPresenter.IsPersistentCharaSelectPlacementConfigured(configuration)
+            || TitleBackgroundQuickCheckUiPresenter.IsApprovedStaticProductionPlacementEligible(candidate);
         var expectedOwner = TitleBackgroundCharaSelectEngineOwnerLogic.Describe(
             TitleBackgroundCharaSelectEngineOwnerLogic.Resolve(
                 configuration.TitleBackgroundOverrideEnabled,
@@ -86,20 +84,17 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
             expectedOwner);
     }
 
-    public static bool ShouldArm(
-        bool isLoggedIn,
-        in TitleBackgroundColdStartOwnerSnapshot before)
-    {
-        return !isLoggedIn
+    public static bool ShouldArm(bool isLoggedIn, in TitleBackgroundColdStartOwnerSnapshot before)
+        => !isLoggedIn
             && before.OverrideEnabled
             && string.Equals(
                 before.CandidateId,
                 TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
                 StringComparison.Ordinal);
-    }
 
     public static string Classify(in TitleBackgroundColdStartDiagnosisInput input)
     {
+        // H1: PR #4 reviewで既知の保存済みowner migration gap。最優先で判定する。
         if (string.Equals(input.After.ExpectedOwner, "placement", StringComparison.Ordinal)
             && string.Equals(input.After.ActualOwner, "v2", StringComparison.Ordinal))
         {
@@ -114,42 +109,39 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
             return input.LoginObserved ? "scene-generation" : "insufficient-evidence";
         }
 
-        if (string.Equals(input.After.ActualOwner, "placement", StringComparison.Ordinal))
+        if (!string.Equals(input.After.ActualOwner, "placement", StringComparison.Ordinal))
         {
-            if (!input.ResolverEverValid)
-            {
-                return "actor-resolver";
-            }
-
-            if (input.StaticAnchorEvaluated && !input.StaticAnchorAuthorized)
-            {
-                return "static-anchor-authorization";
-            }
-
-            if (input.CaptureTimedOut || (!input.CaptureCompleted && input.PlacementWriteAttemptCount == 0))
-            {
-                return "capture";
-            }
-
-            if (input.PlacementWriteAttemptCount > 0 && !input.PlacementWriteConfirmed)
-            {
-                return "placement-write";
-            }
-
-            if (input.PlacementWriteConfirmed
-                && input.UniqueResolvedActorCount > input.ConfirmedWriteKeyCount
-                && input.UniqueResolvedActorCount > 1)
-            {
-                return "actor-recreation";
-            }
-
-            if (input.PlacementWriteConfirmed)
-            {
-                return "post-placement-visual";
-            }
+            return "insufficient-evidence";
         }
 
-        return "insufficient-evidence";
+        if (!input.ResolverEverValid)
+        {
+            return "actor-resolver";
+        }
+
+        if (input.StaticAnchorEvaluated && !input.StaticAnchorAuthorized)
+        {
+            return "static-anchor-authorization";
+        }
+
+        if (input.CaptureTimedOut || (!input.CaptureCompleted && input.PlacementWriteAttemptCount == 0))
+        {
+            return "capture";
+        }
+
+        if (input.PlacementWriteAttemptCount > 0 && !input.PlacementWriteConfirmed)
+        {
+            return "placement-write";
+        }
+
+        if (input.PlacementWriteConfirmed
+            && input.UniqueResolvedActorCount > input.ConfirmedWriteKeyCount
+            && input.UniqueResolvedActorCount > 1)
+        {
+            return "actor-recreation";
+        }
+
+        return input.PlacementWriteConfirmed ? "post-placement-visual" : "insufficient-evidence";
     }
 }
 
@@ -251,7 +243,8 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         LegacyOwnershipInactive |= legacyOwnershipInactive;
     }
 
-    public bool CanAttemptResolver => ResolverAttemptCount < TitleBackgroundColdStartDiagnosticLogic.ResolverAttemptBudget;
+    public bool CanAttemptResolver
+        => ResolverAttemptCount < TitleBackgroundColdStartDiagnosticLogic.ResolverAttemptBudget;
 
     public void RecordResolverAttempt(in CharaSelectResolvedActorContext actor)
     {
@@ -274,9 +267,9 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         TitleBackgroundCharaSelectStaticAnchorSnapshot anchor,
         TitleBackgroundV2RuntimeState v2)
     {
-        StaticAnchorEvaluated |= !string.Equals(anchor.AuthorizationReason, "not-run", StringComparison.Ordinal);
         if (!string.Equals(anchor.AuthorizationReason, "not-run", StringComparison.Ordinal))
         {
+            StaticAnchorEvaluated = true;
             StaticAnchorAuthorized = anchor.Authorized;
             StaticAnchorReason = anchor.AuthorizationReason;
         }
@@ -328,43 +321,42 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         return BuildReport();
     }
 
-    public void Stop()
-    {
-        Active = false;
-    }
+    public void Stop() => Active = false;
 
     private string BuildReport()
     {
         static string B(bool value) => value ? "True" : "False";
+        static string N(string? value) => string.IsNullOrWhiteSpace(value) ? "none" : value;
+
         var lines = new List<string>
         {
             "[XIV Mini Util] Title Background cold-start diagnostic",
             $"coldStart.diagnosis={Diagnosis}",
             $"coldStart.completed={B(Completed)}",
-            $"startup.before.candidate={Before.CandidateId}",
+            $"startup.before.candidate={N(Before.CandidateId)}",
             $"startup.before.overrideEnabled={B(Before.OverrideEnabled)}",
             $"startup.before.v2Enabled={B(Before.V2Enabled)}",
             $"startup.before.placementEnabled={B(Before.PlacementEnabled)}",
-            $"startup.before.placementCandidate={Normalize(Before.PlacementCandidateId)}",
+            $"startup.before.placementCandidate={N(Before.PlacementCandidateId)}",
             $"startup.before.positionCaptured={B(Before.PositionCaptured)}",
-            $"startup.before.owner={Before.ActualOwner}",
-            $"startup.before.expectedOwner={Before.ExpectedOwner}",
-            $"startup.after.candidate={After.CandidateId}",
+            $"startup.before.owner={N(Before.ActualOwner)}",
+            $"startup.before.expectedOwner={N(Before.ExpectedOwner)}",
+            $"startup.after.candidate={N(After.CandidateId)}",
             $"startup.after.overrideEnabled={B(After.OverrideEnabled)}",
             $"startup.after.v2Enabled={B(After.V2Enabled)}",
             $"startup.after.placementEnabled={B(After.PlacementEnabled)}",
-            $"startup.after.placementCandidate={Normalize(After.PlacementCandidateId)}",
+            $"startup.after.placementCandidate={N(After.PlacementCandidateId)}",
             $"startup.after.positionCaptured={B(After.PositionCaptured)}",
-            $"startup.after.owner={After.ActualOwner}",
-            $"startup.after.expectedOwner={After.ExpectedOwner}",
+            $"startup.after.owner={N(After.ActualOwner)}",
+            $"startup.after.expectedOwner={N(After.ExpectedOwner)}",
             $"startup.ownerMismatch={B(!string.Equals(After.ActualOwner, After.ExpectedOwner, StringComparison.Ordinal))}",
             $"firstScene.observed={B(CharaSelectObserved)}",
-            $"firstScene.path={Normalize(ScenePath)}",
+            $"firstScene.path={N(ScenePath)}",
             $"firstScene.territoryId={SceneTerritoryId}",
             $"firstScene.layerFilterKey={SceneLayerFilterKey}",
             $"firstScene.placementSceneGeneration={PlacementSceneGeneration}",
             $"firstScene.activeSceneGeneration={ActiveSceneGeneration}",
-            $"firstScene.owner={SceneOwner}",
+            $"firstScene.owner={N(SceneOwner)}",
             $"firstScene.v2Active={B(V2Active)}",
             $"firstScene.placementActive={B(PlacementActive)}",
             $"firstScene.legacyOwnershipInactive={B(LegacyOwnershipInactive)}",
@@ -406,9 +398,6 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         };
         return string.Join(Environment.NewLine, lines);
     }
-
-    private static string Normalize(string? value)
-        => string.IsNullOrWhiteSpace(value) ? "none" : value;
 }
 
 public sealed unsafe partial class TitleScreenBackgroundService
@@ -429,7 +418,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
 
         // Interrupted OneClick recovery is a different transaction and can intentionally alter runtime ownership.
-        // Mixing it into a cold-start reproduction would make the report ambiguous, so fail closed and do not arm.
+        // Mixing it into this reproduction would make the evidence ambiguous.
         if (_automaticCheck.Requested || _automaticCheck.PlacementProofArmed)
         {
             return;
@@ -481,13 +470,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
         try
         {
-            if (_hookLifecycle.Disposed)
-            {
-                FinishColdStartDiagnostic("insufficient-evidence");
-                return;
-            }
-
-            if (DateTimeOffset.UtcNow - _coldStartDiagnostic.StartedAt >= TitleBackgroundColdStartDiagnosticLogic.MaxDuration)
+            if (_hookLifecycle.Disposed
+                || DateTimeOffset.UtcNow - _coldStartDiagnostic.StartedAt >= TitleBackgroundColdStartDiagnosticLogic.MaxDuration)
             {
                 FinishColdStartDiagnostic("insufficient-evidence");
                 return;
@@ -503,7 +487,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 return;
             }
 
-            if (!TryReadCurrentLobbyMap(out var currentMap) || currentMap != Dalamud.Game.ClientState.Objects.Enums.GameLobbyType.CharaSelect)
+            if (!TryReadCurrentLobbyMap(out var currentMap)
+                || currentMap != Dalamud.Game.ClientState.Objects.Enums.GameLobbyType.CharaSelect)
             {
                 return;
             }
@@ -521,10 +506,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
             if (_coldStartDiagnostic.CanAttemptResolver)
             {
-                _ = _charaSelectService?.TryResolveCurrentCharaSelectActor(out var actor);
+                var actor = default(CharaSelectResolvedActorContext);
+                _ = _charaSelectService?.TryResolveCurrentCharaSelectActor(out actor);
                 _coldStartDiagnostic.RecordResolverAttempt(actor);
             }
 
+            // Read only existing runtime evidence. Do not evaluate/arm an anchor or write a native value here.
             _coldStartDiagnostic.RecordRuntimeEvidence(
                 _charaSelectPlacement,
                 _charaSelectStaticAnchor.Snapshot,
@@ -568,6 +555,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _coldStartDiagnostic.Subscribed = false;
         }
 
+        // Queue clipboard before best-effort file I/O so a filesystem failure cannot lose the one-run report.
         _coldStartDiagnostic.PendingClipboardText = report;
         try
         {
@@ -578,7 +566,6 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
         catch (Exception ex)
         {
-            // File output is best-effort. Clipboard handoff remains authoritative for the one-run contract.
             _log.Warning(ex, "[XMU BG] Cold-start diagnostic file save failed.");
         }
 
