@@ -16,6 +16,7 @@
 
 ## 補足
 
-- Title Background / Character Select の恒久的な安全契約は `AGENTS.md` の
-  「Title Background UI・実機確認の恒久契約」節を正とします。
+- Title Background / Character Select の恒久的な安全契約は
+  `docs/agent-guides/title-background.md` を正とします
+  （root `AGENTS.md` の同名節はそこへの短いポインタ）。
 - リファクタリング時に維持する契約は `refactoring-plan.md` の「維持する契約」節にまとめています。
