@@ -488,7 +488,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
 
             if (!TryReadCurrentLobbyMap(out var currentMap)
-                || currentMap != Dalamud.Game.ClientState.Objects.Enums.GameLobbyType.CharaSelect)
+                || currentMap != GameLobbyType.CharaSelect)
             {
                 return;
             }
@@ -507,7 +507,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             if (_coldStartDiagnostic.CanAttemptResolver)
             {
                 var actor = default(CharaSelectResolvedActorContext);
-                _ = _charaSelectService?.TryResolveCurrentCharaSelectActor(out actor);
+                _charaSelectService?.TryResolveCurrentCharaSelectActor(out actor);
                 _coldStartDiagnostic.RecordResolverAttempt(actor);
             }
 
