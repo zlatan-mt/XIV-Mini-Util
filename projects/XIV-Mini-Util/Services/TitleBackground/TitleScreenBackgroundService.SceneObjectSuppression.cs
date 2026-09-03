@@ -535,9 +535,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
             catch (Exception ex)
             {
-                // instance を評価できなかった -> このパスは stable にしない。
+                // instance を評価できなかった -> このパスは stable にしない（suppression semantics 不変）。
+                // MUST FIX (review 5098946239 #2): verdict 不明 = 最終診断側は fail-closed でこの
+                // WRITE pass を invalidate する（eligible path の取りこぼしを delta 化しない）。
                 _charaSelectSceneObjectSuppression.MarkPassDirty();
                 _charaSelectSceneObjectSuppression.RecordFailure($"primary-path:{ex.GetType().Name}");
+                _charaSelectSelectionChangeDelta.RecordReadFailure();
                 continue;
             }
 
@@ -580,7 +583,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
                     }
                     catch (Exception ex)
                     {
+                        // suppression 側の dirty/stable semantics は変えない（この catch は非-deny 診断計数のみ）。
+                        // MUST FIX (review 5098946239 #2): 最終診断側はこの WRITE pass を invalidate し、
+                        // baseline->0 を合成させない。
                         _charaSelectSceneObjectSuppression.RecordFailure($"coverage-probe:{ex.GetType().Name}");
+                        _charaSelectSelectionChangeDelta.RecordReadFailure();
                     }
                 }
 

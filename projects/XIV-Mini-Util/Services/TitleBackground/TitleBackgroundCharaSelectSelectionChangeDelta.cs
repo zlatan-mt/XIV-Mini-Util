@@ -262,6 +262,10 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
 
     private bool _sessionEnded;
 
+    // MUST FIX (review 5098946239 #2): 現在の SG/VFX pass で per-instance read failure が 1 件でもあったか。
+    // Begin*Pass でリセットし、その pass は valid=false 扱い（baseline->0 / disappeared を合成しない）。
+    private bool _passReadFailed;
+
     public bool Complete => WindowComplete || _sessionEnded;
 
     // ---- 通常 suppression pass（re-arm 前）からの baseline source 更新 ----
@@ -286,8 +290,17 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
     }
 
     // Framework スレッドの選択変更 re-arm で呼ぶ。managed baseline だけを snapshot する（native scan なし）。
+    // MUST FIX (review 5098946239 #1): 1 回の user-visible switch burst 中の複数 re-arm で、baseline /
+    // accumulated SG/VFX delta をリセットしない。まだ観測中（Armed かつ未 terminal）なら no-op で、
+    // burst の最初の re-arm が張った baseline を維持し、early delta を取りこぼさない。
+    // window が terminal（timeout / session end）or Reset() の後は、次の switch で改めて re-baseline する。
     public void ArmFromReArm(IReadOnlyList<TitleBackgroundVfxDetailEntry> vfxSnapshot)
     {
+        if (Armed && !Complete)
+        {
+            return;
+        }
+
         ResetObservation();
         Armed = true;
         Outcome = "observing";
@@ -328,6 +341,7 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
     public void BeginSharedGroupPass()
     {
         _passCounts.Clear();
+        _passReadFailed = false;
     }
 
     // scan が 1 instance を渡す。sanitizedPath は SanitizeGameAssetPath 済み・非 keep-token の eligible path。
@@ -358,16 +372,20 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         }
     }
 
-    // pass 終了。Armed なら delta として畳み込む。partial/failed scan（valid=false）は 0 を合成しない。
+    // pass 終了。Armed なら delta として畳み込む。partial/failed scan（valid=false）や、
+    // この pass で per-instance read failure が 1 件でもあった場合（_passReadFailed）は
+    // valid=false 扱いにして 0 を合成しない（baseline->0 / disappeared を作らない）。
     public void FinishSharedGroupPass(bool valid, long elapsedMs)
     {
+        var passValid = valid && !_passReadFailed;
+
         if (!Armed)
         {
-            RecordOrdinarySuppressionPass(valid);
+            RecordOrdinarySuppressionPass(passValid);
             return;
         }
 
-        if (!valid)
+        if (!passValid)
         {
             _passCounts.Clear();
             return;
@@ -409,6 +427,7 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
     public void BeginVfxPass()
     {
         _vfxCurrent.Clear();
+        _passReadFailed = false;
     }
 
     public void RecordVfxInstance(ulong uuid, bool isActive, bool loaded, bool gfx, uint pathHash, string? primaryPath)
@@ -426,10 +445,11 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         }
     }
 
-    // valid=false（partial/failed scan）は disappear を合成しない。
+    // valid=false（partial/failed scan）や、この pass で per-instance read failure が 1 件でもあった場合
+    // （_passReadFailed）は disappear / change を合成しない。
     public void FinishVfxPass(bool valid)
     {
-        if (!Armed || !valid)
+        if (!Armed || !valid || _passReadFailed)
         {
             _vfxCurrent.Clear();
             return;
@@ -487,9 +507,12 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
 
     // ---- failure / terminal ----
 
+    // per-instance read failure。window 累積 counter を進め、かつ現在の SG/VFX pass を invalidate する
+    // （その pass では baseline->0 / disappeared / change を合成しない）。
     public void RecordReadFailure()
     {
         ReadFailureCount++;
+        _passReadFailed = true;
     }
 
     public void RecordGateBlockedPass()
@@ -599,6 +622,7 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         SharedGroupPathCapReached = false;
         SharedGroupValidPassCount = 0;
         VfxValidPassCount = 0;
+        _passReadFailed = false;
         _baseline.Clear();
         _tracking.Clear();
         _passCounts.Clear();
