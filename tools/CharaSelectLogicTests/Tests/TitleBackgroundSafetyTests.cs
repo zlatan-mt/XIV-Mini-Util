@@ -9418,35 +9418,46 @@ Test(591, "MUST FIX (review 5097939613): coverage follow-up aggregates per-path 
         && resolvedWhenAllInactive && notResolvedWhenUnobserved;
 });
 
-Test(592, "Phase A UX: SelectionChangeReportReady fires on positive classification, bounded window close, bounded timeout, or session end", () =>
+Test(592, "Phase A UX: SelectionChangeReportReady - positive class immediate; InsufficientEvidence with samples waits for the read-only coverage follow-up, else window-close/timeout; session end always", () =>
 {
-    static bool Ready(TitleBackgroundSceneObjectSelectionChangeClass c, bool completed, long elapsedMs, bool sessionEnding)
-        => TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(c, completed, elapsedMs, sessionEnding);
+    static bool Ready(TitleBackgroundSceneObjectSelectionChangeClass c, bool completed, long elapsedMs, bool sessionEnding, int sample, bool followUpTerminal)
+        => TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(c, completed, elapsedMs, sessionEnding, sample, followUpTerminal);
 
     var timeout = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportTimeoutMs;
+    var insufficient = TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence;
 
-    // session end is a hard stop regardless of everything else.
-    var sessionEndAlwaysReady =
-        Ready(TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence, false, 0, true)
-        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap, false, 0, true);
+    // session end is a hard stop regardless of class / follow-up state.
+    var sessionEndAlways =
+        Ready(insufficient, false, 0, true, 12, false)
+        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap, false, 0, true, 0, false);
 
     // any positive classification is stable enough to hand off immediately.
-    var positiveReady =
-        Ready(TitleBackgroundSceneObjectSelectionChangeClass.TimingGap, false, 10, false)
-        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap, false, 10, false)
-        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.DeactivationSemantics, false, 10, false);
+    var positiveImmediate =
+        Ready(TitleBackgroundSceneObjectSelectionChangeClass.TimingGap, false, 10, false, 0, false)
+        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap, false, 10, false, 5, false)
+        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.DeactivationSemantics, false, 10, false, 0, false);
 
-    // InsufficientEvidence must wait for the bounded window to close or the bounded timeout.
-    var insufficientNotReadyYet =
-        !Ready(TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence, false, timeout - 1, false)
-        && !Ready(TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence, false, -1, false);
-    var insufficientReadyOnClose =
-        Ready(TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence, true, 0, false);
-    var insufficientReadyOnTimeout =
-        Ready(TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence, false, timeout, false);
+    // InsufficientEvidence WITH unresolved non-deny samples: WRITE-window stable alone is not enough;
+    // publish only once the read-only coverage follow-up window is terminal.
+    var samplesWaitForFollowUp =
+        !Ready(insufficient, true, timeout + 1, false, 12, false)
+        && Ready(insufficient, true, 0, false, 12, true);
 
-    return sessionEndAlwaysReady && positiveReady && insufficientNotReadyYet
-        && insufficientReadyOnClose && insufficientReadyOnTimeout;
+    // InsufficientEvidence WITHOUT samples: old behaviour (WRITE-window close or the event timeout).
+    var noSamplesOldBehaviour =
+        !Ready(insufficient, false, timeout - 1, false, 0, false)
+        && Ready(insufficient, true, 0, false, 0, false)
+        && Ready(insufficient, false, timeout, false, 0, false);
+
+    // ShouldArmCoverageFollowUp gate.
+    var armGate =
+        TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(true, 12, 0, true)
+        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(true, 12, 0, false)
+        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(true, 0, 0, true)
+        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(true, 12, 1, true)
+        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(false, 12, 0, true);
+
+    return sessionEndAlways && positiveImmediate && samplesWaitForFollowUp && noSamplesOldBehaviour && armGate;
 });
 
 Test(593, "Phase A UX: FRU selection-change report uses a dedicated file, keeps only fru.suppression.* lines, and never reuses the auto-check report", () =>
@@ -9528,6 +9539,231 @@ Test(594, "Phase A UX: selection-change auto-copy reuses the Plugin.UiEvents cli
         && !suppression.Contains("TitleBackgroundAutomaticCheckReportBuilder.FileName", StringComparison.Ordinal);
 
     return handlerWired && consumeMirrorsPattern && noOneClickOrQuickCheck && noConfigMutation && dedicatedFile;
+});
+
+Test(595, "Phase A UX: READ-ONLY coverage follow-up runs after the WRITE window closes (not resuming it) and confirms CoverageGap on a whole-pass active->inactive transition", () =>
+{
+    var k = ((ulong)7u << 32) | 0u;
+    const string zon11 = "bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a4_zon11.sgb";
+    const string zon12 = "bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a4_zon12.sgb";
+    const string rot01 = "bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a4_rot01.sgb";
+    var streak = TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState.StableStreakTarget;
+
+    var s = new TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState();
+    s.ArmForGeneration(5);
+    s.NoteSelectionChangeReArm(5, 5, 1000, 0);
+    s.ArmForGeneration(5, forceReArm: true);
+    s.MarkFirstReArmedPassStarting(0);
+
+    // WRITE window: real-game shape - every deny-matched group already inactive, plus 3 non-deny samples.
+    for (var i = 0; i < streak; i++)
+    {
+        s.BeginPass();
+        s.RecordScanned();
+        s.RecordMatched(k);
+        s.RecordAlreadyInactive(k);
+        if (i == 0)
+        {
+            s.RecordActiveNonDenyKeepPath(zon11);
+            s.RecordActiveNonDenyKeepPath(zon12);
+            s.RecordActiveNonDenyKeepPath(rot01);
+        }
+        s.EndPass();
+    }
+
+    var writeWindowStable = s.Completed && s.StopReason == "stable" && s.TerminalAtPassCount == streak
+        && !s.ShouldRunPass() && s.PassCount == streak
+        && s.TotalWriteCalls == 0
+        && s.ActiveNonDenyKeepPathSampleCount == 3
+        && s.ActiveNonDenyKeepPathResolvedInactiveCount == 0
+        && s.SelectionChangeClass == TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence;
+
+    // #1: the WRITE window never resumes. A same-generation re-arm keeps it closed; write counters frozen.
+    s.ArmForGeneration(5);
+    var writeWindowNotResumed = !s.ShouldRunPass() && s.Completed
+        && s.PassCount == streak && s.TotalWriteCalls == 0 && s.StableStreak == streak;
+
+    // #2: the READ-ONLY follow-up window arms and its passes run AFTER Completed.
+    var shouldArm = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(
+        s.SelectionChangeReArmCount > 0, s.ActiveNonDenyKeepPathSampleCount, s.ActiveNonDenyKeepPathResolvedInactiveCount, s.Completed);
+    s.ArmCoverageFollowUp(0);
+    var armed = shouldArm && s.CoverageFollowUpArmed && s.CoverageFollowUpActive && !s.CoverageFollowUpTerminal;
+
+    s.RecordCoverageFollowUpElapsed(200);
+    s.BeginCoverageFollowUpPass();
+    s.RecordNonDenyKeepPathFollowUp(zon11, isActive: true);   // still active
+    s.RecordNonDenyKeepPathFollowUp(zon12, isActive: false);  // whole pass saw no active instance -> resolves
+    s.RecordNonDenyKeepPathFollowUp(rot01, isActive: true);
+    s.EndCoverageFollowUpPass();
+    var followUpPassRanAfterClose = s.CoverageFollowUpPassCount == 1
+        && s.PassCount == streak            // WRITE pass count untouched
+        && s.ActiveNonDenyKeepPathResolvedInactiveCount == 1
+        && !s.CoverageFollowUpTerminal
+        && s.SelectionChangeClass == TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap;
+
+    // #3: a later pass where the remaining samples are inactive-only resolves them all.
+    s.RecordCoverageFollowUpElapsed(700);
+    s.BeginCoverageFollowUpPass();
+    s.RecordNonDenyKeepPathFollowUp(zon11, isActive: false);
+    s.RecordNonDenyKeepPathFollowUp(rot01, isActive: false);
+    s.EndCoverageFollowUpPass();
+    var allResolved = s.ActiveNonDenyKeepPathResolvedInactiveCount == 3
+        && s.SelectionChangeClass == TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap;
+    var reportReadyOnCoverageGap = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
+        s.SelectionChangeClass, s.Completed, 999, false, s.ActiveNonDenyKeepPathSampleCount, s.CoverageFollowUpTerminal);
+
+    var lines = s.BuildDiagnosticLines("custom:fru-clear-stage", true).ToArray();
+    var diagOk = lines.Contains("fru.suppression.selectionChange.followUp.armed=True")
+        && lines.Any(l => l.StartsWith("fru.suppression.selectionChange.followUp.passCount=2", StringComparison.Ordinal))
+        && lines.Contains("fru.suppression.selectionChange.followUp.resolvedInactiveCount=3")
+        && lines.Any(l => l.StartsWith("fru.suppression.selectionChange.followUp.resolvedPaths=bg/", StringComparison.Ordinal))
+        && lines.Contains($"fru.suppression.selectionChange.followUp.durationMs={TitleBackgroundCharaSelectSceneObjectSuppressionLogic.CoverageFollowUpDurationMs}")
+        && lines.Contains("fru.suppression.selectionChange.class=CoverageGap");
+
+    return writeWindowStable && writeWindowNotResumed && armed
+        && followUpPassRanAfterClose && allResolved && reportReadyOnCoverageGap && diagOk;
+});
+
+Test(596, "Phase A UX: coverage follow-up 2500ms timeout leaves class InsufficientEvidence but makes the report ready; session end stops it safely; Reset clears it", () =>
+{
+    var streak = TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState.StableStreakTarget;
+    var dur = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.CoverageFollowUpDurationMs;
+    var insufficient = TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence;
+
+    TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState StableWithSamples(int gen)
+    {
+        var s = new TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState();
+        s.ArmForGeneration(gen);
+        s.NoteSelectionChangeReArm(gen, gen, 1000, 0);
+        s.ArmForGeneration(gen, forceReArm: true);
+        s.MarkFirstReArmedPassStarting(0);
+        var k = ((ulong)3u << 32) | 0u;
+        for (var i = 0; i < streak; i++)
+        {
+            s.BeginPass();
+            s.RecordScanned();
+            s.RecordMatched(k);
+            s.RecordAlreadyInactive(k);
+            if (i == 0)
+            {
+                s.RecordActiveNonDenyKeepPath("bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a4_zon15.sgb");
+                s.RecordActiveNonDenyKeepPath("bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a4_zon16.sgb");
+            }
+            s.EndPass();
+        }
+        return s;
+    }
+
+    // --- timeout path: 2500ms with the sampled paths never seen inactive -> InsufficientEvidence, but report ready ---
+    var t = StableWithSamples(9);
+    t.ArmCoverageFollowUp(0);
+    // report is NOT ready while the follow-up window is still running (write-window stable alone is insufficient).
+    var notReadyWhileRunning = !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
+        t.SelectionChangeClass, t.Completed, 100_000, false, t.ActiveNonDenyKeepPathSampleCount, t.CoverageFollowUpTerminal);
+    for (var i = 1; i <= 3; i++)
+    {
+        t.RecordCoverageFollowUpElapsed(600 * i);
+        t.BeginCoverageFollowUpPass();
+        t.RecordNonDenyKeepPathFollowUp("bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a4_zon15.sgb", isActive: true);
+        t.RecordNonDenyKeepPathFollowUp("bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a4_zon16.sgb", isActive: true);
+        t.EndCoverageFollowUpPass();
+    }
+    t.RecordCoverageFollowUpElapsed(dur);
+    t.StopCoverageFollowUp("followup-timeout");
+    var timeoutInsufficient = t.ActiveNonDenyKeepPathResolvedInactiveCount == 0
+        && t.SelectionChangeClass == insufficient
+        && t.CoverageFollowUpTerminal
+        && t.CoverageFollowUpStopReason == "followup-timeout"
+        && t.CoverageFollowUpElapsedMs == dur
+        && t.CoverageFollowUpPassCount == 3;
+    var timeoutReportReady = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
+        t.SelectionChangeClass, t.Completed, -1, false, t.ActiveNonDenyKeepPathSampleCount, t.CoverageFollowUpTerminal);
+
+    // --- session end: safe stop + report ready regardless of the follow-up window ---
+    var e = StableWithSamples(11);
+    e.ArmCoverageFollowUp(0);
+    e.RecordCoverageFollowUpElapsed(300);
+    e.StopCoverageFollowUp("session-end");
+    var sessionEndStopped = !e.CoverageFollowUpActive
+        && e.CoverageFollowUpStopReason == "session-end"
+        && e.CoverageFollowUpElapsedMs == 300
+        && e.CoverageFollowUpTerminal;
+    var sessionEndReportReady = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
+        e.SelectionChangeClass, e.Completed, 50, sessionEnding: true, e.ActiveNonDenyKeepPathSampleCount, e.CoverageFollowUpTerminal);
+
+    e.Reset();
+    var clearedOnReset = !e.CoverageFollowUpArmed && !e.CoverageFollowUpActive
+        && e.CoverageFollowUpStopReason == "not-run" && e.CoverageFollowUpElapsedMs == -1
+        && e.CoverageFollowUpPassCount == 0
+        && e.BuildDiagnosticLines("custom:n4f4", false).Contains("fru.suppression.selectionChange.followUp.armed=False");
+
+    return notReadyWhileRunning && timeoutInsufficient && timeoutReportReady
+        && sessionEndStopped && sessionEndReportReady && clearedOnReset;
+});
+
+Test(597, "Phase A UX: coverage follow-up clock advances with no native reads / identity gate; the scan is identity-gated and read-only; WRITE identity gates + SetActive path intact", () =>
+{
+    var root = FindRepositoryRoot();
+    var suppression = File.ReadAllText(Path.Combine(
+        root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.SceneObjectSuppression.cs"));
+
+    string Body(string signature)
+    {
+        var start = suppression.IndexOf(signature, StringComparison.Ordinal);
+        if (start < 0) return string.Empty;
+        var brace = suppression.IndexOf('{', start);
+        if (brace < 0) return string.Empty;
+        var depth = 0;
+        for (var i = brace; i < suppression.Length; i++)
+        {
+            if (suppression[i] == '{') depth++;
+            else if (suppression[i] == '}' && --depth == 0) return suppression[brace..(i + 1)];
+        }
+        return string.Empty;
+    }
+
+    var advance = Body("private void AdvanceFruCoverageFollowUpClock()");
+    var scanPass = Body("private void ScanFruCoverageFollowUpPass(");
+    var scanPaths = Body("private void ScanCoverageFollowUpSampledPaths(");
+
+    // #5a: the clock advance has no identity gate and no native instance reads; it times out on its own.
+    var clockNoNativeReads = advance.Length > 0
+        && !advance.Contains("TryResolveAuthorizedFruActiveLayout", StringComparison.Ordinal)
+        && !advance.Contains("GetPrimaryPath", StringComparison.Ordinal)
+        && !advance.Contains("IsActive", StringComparison.Ordinal)
+        && !advance.Contains("InstancesByType", StringComparison.Ordinal)
+        && advance.Contains("Environment.TickCount64", StringComparison.Ordinal)
+        && advance.Contains("StopCoverageFollowUp(\"followup-timeout\")", StringComparison.Ordinal);
+
+    // #5b: the scan pass is gated by the shared identity check and bails before any pass begins when it fails.
+    var gateIdx = scanPass.IndexOf("RecordGateStatus($\"coverage-followup:{gate}\")", StringComparison.Ordinal);
+    var beginIdx = scanPass.IndexOf("BeginCoverageFollowUpPass()", StringComparison.Ordinal);
+    var scanGateFirst = scanPass.Length > 0 && gateIdx >= 0 && beginIdx >= 0 && gateIdx < beginIdx
+        && scanPass.Contains("TryResolveAuthorizedFruActiveLayout(candidate, out var activeLayout, out var gate)", StringComparison.Ordinal);
+
+    // #6 (read-only): the scan only uses GetPrimaryPath + IsActive; never SetActive / deny / write budget.
+    var scanReadOnly = scanPaths.Length > 0
+        && scanPaths.Contains("GetPrimaryPath()", StringComparison.Ordinal)
+        && scanPaths.Contains("instance->IsActive", StringComparison.Ordinal)
+        && !scanPaths.Contains("SetActive", StringComparison.Ordinal)
+        && !scanPaths.Contains("DenyPathTokens", StringComparison.Ordinal)
+        && !scanPaths.Contains("TryConsumeWriteBudget", StringComparison.Ordinal);
+
+    // login / session end stops the follow-up window BEFORE the report is published.
+    var stopIdx = suppression.IndexOf("StopCoverageFollowUp(\"session-end\")", StringComparison.Ordinal);
+    var publishIdx = suppression.IndexOf("MaybePublishFruSelectionChangeReport(candidate.Id, sessionEnding: true)", StringComparison.Ordinal);
+    var sessionEndOrder = stopIdx > 0 && publishIdx > stopIdx;
+
+    // the WRITE window's identity gates + SetActive / write-budget path are unchanged (now via the shared helper).
+    var writePathIntact = suppression.Contains("gateStatus = \"active-layout-null\";", StringComparison.Ordinal)
+        && suppression.Contains("gateStatus = \"active-layout-not-ready\";", StringComparison.Ordinal)
+        && suppression.Contains("gateStatus = \"loaded-layout-territory-mismatch\";", StringComparison.Ordinal)
+        && suppression.Contains("gateStatus = \"loaded-layout-layer-mismatch\";", StringComparison.Ordinal)
+        && suppression.Contains("gateStatus = \"authorized\";", StringComparison.Ordinal)
+        && suppression.Contains("instance->SetActive(false);", StringComparison.Ordinal)
+        && suppression.Contains("TryConsumeWriteBudget(key)", StringComparison.Ordinal);
+
+    return clockNoNativeReads && scanGateFirst && scanReadOnly && sessionEndOrder && writePathIntact;
 });
 
     }

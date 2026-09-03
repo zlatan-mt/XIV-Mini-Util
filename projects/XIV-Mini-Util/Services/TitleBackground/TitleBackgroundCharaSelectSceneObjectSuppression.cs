@@ -184,11 +184,41 @@ internal static class TitleBackgroundCharaSelectSceneObjectSuppressionLogic
     //   window 終了 or timeout まで待つ。
     public const long SelectionChangeReportTimeoutMs = 6000;
 
+    // WRITE window 終了後に走る READ-ONLY coverage follow-up window の bounded duration。
+    // 実機で non-deny candidate の遅い active->inactive transition を観測するための追加観測窓。
+    public const long CoverageFollowUpDurationMs = 2500;
+
+    // READ-ONLY coverage follow-up window を arm すべきか。
+    // - selection-change sample が存在
+    // - activeNonDenyKeepSampleCount > 0
+    // - CoverageGap 未確定（resolvedInactiveCount == 0）
+    // - 通常 suppression WRITE window が completed
+    // のとき true。WRITE window（stable streak / pass budget / SetActive / deny list）は一切変更しない。
+    public static bool ShouldArmCoverageFollowUp(
+        bool selectionChangeObserved,
+        int activeNonDenyKeepSampleCount,
+        int activeNonDenyKeepResolvedInactiveCount,
+        bool writeWindowCompleted)
+    {
+        return selectionChangeObserved
+            && writeWindowCompleted
+            && activeNonDenyKeepSampleCount > 0
+            && activeNonDenyKeepResolvedInactiveCount == 0;
+    }
+
+    // selection-change レポートを publish してよいか。
+    // - session 終了は hard stop。
+    // - positive class（TimingGap / CoverageGap / DeactivationSemantics）確定なら即 publish。
+    // - InsufficientEvidence かつ non-deny sample が存在するなら、READ-ONLY coverage follow-up window が
+    //   terminal（transition 確認 or 2500ms timeout）になるまで publish しない。
+    // - InsufficientEvidence かつ sample が無いなら、旧挙動どおり WRITE window close or bounded timeout。
     public static bool SelectionChangeReportReady(
         TitleBackgroundSceneObjectSelectionChangeClass currentClass,
         bool windowCompleted,
         long elapsedMsSinceEvent,
-        bool sessionEnding)
+        bool sessionEnding,
+        int activeNonDenyKeepSampleCount,
+        bool coverageFollowUpTerminal)
     {
         if (sessionEnding)
         {
@@ -198,6 +228,12 @@ internal static class TitleBackgroundCharaSelectSceneObjectSuppressionLogic
         if (currentClass != TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence)
         {
             return true;
+        }
+
+        if (activeNonDenyKeepSampleCount > 0)
+        {
+            // READ-ONLY coverage follow-up が warranted。それが終わるまで待つ。
+            return coverageFollowUpTerminal;
         }
 
         return windowCompleted
@@ -341,6 +377,15 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         "fru.suppression.selectionChange.activeNonDenyKeepSampleCount",
         "fru.suppression.selectionChange.activeNonDenyKeepResolvedInactiveCount",
         "fru.suppression.selectionChange.activeNonDenyKeepPaths",
+        // READ-ONLY coverage follow-up window（review 5521156279）。
+        "fru.suppression.selectionChange.followUp.armed",
+        "fru.suppression.selectionChange.followUp.active",
+        "fru.suppression.selectionChange.followUp.elapsedMs",
+        "fru.suppression.selectionChange.followUp.durationMs",
+        "fru.suppression.selectionChange.followUp.passCount",
+        "fru.suppression.selectionChange.followUp.stopReason",
+        "fru.suppression.selectionChange.followUp.resolvedInactiveCount",
+        "fru.suppression.selectionChange.followUp.resolvedPaths",
         "fru.suppression.selectionChange.class",
         "fru.suppression.selectionChange.classReason",
         "fru.suppression.selectionChange.classNote",
@@ -432,18 +477,40 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
 
     public IReadOnlyList<string> ActiveNonDenyKeepPaths => _activeNonDenyKeepPaths;
 
-    // MUST FIX 2: 最初の re-arm パスで採った sanitized path のうち、同じ bounded window 内の
-    // read-only follow-up で「ある pass 全体を通じて active instance を 1 つも観測しなかった」ことを
-    // 確認できたもの。primary path を共有する別 instance が active なら resolved にしない。
+    // MUST FIX 2: 最初の re-arm パスで採った sanitized path のうち、bounded な read-only follow-up で
+    // 「ある pass 全体を通じて active instance を 1 つも観測しなかった」ことを確認できたもの。
+    // primary path を共有する別 instance が active なら resolved にしない。
     public int ActiveNonDenyKeepPathResolvedInactiveCount => _nonDenyKeepPathResolvedInactive.Count;
 
-    // follow-up の read-only 観測を続けるべきか（最初のパス採取済み・window open・未解決が残っている）。
+    // resolved-inactive になった sanitized path（≤12、sample の部分集合）。診断へ出す。
+    public IReadOnlyCollection<string> ActiveNonDenyKeepResolvedInactivePaths => _nonDenyKeepPathResolvedInactive;
+
+    // --- READ-ONLY coverage follow-up window（review 5521156279）---
+    // WRITE window（stable streak / pass budget / SetActive / deny list）は一切変更しない。
+    // これは WRITE window 終了後に走る別の bounded READ-ONLY 観測窓で、sampled non-deny path の
+    // 遅い active->inactive transition を捉える。native 操作は GetPrimaryPath / IsActive のみ。
+    public bool CoverageFollowUpArmed { get; private set; }
+
+    public bool CoverageFollowUpActive { get; private set; }
+
+    // service（唯一の時計保有者）が stamp する monotonic 開始 tick（ms）。0 = 未 stamp。
+    public long CoverageFollowUpStartTickMs { get; private set; }
+
+    // service が毎フレーム更新する経過 ms。stop 時点の値で凍結する。-1 = 未計測。
+    public long CoverageFollowUpElapsedMs { get; private set; } = -1;
+
+    public int CoverageFollowUpPassCount { get; private set; }
+
+    public string CoverageFollowUpStopReason { get; private set; } = "not-run";
+
+    // follow-up の read-only 観測を続けるべきか。WRITE window 中（!Completed）は従来どおり、
+    // WRITE window 終了後は CoverageFollowUpActive の間だけ継続する。
     public bool ShouldFollowUpNonDenyKeepPaths =>
         FirstReArmedPassCaptured
         && !_capturingFirstReArmedPass
-        && !Completed
         && _activeNonDenyKeepPaths.Count > 0
-        && _nonDenyKeepPathResolvedInactive.Count < _activeNonDenyKeepPaths.Count;
+        && _nonDenyKeepPathResolvedInactive.Count < _activeNonDenyKeepPaths.Count
+        && (!Completed || CoverageFollowUpActive);
 
     private bool _capturingFirstReArmedPass;
     private int _passWrites;
@@ -538,6 +605,7 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         _nonDenyKeepPathResolvedInactive.Clear();
         _followUpPassObserved.Clear();
         _followUpPassAnyActive.Clear();
+        ResetCoverageFollowUp();
     }
 
     // 最初の re-arm パスの BeginPass 直前に呼ぶ（サービスが gate 通過を確認済みのとき）。
@@ -613,6 +681,77 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         _followUpPassAnyActive.Clear();
     }
 
+    // sanitized 済みの sampled non-deny path か（follow-up scan が対象 instance を絞るために使う。
+    // これ自体は native を読まない）。
+    public bool IsSampledNonDenyKeepPath(string? primaryPath)
+    {
+        var sanitized = SanitizeGameAssetPath(primaryPath);
+        return sanitized.Length != 0 && _activeNonDenyKeepPaths.Contains(sanitized);
+    }
+
+    // --- READ-ONLY coverage follow-up window の制御（service が駆動する。時計は service 側）---
+
+    // WRITE window 終了後に READ-ONLY follow-up window を arm する。1 度だけ。
+    public void ArmCoverageFollowUp(long startTickMs)
+    {
+        if (CoverageFollowUpArmed)
+        {
+            return;
+        }
+
+        CoverageFollowUpArmed = true;
+        CoverageFollowUpActive = true;
+        CoverageFollowUpStartTickMs = startTickMs;
+        CoverageFollowUpElapsedMs = 0;
+        CoverageFollowUpPassCount = 0;
+        CoverageFollowUpStopReason = "running";
+    }
+
+    // service が毎フレーム更新する経過 ms。active の間だけ受け付け、stop 時点の値で凍結する。
+    public void RecordCoverageFollowUpElapsed(long elapsedMs)
+    {
+        if (CoverageFollowUpActive && elapsedMs >= 0)
+        {
+            CoverageFollowUpElapsedMs = elapsedMs;
+        }
+    }
+
+    public void StopCoverageFollowUp(string reason)
+    {
+        if (!CoverageFollowUpActive)
+        {
+            return;
+        }
+
+        CoverageFollowUpActive = false;
+        CoverageFollowUpStopReason = string.IsNullOrWhiteSpace(reason) ? "stopped" : reason.Trim();
+    }
+
+    // follow-up window が terminal（arm 済みかつ非 active）か。selection-change レポート publish 判定に使う。
+    public bool CoverageFollowUpTerminal => CoverageFollowUpArmed && !CoverageFollowUpActive;
+
+    public void BeginCoverageFollowUpPass()
+    {
+        CoverageFollowUpPassCount++;
+        _followUpPassObserved.Clear();
+        _followUpPassAnyActive.Clear();
+    }
+
+    public void EndCoverageFollowUpPass()
+    {
+        FoldNonDenyKeepFollowUpPass();
+    }
+
+    private void ResetCoverageFollowUp()
+    {
+        CoverageFollowUpArmed = false;
+        CoverageFollowUpActive = false;
+        CoverageFollowUpStartTickMs = 0;
+        CoverageFollowUpElapsedMs = -1;
+        CoverageFollowUpPassCount = 0;
+        CoverageFollowUpStopReason = "not-run";
+    }
+
     // 診断へ出すのはゲームアセットパス（bg/ ・ bgcommon/）だけ。fail-closed で他は空にする。
     private static string SanitizeGameAssetPath(string? path)
     {
@@ -651,6 +790,7 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         _nonDenyKeepPathResolvedInactive.Clear();
         _followUpPassObserved.Clear();
         _followUpPassAnyActive.Clear();
+        ResetCoverageFollowUp();
     }
 
     // window がまだ書込を試みてよいか（bounded）。
@@ -927,6 +1067,14 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         yield return $"fru.suppression.selectionChange.activeNonDenyKeepSampleCount={ActiveNonDenyKeepPathSampleCount}";
         yield return $"fru.suppression.selectionChange.activeNonDenyKeepResolvedInactiveCount={ActiveNonDenyKeepPathResolvedInactiveCount}";
         yield return $"fru.suppression.selectionChange.activeNonDenyKeepPaths={(_activeNonDenyKeepPaths.Count == 0 ? "none" : string.Join(",", _activeNonDenyKeepPaths))}";
+        yield return $"fru.suppression.selectionChange.followUp.armed={CoverageFollowUpArmed}";
+        yield return $"fru.suppression.selectionChange.followUp.active={CoverageFollowUpActive}";
+        yield return $"fru.suppression.selectionChange.followUp.elapsedMs={CoverageFollowUpElapsedMs}";
+        yield return $"fru.suppression.selectionChange.followUp.durationMs={TitleBackgroundCharaSelectSceneObjectSuppressionLogic.CoverageFollowUpDurationMs}";
+        yield return $"fru.suppression.selectionChange.followUp.passCount={CoverageFollowUpPassCount}";
+        yield return $"fru.suppression.selectionChange.followUp.stopReason={Normalize(CoverageFollowUpStopReason)}";
+        yield return $"fru.suppression.selectionChange.followUp.resolvedInactiveCount={ActiveNonDenyKeepPathResolvedInactiveCount}";
+        yield return $"fru.suppression.selectionChange.followUp.resolvedPaths={(_nonDenyKeepPathResolvedInactive.Count == 0 ? "none" : string.Join(",", _nonDenyKeepPathResolvedInactive))}";
         yield return $"fru.suppression.selectionChange.class={selectionChangeClass}";
         yield return $"fru.suppression.selectionChange.classReason={Normalize(selectionChangeReason)}";
         // SHOULD: auto class は受動証拠の要約。実機の「ちらつきが実際に見えた」外部観測と併せて読む。単体で fade を証明しない。

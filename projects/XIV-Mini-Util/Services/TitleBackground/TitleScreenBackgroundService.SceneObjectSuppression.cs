@@ -61,13 +61,17 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 _charaSelectSceneObjectSuppression.RecordCleanupState("stopped-on-login");
             }
 
-            // session 終了は hard stop: 未 publish の selection-change レポートがあれば今出す。
+            // session 終了は hard stop: READ-ONLY follow-up を安全停止し、未 publish の
+            // selection-change レポートがあれば今出す。
+            _charaSelectSceneObjectSuppression.StopCoverageFollowUp("session-end");
             MaybePublishFruSelectionChangeReport(candidate.Id, sessionEnding: true);
             return;
         }
 
-        // pre-login: 分類確定 / window 終了 / bounded timeout に到達していれば selection-change レポートを
+        // pre-login: READ-ONLY coverage follow-up の時計を進め（native 読取なし・timeout は延長しない）、
+        // 分類確定 / follow-up terminal / bounded timeout に到達していれば selection-change レポートを
         // 1 度だけ publish する（後続の gate 失敗フレームでも出せるよう、ここで判定する）。
+        AdvanceFruCoverageFollowUpClock();
         MaybePublishFruSelectionChangeReport(candidate.Id, sessionEnding: false);
 
         if (!_charaSelectTitleBackgroundSessionActive
@@ -131,40 +135,21 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _charaSelectSceneObjectSuppression.RecordGateStatus("window-closed");
             _charaSelectSceneObjectSuppression.RecordCleanupState(
                 $"window-closed:{_charaSelectSceneObjectSuppression.StopReason}");
+            // WRITE window は終了済み（stable / no-match / budget）。以降は再開しない。
+            // 代わりに、識別子ゲートを満たすフレームで READ-ONLY coverage follow-up の 1 パスを走らせる。
+            ScanFruCoverageFollowUpPass(candidate);
             return;
         }
 
         try
         {
-            var layoutWorld = LayoutWorld.Instance();
-            var activeLayout = layoutWorld == null ? null : layoutWorld->ActiveLayout;
-            if (activeLayout == null)
+            if (!TryResolveAuthorizedFruActiveLayout(candidate, out var activeLayout, out var writeGateStatus))
             {
-                _charaSelectSceneObjectSuppression.RecordGateStatus("active-layout-null");
+                _charaSelectSceneObjectSuppression.RecordGateStatus(writeGateStatus);
                 return;
             }
 
-            // 厳密確認（fail-closed: TerritoryTypeId==0 も不一致扱い）。初期化途中の不一致は
-            // failure ではなく gate status（次フレーム再試行）。
-            if (activeLayout->InitState != 7)
-            {
-                _charaSelectSceneObjectSuppression.RecordGateStatus("active-layout-not-ready");
-                return;
-            }
-
-            if (activeLayout->TerritoryTypeId != candidate.TerritoryId)
-            {
-                _charaSelectSceneObjectSuppression.RecordGateStatus("loaded-layout-territory-mismatch");
-                return;
-            }
-
-            if (activeLayout->LayerFilterKey != candidate.LayerFilterKey)
-            {
-                _charaSelectSceneObjectSuppression.RecordGateStatus("loaded-layout-layer-mismatch");
-                return;
-            }
-
-            _charaSelectSceneObjectSuppression.RecordGateStatus("authorized");
+            _charaSelectSceneObjectSuppression.RecordGateStatus(writeGateStatus);
 
             // Phase A: 選択変更後の最初の実パスなら、event->first-pass の monotonic 経過を確定する。
             if (_charaSelectSceneObjectSuppression.AwaitingFirstReArmedPass)
@@ -188,6 +173,174 @@ public sealed unsafe partial class TitleScreenBackgroundService
         {
             _charaSelectSceneObjectSuppression.RecordFailure($"exception:{ex.GetType().Name}");
             _log.Warning(ex, "[XMU BG] FRU scene-object suppression pass failed.");
+        }
+    }
+
+    // loaded ActiveLayout の identity を厳密確認する（fail-closed: TerritoryTypeId==0 も不一致扱い）。
+    // WRITE パスと READ-ONLY coverage follow-up パスで共有する。native 読取のみ。呼び出し側で
+    // gate status を記録し、認可されないフレームでは以降の native instance 読取を行わないこと。
+    // 認可に成功したときの gateStatus は "authorized"。
+    private bool TryResolveAuthorizedFruActiveLayout(
+        in TitleBackgroundCharacterSelectOverrideCandidate candidate,
+        out LayoutManager* activeLayout,
+        out string gateStatus)
+    {
+        activeLayout = null;
+        var layoutWorld = LayoutWorld.Instance();
+        var layout = layoutWorld == null ? null : layoutWorld->ActiveLayout;
+        if (layout == null)
+        {
+            gateStatus = "active-layout-null";
+            return false;
+        }
+
+        if (layout->InitState != 7)
+        {
+            gateStatus = "active-layout-not-ready";
+            return false;
+        }
+
+        if (layout->TerritoryTypeId != candidate.TerritoryId)
+        {
+            gateStatus = "loaded-layout-territory-mismatch";
+            return false;
+        }
+
+        if (layout->LayerFilterKey != candidate.LayerFilterKey)
+        {
+            gateStatus = "loaded-layout-layer-mismatch";
+            return false;
+        }
+
+        activeLayout = layout;
+        gateStatus = "authorized";
+        return true;
+    }
+
+    // READ-ONLY coverage follow-up の時計だけを進める（毎 pre-login フレームで呼ぶ。native 読取なし）。
+    // WRITE window 終了 + 未解決の non-deny sample あり + CoverageGap 未確定なら arm し、
+    // transition 確認 or 2500ms timeout で stop する。identity gate 待ちでも timeout は延長しない。
+    private void AdvanceFruCoverageFollowUpClock()
+    {
+        var st = _charaSelectSceneObjectSuppression;
+
+        if (!st.CoverageFollowUpArmed
+            && TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(
+                st.SelectionChangeReArmCount > 0,
+                st.ActiveNonDenyKeepPathSampleCount,
+                st.ActiveNonDenyKeepPathResolvedInactiveCount,
+                st.Completed))
+        {
+            st.ArmCoverageFollowUp(Environment.TickCount64);
+        }
+
+        if (!st.CoverageFollowUpActive)
+        {
+            return;
+        }
+
+        var elapsedMs = Math.Max(0L, Environment.TickCount64 - st.CoverageFollowUpStartTickMs);
+        st.RecordCoverageFollowUpElapsed(elapsedMs);
+
+        if (st.ActiveNonDenyKeepPathResolvedInactiveCount > 0)
+        {
+            st.StopCoverageFollowUp("coverage-confirmed");
+            return;
+        }
+
+        if (elapsedMs >= TitleBackgroundCharaSelectSceneObjectSuppressionLogic.CoverageFollowUpDurationMs)
+        {
+            st.StopCoverageFollowUp("followup-timeout");
+        }
+    }
+
+    // READ-ONLY coverage follow-up の 1 パス。identity gate を満たすフレームでのみ native を読む。
+    // 満たさないフレームでは何も読まず待つ（timeout は AdvanceFruCoverageFollowUpClock 側で進む）。
+    private void ScanFruCoverageFollowUpPass(in TitleBackgroundCharacterSelectOverrideCandidate candidate)
+    {
+        var st = _charaSelectSceneObjectSuppression;
+        if (!st.CoverageFollowUpActive)
+        {
+            return;
+        }
+
+        if (!TryResolveAuthorizedFruActiveLayout(candidate, out var activeLayout, out var gate))
+        {
+            st.RecordGateStatus($"coverage-followup:{gate}");
+            return;
+        }
+
+        try
+        {
+            st.BeginCoverageFollowUpPass();
+            ScanCoverageFollowUpSampledPaths(activeLayout);
+            st.EndCoverageFollowUpPass();
+        }
+        catch (Exception ex)
+        {
+            st.RecordFailure($"coverage-followup-scan:{ex.GetType().Name}");
+        }
+
+        if (st.ActiveNonDenyKeepPathResolvedInactiveCount > 0)
+        {
+            st.StopCoverageFollowUp("coverage-confirmed");
+        }
+    }
+
+    // sampled non-deny path の instance だけを READ-ONLY 観測する。
+    // 許可 native 操作: GetPrimaryPath / IsActive のみ。SetActive / deny 変更 / pointer 保持なし。
+    private void ScanCoverageFollowUpSampledPaths(LayoutManager* activeLayout)
+    {
+        if (!activeLayout->InstancesByType.TryGetValuePointer(InstanceType.SharedGroup, out var innerMapPtr)
+            || innerMapPtr == null)
+        {
+            return;
+        }
+
+        var innerMap = innerMapPtr->Value;
+        if (innerMap == null)
+        {
+            return;
+        }
+
+        foreach (var entry in *innerMap)
+        {
+            var instance = entry.Item2.Value;
+            if (instance == null)
+            {
+                continue;
+            }
+
+            string primaryPath;
+            try
+            {
+                var cptr = instance->GetPrimaryPath();
+                primaryPath = cptr.HasValue ? cptr.ToString() : string.Empty;
+            }
+            catch (Exception ex)
+            {
+                _charaSelectSceneObjectSuppression.RecordFailure($"coverage-followup-path:{ex.GetType().Name}");
+                continue;
+            }
+
+            // sampled path 以外は触らない（follow-up は sampled path のみ観測）。
+            if (!_charaSelectSceneObjectSuppression.IsSampledNonDenyKeepPath(primaryPath))
+            {
+                continue;
+            }
+
+            bool isActive;
+            try
+            {
+                isActive = instance->IsActive;
+            }
+            catch (Exception ex)
+            {
+                _charaSelectSceneObjectSuppression.RecordFailure($"coverage-followup-active:{ex.GetType().Name}");
+                continue;
+            }
+
+            _charaSelectSceneObjectSuppression.RecordNonDenyKeepPathFollowUp(primaryPath, isActive);
         }
     }
 
@@ -342,11 +495,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var eventTick = suppression.SelectionChangeEventTickMs;
         var elapsedMs = eventTick > 0 ? Math.Max(0L, Environment.TickCount64 - eventTick) : -1L;
 
+        // WRITE window が stable になっただけでは、READ-ONLY coverage follow-up が pending なら publish しない。
         if (!TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
                 selectionChangeClass,
                 suppression.Completed,
                 elapsedMs,
-                sessionEnding))
+                sessionEnding,
+                suppression.ActiveNonDenyKeepPathSampleCount,
+                suppression.CoverageFollowUpTerminal))
         {
             return;
         }
@@ -355,9 +511,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
             ? "session-end"
             : selectionChangeClass != TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence
                 ? "classified"
-                : suppression.Completed
-                    ? "window-closed"
-                    : "timeout";
+                : suppression.CoverageFollowUpTerminal
+                    ? $"coverage-followup:{suppression.CoverageFollowUpStopReason}"
+                    : suppression.Completed
+                        ? "window-closed"
+                        : "timeout";
 
         string report;
         try
