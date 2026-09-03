@@ -10241,5 +10241,131 @@ Test(605, "MUST FIX (review 5099109840): baseline availability is explicit - no 
         && gateBlockedIncomplete && cleanNegativeIsNoSafeDelta;
 });
 
+Test(606, "MUST FIX (review 5099281460 #1): RecordGateBlockedPass only counts while Armed && !Complete, and any counted gate-block keeps a negative run at incomplete", () =>
+{
+    // guard: unarmed -> no-op.
+    var unarmed = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    unarmed.RecordGateBlockedPass();
+    var unarmedNoCount = unarmed.GateBlockedPassCount == 0;
+
+    // armed && !complete -> counts.
+    var armed = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    armed.BeginSharedGroupPass();
+    armed.FinishSharedGroupPass(valid: true, elapsedMs: -1);
+    armed.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: true);
+    armed.RecordGateBlockedPass();
+    armed.RecordGateBlockedPass();
+    var armedCounts = armed.GateBlockedPassCount == 2;
+
+    // after the window is terminal -> no-op (a stale gate-block frame must not inflate the count).
+    armed.MarkWindowComplete();
+    armed.RecordGateBlockedPass();
+    var terminalNoCount = armed.GateBlockedPassCount == 2;
+
+    // an otherwise-clean negative run with a counted gate-block ends at incomplete (not no-safe-layout-delta).
+    var run = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    run.BeginSharedGroupPass();
+    run.FinishSharedGroupPass(valid: true, elapsedMs: -1);
+    run.ArmFromReArm(
+        new[]
+        {
+            new TitleBackgroundVfxDetailEntry((1UL << 32), 1u, 0u,
+                TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(1, 0u),
+                true, true, true, 0xAAu, "bg/vfx/1.avfx"),
+        },
+        vfxSnapshotReliable: true);
+    run.RecordGateBlockedPass();                       // a safety-gate return frame while observing
+    run.BeginSharedGroupPass();
+    run.RecordSharedGroupInstance("bg/a/px.sgb", false);
+    run.FinishSharedGroupPass(valid: true, elapsedMs: 40);
+    run.BeginVfxPass();
+    run.RecordVfxInstance(TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(1, 0u), isActive: true, loaded: true, gfx: true, pathHash: 0xAAu, "bg/vfx/1.avfx");
+    run.FinishVfxPass(valid: true);
+    run.MarkWindowComplete();
+    var negativeWithGateBlockIsIncomplete = run.SharedGroupChangedCount == 0
+        && run.VfxChangedCount == 0
+        && run.SharedGroupValidPassCount > 0
+        && run.VfxValidPassCount > 0
+        && run.GateBlockedPassCount == 1
+        && run.Outcome == "incomplete"
+        && run.BuildFinalDiagnosticLines().Contains("fru.suppression.selectionChange.final.gateBlockedPassCount=1");
+
+    return unarmedNoCount && armedCounts && terminalNoCount && negativeWithGateBlockIsIncomplete;
+});
+
+Test(607, "MUST FIX (review 5099281460): every safety-gate return during the final diagnostic calls RecordGateBlockedPass; vfxSnapshotReliable requires the strict predicate; no new native scan / wait loop; WRITE path intact", () =>
+{
+    var root = FindRepositoryRoot();
+    var src = File.ReadAllText(Path.Combine(
+        root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.SceneObjectSuppression.cs"));
+
+    string Body(string signature)
+    {
+        var start = src.IndexOf(signature, StringComparison.Ordinal);
+        if (start < 0) return string.Empty;
+        var brace = src.IndexOf('{', start);
+        if (brace < 0) return string.Empty;
+        var depth = 0;
+        for (var i = brace; i < src.Length; i++)
+        {
+            if (src[i] == '{') depth++;
+            else if (src[i] == '}' && --depth == 0) return src[brace..(i + 1)];
+        }
+        return string.Empty;
+    }
+
+    var maintain = Body("private void MaintainFruSceneObjectSuppression()");
+
+    // #1: each safety gate that RecordGateStatus(...)s and returns also records a gate-blocked pass.
+    static bool GatePairsWithBlock(string body, string gateStatusToken)
+    {
+        var g = body.IndexOf(gateStatusToken, StringComparison.Ordinal);
+        if (g < 0) return false;
+        var ret = body.IndexOf("return;", g, StringComparison.Ordinal);
+        var block = body.IndexOf("_charaSelectSelectionChangeDelta.RecordGateBlockedPass();", g, StringComparison.Ordinal);
+        return ret >= 0 && block >= 0 && block < ret;
+    }
+
+    var gatesBlockCounted =
+        GatePairsWithBlock(maintain, "RecordGateStatus(\"session-or-hook-not-ready\")")
+        && GatePairsWithBlock(maintain, "RecordGateStatus(\"not-chara-select-map\")")
+        && GatePairsWithBlock(maintain, "RecordGateStatus(\"scene-generation-not-observed\")")
+        && GatePairsWithBlock(maintain, "$\"scene-not-authorized")
+        && GatePairsWithBlock(maintain, "RecordGateStatus(writeGateStatus)");
+    // the follow-up scan already records a gate-block on identity-gate failure.
+    var followUpBlocks = Body("private void ScanFruCoverageFollowUpPass(")
+        .Contains("_charaSelectSelectionChangeDelta.RecordGateBlockedPass();", StringComparison.Ordinal);
+
+    // safety gate conditions themselves are unchanged.
+    var gateConditionsIntact = maintain.Contains("!_charaSelectTitleBackgroundSessionActive", StringComparison.Ordinal)
+        && maintain.Contains("_hookLifecycle.State != TitleBackgroundServiceState.Ready", StringComparison.Ordinal)
+        && maintain.Contains("TitleBackgroundCharaSelectPlacementLogic.IsCharaSelectMap(lobbyMap)", StringComparison.Ordinal)
+        && maintain.Contains("if (generation <= 0)", StringComparison.Ordinal)
+        && maintain.Contains("_charaSelectStaticAnchor.TryGetAuthorizedAnchor(", StringComparison.Ordinal);
+
+    // #2: strict vfxSnapshotReliable predicate.
+    var strictReliable = maintain.Contains("vfxSnapshotReliable: _charaSelectVfxInventory.ArmedSceneGeneration == generation", StringComparison.Ordinal)
+        && maintain.Contains("_charaSelectVfxInventory.Completed", StringComparison.Ordinal)
+        && maintain.Contains("string.Equals(_charaSelectVfxInventory.StopReason, \"stable\", StringComparison.Ordinal)", StringComparison.Ordinal)
+        && maintain.Contains("_charaSelectVfxInventory.ReadFailureCount == 0", StringComparison.Ordinal)
+        && maintain.Contains("_charaSelectVfxInventory.DetailSnapshotCount > 0", StringComparison.Ordinal);
+
+    // no new native scan / wait loop introduced by this change: the maintain method has no loop of its own
+    // and does not touch InstancesByType (only the pre-existing scan helpers do).
+    var noWaitLoopOrExtraScan = !maintain.Contains("while (", StringComparison.Ordinal)
+        && !maintain.Contains("InstancesByType", StringComparison.Ordinal)
+        && !maintain.Contains("GetPrimaryPath", StringComparison.Ordinal);
+
+    // WRITE path unchanged.
+    var writePathIntact = Body("private bool SuppressSharedGroups(")
+            is var w
+        && w.Contains("instance->SetActive(false);", StringComparison.Ordinal)
+        && w.Contains("TryConsumeWriteBudget(key)", StringComparison.Ordinal)
+        && w.Contains("RecordMatched(key)", StringComparison.Ordinal);
+
+    return gatesBlockCounted && followUpBlocks && gateConditionsIntact
+        && strictReliable && noWaitLoopOrExtraScan && writePathIntact;
+});
+
     }
 }

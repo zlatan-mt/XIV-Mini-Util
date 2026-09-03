@@ -80,10 +80,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
         AdvanceFruCoverageFollowUpClock();
         MaybePublishFruSelectionChangeReport(candidate.Id, sessionEnding: false);
 
+        // 最終診断が Armed かつ未 terminal の間、safety gate で return するフレームは gate-blocked pass
+        // として数える（review 5099281460 #1）。RecordGateBlockedPass() は内部で Armed && !WindowComplete を
+        // guard するので無条件で呼んでよい。safety gate 自体は一切変更しない。
         if (!_charaSelectTitleBackgroundSessionActive
             || _hookLifecycle.State != TitleBackgroundServiceState.Ready)
         {
             _charaSelectSceneObjectSuppression.RecordGateStatus("session-or-hook-not-ready");
+            _charaSelectSelectionChangeDelta.RecordGateBlockedPass();
             return;
         }
 
@@ -92,6 +96,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             || !TitleBackgroundCharaSelectPlacementLogic.IsCharaSelectMap(lobbyMap))
         {
             _charaSelectSceneObjectSuppression.RecordGateStatus("not-chara-select-map");
+            _charaSelectSelectionChangeDelta.RecordGateBlockedPass();
             return;
         }
 
@@ -99,6 +104,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         if (generation <= 0)
         {
             _charaSelectSceneObjectSuppression.RecordGateStatus("scene-generation-not-observed");
+            _charaSelectSelectionChangeDelta.RecordGateBlockedPass();
             return;
         }
 
@@ -116,6 +122,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         {
             _charaSelectSceneObjectSuppression.RecordGateStatus(
                 $"scene-not-authorized:{anchorSnapshot.AuthorizationReason}:gen({anchorSnapshot.SceneGeneration}/{generation})");
+            _charaSelectSelectionChangeDelta.RecordGateBlockedPass();
             return;
         }
 
@@ -134,15 +141,19 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 eventTick,
                 eventToReArmMs);
 
-            // 最終診断: managed baseline を snapshot する（native scan は増やさない）。
+            // 最終診断: managed baseline を snapshot する（native scan は増やさない・wait loop なし）。
             // - SharedGroup baseline = 直近の authorized な valid 通常 suppression pass の path->activeCount。
-            // - VFX baseline = この scene generation の信頼できる既存 VFX inventory スナップショット
-            //   （current-gen で arm 済み + valid な完了パスあり）。frozen で可。未取得なら
-            //   appeared/change を positive delta にしない（outcome は incomplete 側）。
+            // - VFX baseline = この scene generation の信頼できる既存 VFX inventory スナップショット。
+            //   review 5099281460 #2: 最低限 ArmedSceneGeneration==generation && Completed &&
+            //   StopReason=="stable" && ReadFailureCount==0 && DetailSnapshotCount>0 を要求する。
+            //   これを満たさなければ VFX baseline は「未取得」（appeared/change を positive delta にしない）。
             _charaSelectSelectionChangeDelta.ArmFromReArm(
                 _charaSelectVfxInventory.DetailSnapshot,
-                vfxSnapshotReliable: _charaSelectVfxInventory.DetailSnapshotCount > 0
-                    && _charaSelectVfxInventory.ArmedSceneGeneration == generation);
+                vfxSnapshotReliable: _charaSelectVfxInventory.ArmedSceneGeneration == generation
+                    && _charaSelectVfxInventory.Completed
+                    && string.Equals(_charaSelectVfxInventory.StopReason, "stable", StringComparison.Ordinal)
+                    && _charaSelectVfxInventory.ReadFailureCount == 0
+                    && _charaSelectVfxInventory.DetailSnapshotCount > 0);
         }
 
         _charaSelectSceneObjectSuppression.ArmForGeneration(generation, forceReArm);
@@ -162,6 +173,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             if (!TryResolveAuthorizedFruActiveLayout(candidate, out var activeLayout, out var writeGateStatus))
             {
                 _charaSelectSceneObjectSuppression.RecordGateStatus(writeGateStatus);
+                _charaSelectSelectionChangeDelta.RecordGateBlockedPass();
                 return;
             }
 
