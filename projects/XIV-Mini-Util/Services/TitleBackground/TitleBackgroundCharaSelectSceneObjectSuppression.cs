@@ -302,10 +302,21 @@ internal static class TitleBackgroundSelectionChangeReportBuilder
             "[XIV Mini Util] --- selectionChange ---",
         };
 
+        var bgPartSectionWritten = false;
         foreach (var line in suppressionDiagnosticLines)
         {
             if (line.StartsWith("fru.suppression.", StringComparison.Ordinal))
             {
+                lines.Add($"[XIV Mini Util] {line}");
+            }
+            else if (line.StartsWith("fru.bgpart.", StringComparison.Ordinal))
+            {
+                if (!bgPartSectionWritten)
+                {
+                    lines.Add("[XIV Mini Util] --- bgpart ---");
+                    bgPartSectionWritten = true;
+                }
+
                 lines.Add($"[XIV Mini Util] {line}");
             }
         }

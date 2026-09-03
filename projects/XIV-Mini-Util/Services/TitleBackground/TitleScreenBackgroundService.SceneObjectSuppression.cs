@@ -189,6 +189,15 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 _charaSelectSceneObjectSuppression.MarkFirstReArmedPassStarting(eventToFirstPassMs);
             }
 
+            // TitleEdit parity checkpoint: first valid post-event BgPart snapshot only。existing
+            // authorized frame を再利用し、native write は行わない。後続の state delta は
+            // WRITE window 終了後の bounded READ-ONLY follow-up で継続する。
+            var bgPart = _charaSelectSelectionChangeDelta.BgPart;
+            if (bgPart.ShouldRunPass && !bgPart.FirstPassCaptured)
+            {
+                ObserveFruBgPartSelectionChangePass(activeLayout, ComputeSelectionChangeElapsedMs());
+            }
+
             _charaSelectSceneObjectSuppression.BeginPass();
             // 最終診断: 同じ WRITE scan の中で eligible SharedGroup の active-instance 数も数える
             // （新しい native scan は増やさない）。再 arm 前は baseline source、再 arm 後は delta として畳み込む。
@@ -312,6 +321,9 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
 
             var elapsedMs = ComputeSelectionChangeElapsedMs();
+
+            // first snapshot 済みなら、同じ authorized follow-up frame で state/presence を追跡する。
+            ObserveFruBgPartSelectionChangePass(activeLayout, elapsedMs);
 
             st.BeginCoverageFollowUpPass();
             ScanCoverageFollowUpSampledPaths(activeLayout);
@@ -457,6 +469,101 @@ public sealed unsafe partial class TitleScreenBackgroundService
         }
 
         return true;
+    }
+
+    // selection-change の BgPart を 1 pass だけ typed read する。対象は InstanceType.BgPart のみ。
+    // map pointer はこの呼び出し中だけ使い、managed state には UUID と safe field だけを渡す。
+    private void ObserveFruBgPartSelectionChangePass(LayoutManager* activeLayout, long elapsedMs)
+    {
+        var bgPart = _charaSelectSelectionChangeDelta.BgPart;
+        if (!bgPart.ShouldRunPass)
+        {
+            return;
+        }
+
+        bgPart.BeginPass();
+        var valid = ScanSelectionChangeBgParts(activeLayout);
+        bgPart.FinishPass(valid, elapsedMs);
+    }
+
+    // BgPart の complete pass を read-only で走査する。false は map/scan が完全に読めなかったことを示す。
+    // 許可する typed read は Id.InstanceKey / SubId / IsActive / GetPrimaryPath /
+    // IsPrimaryLoaded / GetGraphics のみ。例外・bound 超過は fail-closed でこの pass を捨てる。
+    private bool ScanSelectionChangeBgParts(LayoutManager* activeLayout)
+    {
+        var bgPart = _charaSelectSelectionChangeDelta.BgPart;
+        try
+        {
+            if (activeLayout == null
+                || !activeLayout->InstancesByType.TryGetValuePointer(InstanceType.BgPart, out var innerMapPtr)
+                || innerMapPtr == null)
+            {
+                bgPart.RecordReadFailure();
+                return false;
+            }
+
+            var innerMap = innerMapPtr->Value;
+            if (innerMap == null)
+            {
+                bgPart.RecordReadFailure();
+                return false;
+            }
+
+            var scanned = 0;
+            foreach (var entry in *innerMap)
+            {
+                if (scanned >= TitleBackgroundCharaSelectBgPartSelectionChangeLogic.MaxScanPerPass)
+                {
+                    bgPart.MarkTruncated();
+                    return false;
+                }
+
+                scanned++;
+                var instance = entry.Item2.Value;
+                if (instance == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var instanceKey = instance->Id.InstanceKey;
+                    var subId = instance->SubId;
+                    var isActive = instance->IsActive;
+                    var cptr = instance->GetPrimaryPath();
+                    var primaryPath = cptr.HasValue ? cptr.ToString() : string.Empty;
+                    var sanitizedPath = TitleBackgroundCharaSelectSceneObjectSuppressionLogic
+                        .SanitizeGameAssetPathForDiagnostics(primaryPath);
+                    var isPrimaryLoaded = instance->IsPrimaryLoaded();
+                    var hasGraphicsObject = instance->GetGraphics() != null;
+
+                    if (!bgPart.TryRecordInstance(new TitleBackgroundBgPartObservation(
+                            TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(instanceKey, subId),
+                            instanceKey,
+                            subId,
+                            isActive,
+                            sanitizedPath,
+                            isPrimaryLoaded,
+                            hasGraphicsObject)))
+                    {
+                        return false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    bgPart.RecordReadFailure();
+                    _charaSelectSceneObjectSuppression.RecordFailure($"delta-bgpart:{ex.GetType().Name}");
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            bgPart.RecordReadFailure();
+            _charaSelectSceneObjectSuppression.RecordFailure($"delta-bgpart-scan:{ex.GetType().Name}");
+            return false;
+        }
     }
 
     // sampled non-deny path の instance だけを READ-ONLY 観測する。
@@ -722,6 +829,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         {
             var reportLines = suppression.BuildDiagnosticLines(candidateId, true)
                 .Concat(_charaSelectSelectionChangeDelta.BuildFinalDiagnosticLines())
+                .Concat(_charaSelectSelectionChangeDelta.BuildBgPartDiagnosticLines())
                 .ToArray();
             report = TitleBackgroundSelectionChangeReportBuilder.Build(
                 DateTimeOffset.Now,

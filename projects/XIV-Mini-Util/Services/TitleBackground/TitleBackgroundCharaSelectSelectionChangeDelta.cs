@@ -212,6 +212,12 @@ internal readonly record struct TitleBackgroundVfxDeltaState(
 // write は 1 件も行わない。native pointer / address / instance id は保持しない。
 internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
 {
+    // TitleEdit parity の最後の BgPart checkpoint。既存 final diagnostic と同じ re-arm /
+    // terminal / reset lifecycle に乗せるが、observe 対象は BgPart だけで write は無い。
+    private readonly TitleBackgroundCharaSelectBgPartSelectionChangeRuntimeState _bgPart = new();
+
+    public TitleBackgroundCharaSelectBgPartSelectionChangeRuntimeState BgPart => _bgPart;
+
     public bool Armed { get; private set; }
 
     public bool WindowComplete { get; private set; }
@@ -330,6 +336,7 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         ResetObservation();
         Armed = true;
         Outcome = "observing";
+        _bgPart.ArmFromReArm();
 
         SharedGroupBaselineAvailable = _latestOrdinaryPassValid;
         if (SharedGroupBaselineAvailable)
@@ -567,6 +574,7 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         if (Armed && !WindowComplete)
         {
             GateBlockedPassCount++;
+            _bgPart.RecordGateBlockedPass();
         }
     }
 
@@ -578,6 +586,7 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         }
 
         WindowComplete = true;
+        _bgPart.MarkWindowComplete();
         RecomputeOutcome();
     }
 
@@ -590,6 +599,7 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
 
         _sessionEnded = true;
         WindowComplete = true;
+        _bgPart.MarkSessionEnd();
         RecomputeOutcome();
     }
 
@@ -664,6 +674,11 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         }
     }
 
+    public IEnumerable<string> BuildBgPartDiagnosticLines()
+    {
+        return _bgPart.BuildDiagnosticLines();
+    }
+
     private void ResetObservation()
     {
         WindowComplete = false;
@@ -685,6 +700,7 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         _vfxChange.Clear();
         _vfxPathHash.Clear();
         _vfxPath.Clear();
+        _bgPart.Reset();
     }
 
     public void Reset()

@@ -10367,5 +10367,271 @@ Test(607, "MUST FIX (review 5099281460): every safety-gate return during the fin
         && strictReliable && noWaitLoopOrExtraScan && writePathIntact;
 });
 
+Test(608, "BgPart TitleEdit parity: first valid post-event snapshot is captured once, active rows are UUID-sorted, and state changes are retained without a pre-event baseline", () =>
+{
+    static TitleBackgroundBgPartObservation O(
+        uint instanceKey,
+        bool active,
+        bool loaded,
+        bool gfx,
+        string path,
+        uint subId = 0)
+        => new(
+            TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(instanceKey, subId),
+            instanceKey,
+            subId,
+            active,
+            path,
+            loaded,
+            gfx);
+
+    var delta = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    delta.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: false);
+    var bgPart = delta.BgPart;
+
+    // No pre-event baseline is provided; a valid first post-event pass is enough.
+    bgPart.BeginPass();
+    bgPart.TryRecordInstance(O(9, active: true, loaded: true, gfx: true, path: "bg/late.sgb"));
+    bgPart.TryRecordInstance(O(2, active: true, loaded: true, gfx: true, path: "bg/early.sgb"));
+    bgPart.FinishPass(valid: true, elapsedMs: 16);
+
+    var firstSnapshot = bgPart.FirstPassCaptured
+        && bgPart.FirstPassTotalCount == 2
+        && bgPart.FirstPassActiveCount == 2
+        && bgPart.FirstPassActiveReportedCount == 2
+        && bgPart.ValidPassCount == 1;
+
+    // A second re-arm in the same visible switch burst must not replace the first snapshot.
+    delta.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: true);
+    var survivesReArm = bgPart.FirstPassCaptured
+        && bgPart.FirstPassActiveCount == 2
+        && bgPart.ValidPassCount == 1;
+
+    // Loaded/gfx/path/active changes are all observed in a later complete pass.
+    bgPart.BeginPass();
+    bgPart.TryRecordInstance(O(2, active: false, loaded: false, gfx: false, path: "bg/changed.sgb"));
+    bgPart.TryRecordInstance(O(9, active: true, loaded: true, gfx: true, path: "bg/late.sgb"));
+    bgPart.FinishPass(valid: true, elapsedMs: 110);
+    delta.MarkWindowComplete();
+
+    var lines = bgPart.BuildDiagnosticLines().ToArray();
+    var activeRows = lines
+        .Where(line => line.StartsWith("fru.bgpart.active", StringComparison.Ordinal)
+            && line.Contains("=uuid=", StringComparison.Ordinal))
+        .ToArray();
+    var changed = lines.FirstOrDefault(line => line.StartsWith("fru.bgpart.changed0=", StringComparison.Ordinal)) ?? string.Empty;
+    var deterministicActiveRows = activeRows.Length == 2
+        && activeRows[0].Contains("uuid=2", StringComparison.Ordinal)
+        && activeRows[1].Contains("uuid=9", StringComparison.Ordinal);
+    var changedState = bgPart.ChangedCount == 1
+        && changed.Contains("uuid=2", StringComparison.Ordinal)
+        && changed.Contains("firstActive=true finalActive=false", StringComparison.Ordinal)
+        && changed.Contains("firstLoaded=true finalLoaded=false", StringComparison.Ordinal)
+        && changed.Contains("firstGfx=true finalGfx=false", StringComparison.Ordinal)
+        && changed.Contains("firstPath=bg/early.sgb finalPath=bg/changed.sgb", StringComparison.Ordinal)
+        && changed.Contains("changedAtMs=110", StringComparison.Ordinal);
+    var complete = bgPart.Complete
+        && !bgPart.Truncated
+        && lines.Contains("fru.bgpart.complete=True")
+        && TitleBackgroundCharaSelectBgPartSelectionChangeLogic.DiagnosticKeys
+            .Contains("fru.bgpart.active0", StringComparer.Ordinal);
+
+    return firstSnapshot && survivesReArm && deterministicActiveRows && changedState && complete;
+});
+
+Test(609, "BgPart TitleEdit parity: failed passes cannot synthesize disappearance; appearance/disappearance and inactive->active are retained; bounds fail closed", () =>
+{
+    static TitleBackgroundBgPartObservation O(
+        uint instanceKey,
+        bool active,
+        bool loaded = true,
+        bool gfx = true,
+        string path = "bg/test/part.mdl")
+        => new(
+            TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(instanceKey, 0),
+            instanceKey,
+            0,
+            active,
+            path,
+            loaded,
+            gfx);
+
+    var state = new TitleBackgroundCharaSelectBgPartSelectionChangeRuntimeState();
+    state.ArmFromReArm();
+    state.BeginPass();
+    state.TryRecordInstance(O(10, active: false, path: "bg/test/inactive.mdl"));
+    state.TryRecordInstance(O(20, active: true, path: "bg/test/disappears.mdl"));
+    state.FinishPass(valid: true, elapsedMs: 0);
+
+    // A partial pass is discarded: UUID 20 is not declared disappeared yet.
+    state.BeginPass();
+    state.TryRecordInstance(O(10, active: true));
+    state.RecordReadFailure();
+    state.FinishPass(valid: true, elapsedMs: 50);
+    var failedPassDropped = state.ChangedCount == 0
+        && state.ValidPassCount == 1
+        && state.ReadFailureCount == 1;
+
+    // Clean pass: 10 changes inactive->active, 20 disappears, 30 appears.
+    state.BeginPass();
+    state.TryRecordInstance(O(10, active: true, loaded: false, gfx: false, path: "bg/test/part-changed.mdl"));
+    state.TryRecordInstance(O(30, active: true, path: "bg/test/appears.mdl"));
+    state.FinishPass(valid: true, elapsedMs: 120);
+    state.RecordGateBlockedPass();
+    state.MarkWindowComplete();
+
+    var changedLines = state.BuildDiagnosticLines()
+        .Where(line => line.StartsWith("fru.bgpart.changed", StringComparison.Ordinal)
+            && line.Contains("=uuid=", StringComparison.Ordinal))
+        .ToArray();
+    var changedState = state.ChangedCount == 3
+        && changedLines.Length == 3
+        && changedLines[0].Contains("uuid=10", StringComparison.Ordinal)
+        && changedLines[0].Contains("firstActive=false finalActive=true", StringComparison.Ordinal)
+        && changedLines[1].Contains("uuid=20", StringComparison.Ordinal)
+        && changedLines[1].Contains("finalPresent=false appeared=false disappeared=true", StringComparison.Ordinal)
+        && changedLines[2].Contains("uuid=30", StringComparison.Ordinal)
+        && changedLines[2].Contains("firstPresent=false finalPresent=true appeared=true", StringComparison.Ordinal)
+        && state.GateBlockedPassCount == 1
+        && state.Complete;
+
+    // A transient state change must remain a change even when the final state returns to the first state.
+    var bounce = new TitleBackgroundCharaSelectBgPartSelectionChangeRuntimeState();
+    bounce.ArmFromReArm();
+    bounce.BeginPass();
+    bounce.TryRecordInstance(O(40, active: true));
+    bounce.FinishPass(valid: true, elapsedMs: 0);
+    bounce.BeginPass();
+    bounce.TryRecordInstance(O(40, active: false));
+    bounce.FinishPass(valid: true, elapsedMs: 20);
+    bounce.BeginPass();
+    bounce.TryRecordInstance(O(40, active: true));
+    bounce.FinishPass(valid: true, elapsedMs: 40);
+    var bounceRetained = bounce.ChangedCount == 1
+        && bounce.BuildDiagnosticLines().Any(line =>
+            line.StartsWith("fru.bgpart.changed0=", StringComparison.Ordinal)
+            && line.Contains("firstActive=true finalActive=true", StringComparison.Ordinal)
+            && line.Contains("everInactive=true", StringComparison.Ordinal)
+            && line.Contains("changedAtMs=20", StringComparison.Ordinal));
+
+    var activeOverflow = new TitleBackgroundCharaSelectBgPartSelectionChangeRuntimeState();
+    activeOverflow.ArmFromReArm();
+    activeOverflow.BeginPass();
+    for (var i = 0; i < TitleBackgroundCharaSelectBgPartSelectionChangeLogic.MaxReportedFirstPassActive + 1; i++)
+    {
+        activeOverflow.TryRecordInstance(O((uint)(1000 + i), active: true));
+    }
+
+    activeOverflow.FinishPass(valid: true, elapsedMs: 1);
+    activeOverflow.MarkWindowComplete();
+    var activeRows = activeOverflow.BuildDiagnosticLines()
+        .Where(line => line.StartsWith("fru.bgpart.active", StringComparison.Ordinal)
+            && line.Contains("=uuid=", StringComparison.Ordinal))
+        .ToArray();
+    var activeBoundFailsClosed = activeOverflow.FirstPassActiveCount == 1025
+        && activeOverflow.FirstPassActiveReportedCount == 1024
+        && activeRows.Length == 1024
+        && activeOverflow.Truncated
+        && !activeOverflow.Complete;
+
+    var changedOverflow = new TitleBackgroundCharaSelectBgPartSelectionChangeRuntimeState();
+    changedOverflow.ArmFromReArm();
+    changedOverflow.BeginPass();
+    for (var i = 0; i < TitleBackgroundCharaSelectBgPartSelectionChangeLogic.MaxReportedChanged + 1; i++)
+    {
+        changedOverflow.TryRecordInstance(O((uint)(5000 + i), active: true));
+    }
+
+    changedOverflow.FinishPass(valid: true, elapsedMs: 1);
+    changedOverflow.BeginPass();
+    for (var i = 0; i < TitleBackgroundCharaSelectBgPartSelectionChangeLogic.MaxReportedChanged + 1; i++)
+    {
+        changedOverflow.TryRecordInstance(O((uint)(5000 + i), active: false));
+    }
+
+    changedOverflow.FinishPass(valid: true, elapsedMs: 2);
+    changedOverflow.MarkWindowComplete();
+    var changedRows = changedOverflow.BuildDiagnosticLines()
+        .Where(line => line.StartsWith("fru.bgpart.changed", StringComparison.Ordinal)
+            && line.Contains("=uuid=", StringComparison.Ordinal))
+        .ToArray();
+    var changedBoundFailsClosed = changedOverflow.ChangedCount == 257
+        && changedOverflow.ChangedReportedCount == 256
+        && changedRows.Length == 256
+        && changedOverflow.Truncated
+        && !changedOverflow.Complete;
+
+    return failedPassDropped && changedState && bounceRetained
+        && activeBoundFailsClosed && changedBoundFailsClosed;
+});
+
+Test(610, "BgPart TitleEdit parity: report integration and scan are typed read-only, BgPart-only, and bounded", () =>
+{
+    var root = FindRepositoryRoot();
+    string Read(params string[] parts) => File.ReadAllText(Path.Combine(new[] { root }.Concat(parts).ToArray()));
+
+    var service = Read("projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.SceneObjectSuppression.cs");
+    var delta = Read("projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundCharaSelectSelectionChangeDelta.cs");
+    var builder = Read("projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundCharaSelectSceneObjectSuppression.cs");
+    var bgPartFile = Read("projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundCharaSelectBgPartSelectionChange.cs");
+
+    static string Body(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        if (start < 0) return string.Empty;
+        var brace = source.IndexOf('{', start);
+        if (brace < 0) return string.Empty;
+        var depth = 0;
+        for (var i = brace; i < source.Length; i++)
+        {
+            if (source[i] == '{') depth++;
+            else if (source[i] == '}' && --depth == 0) return source[brace..(i + 1)];
+        }
+
+        return string.Empty;
+    }
+
+    var scan = Body(service, "private bool ScanSelectionChangeBgParts(");
+    var typedReadOnly = scan.Contains("InstanceType.BgPart", StringComparison.Ordinal)
+        && scan.Contains("Id.InstanceKey", StringComparison.Ordinal)
+        && scan.Contains("SubId", StringComparison.Ordinal)
+        && scan.Contains("IsActive", StringComparison.Ordinal)
+        && scan.Contains("GetPrimaryPath", StringComparison.Ordinal)
+        && scan.Contains("IsPrimaryLoaded", StringComparison.Ordinal)
+        && scan.Contains("GetGraphics() != null", StringComparison.Ordinal)
+        && scan.Contains("MaxScanPerPass", StringComparison.Ordinal)
+        && !scan.Contains("SetActive", StringComparison.Ordinal)
+        && !scan.Contains("collider", StringComparison.OrdinalIgnoreCase)
+        && !scan.Contains("offset", StringComparison.OrdinalIgnoreCase);
+    var serviceWiring = service.Contains("ObserveFruBgPartSelectionChangePass(activeLayout", StringComparison.Ordinal)
+        && service.Contains("_charaSelectSelectionChangeDelta.BuildBgPartDiagnosticLines()", StringComparison.Ordinal);
+    var lifecycleWiring = delta.Contains("_bgPart.ArmFromReArm();", StringComparison.Ordinal)
+        && delta.Contains("_bgPart.RecordGateBlockedPass();", StringComparison.Ordinal)
+        && delta.Contains("_bgPart.MarkWindowComplete();", StringComparison.Ordinal)
+        && delta.Contains("_bgPart.Reset();", StringComparison.Ordinal);
+
+    var report = TitleBackgroundSelectionChangeReportBuilder.Build(
+        new DateTimeOffset(2026, 9, 3, 15, 30, 0, TimeSpan.Zero),
+        "custom:fru-clear-stage",
+        "final:incomplete",
+        new[]
+        {
+            "fru.suppression.selectionChange.final.outcome=incomplete",
+            "fru.bgpart.complete=False",
+            "fru.bgpart.firstPassCaptured=True",
+            "fru.bgpart.active0=uuid=2 instanceKey=2 subId=0 active=true loaded=true gfx=true path=bg/test.mdl",
+        });
+    var reportHasDedicatedBgPartSection = report.Contains("[XIV Mini Util] --- bgpart ---", StringComparison.Ordinal)
+        && report.Contains("[XIV Mini Util] fru.bgpart.complete=False", StringComparison.Ordinal)
+        && report.Contains("[XIV Mini Util] fru.bgpart.active0=uuid=2", StringComparison.Ordinal)
+        && !report.Contains("unrelated", StringComparison.Ordinal);
+    var boundedReportKeys = bgPartFile.Contains("MaxReportedFirstPassActive = 1024", StringComparison.Ordinal)
+        && bgPartFile.Contains("MaxReportedChanged = 256", StringComparison.Ordinal)
+        && bgPartFile.Contains("MaxTrackedUuids = 4096", StringComparison.Ordinal);
+
+    return typedReadOnly && serviceWiring && lifecycleWiring
+        && reportHasDedicatedBgPartSection && boundedReportKeys;
+});
+
     }
 }
