@@ -22,6 +22,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
     // 0 = pending なし / 1 = pending あり。
     private int _fruSuppressionSelectionChangePending;
 
+    // Phase A 診断（非永続）: 直近の選択変更イベントの monotonic tick（ms）と、その観測時 scene generation。
+    // detour スレッド（OnCharaSelectSelectionChanged）で publish し、Framework スレッドの re-arm で読む。
+    // int / long の単純 racy read で足りる（診断値のみ。write ゲートには使わない）。
+    private long _fruSuppressionSelectionChangeEventTickMs;
+    private int _fruSuppressionSelectionChangeGenerationAtEvent = -1;
+
     // OnFrameworkUpdate から毎フレーム呼ぶ。FRU candidate かつ pre-login + CharaSelect session + hook Ready +
     // static-anchor 認可済み + current lobby map == CharaSelect + loaded ActiveLayout（InitState 7 /
     // territory 1238 / layer 0）のときだけ 1 パス走査する。window が閉じたら以降書かない。
@@ -92,6 +98,18 @@ public sealed unsafe partial class TitleScreenBackgroundService
         // fresh window を re-arm する（既存 SelectedCharacterChanged イベントを利用。新 hook なし）。
         // atomic handoff: pending を read しつつ 0 へ戻す（取りこぼし防止）。
         var forceReArm = System.Threading.Interlocked.Exchange(ref _fruSuppressionSelectionChangePending, 0) != 0;
+        if (forceReArm)
+        {
+            // Phase A: この選択変更イベントの証拠（event->re-arm の monotonic 経過・世代）を記録する。
+            var eventTick = System.Threading.Volatile.Read(ref _fruSuppressionSelectionChangeEventTickMs);
+            var eventToReArmMs = eventTick > 0 ? Math.Max(0L, Environment.TickCount64 - eventTick) : -1L;
+            _charaSelectSceneObjectSuppression.NoteSelectionChangeReArm(
+                System.Threading.Volatile.Read(ref _fruSuppressionSelectionChangeGenerationAtEvent),
+                generation,
+                eventTick,
+                eventToReArmMs);
+        }
+
         _charaSelectSceneObjectSuppression.ArmForGeneration(generation, forceReArm);
         if (!_charaSelectSceneObjectSuppression.ShouldRunPass())
         {
@@ -132,6 +150,17 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
 
             _charaSelectSceneObjectSuppression.RecordGateStatus("authorized");
+
+            // Phase A: 選択変更後の最初の実パスなら、event->first-pass の monotonic 経過を確定する。
+            if (_charaSelectSceneObjectSuppression.AwaitingFirstReArmedPass)
+            {
+                var eventTick = _charaSelectSceneObjectSuppression.SelectionChangeEventTickMs;
+                var eventToFirstPassMs = eventTick > 0
+                    ? Math.Max(0L, Environment.TickCount64 - eventTick)
+                    : -1L;
+                _charaSelectSceneObjectSuppression.MarkFirstReArmedPassStarting(eventToFirstPassMs);
+            }
+
             _charaSelectSceneObjectSuppression.BeginPass();
             SuppressSharedGroups(activeLayout);
             _charaSelectSceneObjectSuppression.EndPass();
@@ -190,6 +219,26 @@ public sealed unsafe partial class TitleScreenBackgroundService
             var decision = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.Evaluate(primaryPath, true);
             if (decision.Verdict != TitleBackgroundSceneObjectSuppressionVerdict.Suppress)
             {
+                // Phase A coverage-gap 証拠: 最初の re-arm パスでだけ、deny token 非該当（"no-deny-token"）で
+                // active な SharedGroup の game-asset primary path を bounded に採取する。keep-token 一致
+                // （花畑 / 床 / 遠景 / 照明 = 意図的存置）は対象外。ここでは write を一切しない。
+                if (decision.Verdict == TitleBackgroundSceneObjectSuppressionVerdict.Keep
+                    && string.Equals(decision.Reason, "no-deny-token", StringComparison.Ordinal)
+                    && _charaSelectSceneObjectSuppression.CapturingFirstReArmedPass)
+                {
+                    try
+                    {
+                        if (instance->IsActive)
+                        {
+                            _charaSelectSceneObjectSuppression.RecordActiveNonDenyKeepPath(primaryPath);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _charaSelectSceneObjectSuppression.RecordFailure($"coverage-probe:{ex.GetType().Name}");
+                    }
+                }
+
                 continue;
             }
 

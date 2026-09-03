@@ -25,6 +25,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
     private void OnCharaSelectSelectionChanged()
     {
         _charaSelectSelectionChangePending = true;
+        // Phase A 診断: この選択変更イベントの monotonic tick と観測時 scene generation を、pending を
+        // 立てる前に publish する（Framework スレッドが pending を消費した時点で必ずスナップショット済み）。
+        System.Threading.Volatile.Write(
+            ref _fruSuppressionSelectionChangeEventTickMs, Environment.TickCount64);
+        System.Threading.Volatile.Write(
+            ref _fruSuppressionSelectionChangeGenerationAtEvent,
+            System.Threading.Volatile.Read(ref _activeCharaSelectSceneGeneration));
         // キャラ切替でゲームが n4gw の SharedGroup を再 active 化しうるため、FRU suppression の
         // bounded window を次 pass で re-arm する（同一 scene generation でも）。
         // detour スレッドからの set は Framework スレッドの read→clear と race しうるので atomic に立てる。

@@ -401,32 +401,8 @@ internal static class TitleBackgroundAutomaticCheckDiagnosticSelector
         "environment.preLogin.dayTimeRequestedSeconds",
         "environment.preLogin.dayTimeReadbackSeconds",
         // FRU 固有: 戦闘 gimmick / telegraph SharedGroup の抑止（scene-generation 単位の bounded window）。
-        "fru.suppression.candidate",
-        "fru.suppression.applicable",
-        "fru.suppression.attempted",
-        "fru.suppression.armedSceneGeneration",
-        "fru.suppression.passCount",
-        "fru.suppression.stableStreak",
-        "fru.suppression.stableStreakTarget",
-        "fru.suppression.everMatched",
-        "fru.suppression.targetInstanceCount",
-        "fru.suppression.matchedCount",
-        "fru.suppression.alreadyInactiveCount",
-        "fru.suppression.writeAttemptedInstanceCount",
-        "fru.suppression.totalWriteCalls",
-        "fru.suppression.confirmedInactiveCount",
-        "fru.suppression.stillActiveCount",
-        "fru.suppression.budgetExhaustedCount",
-        "fru.suppression.writeBudgetPerInstance",
-        "fru.suppression.completed",
-        "fru.suppression.stopReason",
-        "fru.suppression.vfxMode",
-        "fru.suppression.denyTokenCount",
-        "fru.suppression.keepTokenCount",
-        "fru.suppression.lastGateStatus",
-        "fru.suppression.firstFailureReason",
-        "fru.suppression.cleanupState",
-        "fru.suppression.suppressedKeys",
+        // 実キー集合は TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState.DiagnosticKeys が単一ソース。
+        // 下の static 初期化で UnionWith する（実装と allowlist の乖離防止, skill §3）。
         "fixOn.hookInstalled",
         "fixOn.calls",
         "fixOn.lastFocusArgs",
@@ -455,6 +431,9 @@ internal static class TitleBackgroundAutomaticCheckDiagnosticSelector
 
         // FRU read-only VFX インベントリの診断キーも単一ソース（実装と allowlist の乖離防止, skill §3）。
         IncludedKeys.UnionWith(TitleBackgroundCharaSelectVfxInventoryRuntimeState.DiagnosticKeys);
+
+        // FRU 戦闘 gimmick / telegraph SharedGroup 抑止 + Phase A 選択変更分類の診断キーも単一ソース。
+        IncludedKeys.UnionWith(TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState.DiagnosticKeys);
 
         foreach (var frame in BuildViewReplayTraceSampleFrames())
         {
