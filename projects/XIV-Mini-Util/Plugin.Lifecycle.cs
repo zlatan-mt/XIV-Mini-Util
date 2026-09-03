@@ -12,6 +12,7 @@ public sealed partial class Plugin
         UnregisterCommands();
         _pluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         _pluginInterface.UiBuilder.Draw -= CopyPendingTitleBackgroundAutomaticCheckReport;
+        _pluginInterface.UiBuilder.Draw -= CopyPendingFruSelectionChangeDiagnostic;
         _pluginInterface.UiBuilder.OpenMainUi -= OpenMainWindow;
         _pluginInterface.UiBuilder.OpenConfigUi -= OpenSettingsWindow;
 

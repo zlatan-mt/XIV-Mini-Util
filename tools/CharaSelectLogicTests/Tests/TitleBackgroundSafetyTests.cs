@@ -9418,5 +9418,117 @@ Test(591, "MUST FIX (review 5097939613): coverage follow-up aggregates per-path 
         && resolvedWhenAllInactive && notResolvedWhenUnobserved;
 });
 
+Test(592, "Phase A UX: SelectionChangeReportReady fires on positive classification, bounded window close, bounded timeout, or session end", () =>
+{
+    static bool Ready(TitleBackgroundSceneObjectSelectionChangeClass c, bool completed, long elapsedMs, bool sessionEnding)
+        => TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(c, completed, elapsedMs, sessionEnding);
+
+    var timeout = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportTimeoutMs;
+
+    // session end is a hard stop regardless of everything else.
+    var sessionEndAlwaysReady =
+        Ready(TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence, false, 0, true)
+        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap, false, 0, true);
+
+    // any positive classification is stable enough to hand off immediately.
+    var positiveReady =
+        Ready(TitleBackgroundSceneObjectSelectionChangeClass.TimingGap, false, 10, false)
+        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap, false, 10, false)
+        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.DeactivationSemantics, false, 10, false);
+
+    // InsufficientEvidence must wait for the bounded window to close or the bounded timeout.
+    var insufficientNotReadyYet =
+        !Ready(TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence, false, timeout - 1, false)
+        && !Ready(TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence, false, -1, false);
+    var insufficientReadyOnClose =
+        Ready(TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence, true, 0, false);
+    var insufficientReadyOnTimeout =
+        Ready(TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence, false, timeout, false);
+
+    return sessionEndAlwaysReady && positiveReady && insufficientNotReadyYet
+        && insufficientReadyOnClose && insufficientReadyOnTimeout;
+});
+
+Test(593, "Phase A UX: FRU selection-change report uses a dedicated file, keeps only fru.suppression.* lines, and never reuses the auto-check report", () =>
+{
+    var s = new TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState();
+    s.ArmForGeneration(5);
+    s.NoteSelectionChangeReArm(5, 5, 1000, 12);
+    s.ArmForGeneration(5, forceReArm: true);
+    s.MarkFirstReArmedPassStarting(40);
+    s.BeginPass();
+    s.RecordScanned();
+    s.RecordMatched(((ulong)7u << 32) | 0u);
+    s.TryConsumeWriteBudget(((ulong)7u << 32) | 0u);
+    s.RecordWriteAttempted(((ulong)7u << 32) | 0u, "SharedGroup");
+    s.RecordConfirmedInactive(((ulong)7u << 32) | 0u);
+    s.EndPass();
+
+    var lines = s.BuildDiagnosticLines("custom:fru-clear-stage", true).ToArray();
+    var report = TitleBackgroundSelectionChangeReportBuilder.Build(
+        new DateTimeOffset(2026, 9, 3, 15, 30, 0, TimeSpan.Zero),
+        "custom:fru-clear-stage",
+        "classified",
+        lines);
+    var reportLines = report.Split(Environment.NewLine);
+
+    var dedicatedFileName = TitleBackgroundSelectionChangeReportBuilder.FileName == "title-background-selection-change-diag.txt"
+        && !string.Equals(
+            TitleBackgroundSelectionChangeReportBuilder.FileName,
+            TitleBackgroundAutomaticCheckReportBuilder.FileName,
+            StringComparison.Ordinal);
+    var hasHeader = reportLines[0] == "[XIV Mini Util] FRU selection-change diagnostic"
+        && reportLines.Any(l => l.StartsWith("[XIV Mini Util] trigger=classified", StringComparison.Ordinal))
+        && reportLines.Any(l => l.Contains("OneClick / automatic QuickCheck was not started", StringComparison.Ordinal)
+            && l.Contains("config unchanged", StringComparison.Ordinal));
+    var carriesClassification = reportLines.Any(l =>
+        l.StartsWith("[XIV Mini Util] fru.suppression.selectionChange.class=", StringComparison.Ordinal));
+    // body payload lines are exactly the fru.suppression.* diagnostic subset.
+    var payload = reportLines
+        .SkipWhile(l => l != "[XIV Mini Util] --- selectionChange ---")
+        .Skip(1)
+        .ToArray();
+    var payloadOnlySuppression = payload.Length == lines.Length
+        && payload.All(l => l.StartsWith("[XIV Mini Util] fru.suppression.", StringComparison.Ordinal));
+    var noAutoCheckReuse = !report.Contains("title-background-auto-check", StringComparison.Ordinal)
+        && !report.Contains("Title Background automatic check", StringComparison.Ordinal);
+
+    return dedicatedFileName && hasHeader && carriesClassification && payloadOnlySuppression && noAutoCheckReuse;
+});
+
+Test(594, "Phase A UX: selection-change auto-copy reuses the Plugin.UiEvents clipboard queue pattern and starts no OneClick/QuickCheck and mutates no config", () =>
+{
+    var root = FindRepositoryRoot();
+    string Read(params string[] parts) => File.ReadAllText(Path.Combine(new[] { root }.Concat(parts).ToArray()));
+
+    var uiEvents = Read("projects", "XIV-Mini-Util", "Plugin.UiEvents.cs");
+    var serviceCtor = Read("projects", "XIV-Mini-Util", "Plugin.ServiceConstruction.cs");
+    var lifecycle = Read("projects", "XIV-Mini-Util", "Plugin.Lifecycle.cs");
+    var suppression = Read("projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.SceneObjectSuppression.cs");
+
+    // clipboard handoff mirrors the existing auto-check pattern: a Draw handler consuming pending text.
+    var handlerWired = uiEvents.Contains("private void CopyPendingFruSelectionChangeDiagnostic()", StringComparison.Ordinal)
+        && uiEvents.Contains("TryConsumeFruSelectionChangeClipboardText(out var text)", StringComparison.Ordinal)
+        && uiEvents.Contains("ImGui.SetClipboardText(text);", StringComparison.Ordinal)
+        && serviceCtor.Contains("_pluginInterface.UiBuilder.Draw += CopyPendingFruSelectionChangeDiagnostic;", StringComparison.Ordinal)
+        && lifecycle.Contains("_pluginInterface.UiBuilder.Draw -= CopyPendingFruSelectionChangeDiagnostic;", StringComparison.Ordinal);
+
+    var consumeMirrorsPattern = suppression.Contains("internal bool TryConsumeFruSelectionChangeClipboardText(out string text)", StringComparison.Ordinal)
+        && suppression.Contains("_fruSelectionChangePendingClipboardText = string.Empty;", StringComparison.Ordinal);
+
+    // the publish path must not start OneClick / automatic QuickCheck and must not touch config.
+    var noOneClickOrQuickCheck = !suppression.Contains("StartQuickCheck(", StringComparison.Ordinal)
+        && !suppression.Contains("ArmAutomaticQuickCheck", StringComparison.Ordinal)
+        && !suppression.Contains("RequestAutomaticQuickCheck", StringComparison.Ordinal)
+        && !suppression.Contains("_automaticCheck", StringComparison.Ordinal);
+    var noConfigMutation = !suppression.Contains("_configuration", StringComparison.Ordinal);
+
+    // dedicated file name, not the auto-check report file.
+    var dedicatedFile = suppression.Contains("TitleBackgroundSelectionChangeReportBuilder.FileName", StringComparison.Ordinal)
+        && !suppression.Contains("TitleBackgroundAutomaticCheckReportBuilder.FileName", StringComparison.Ordinal);
+
+    return handlerWired && consumeMirrorsPattern && noOneClickOrQuickCheck && noConfigMutation && dedicatedFile;
+});
+
     }
 }

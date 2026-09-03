@@ -28,6 +28,15 @@ public sealed unsafe partial class TitleScreenBackgroundService
     private long _fruSuppressionSelectionChangeEventTickMs;
     private int _fruSuppressionSelectionChangeGenerationAtEvent = -1;
 
+    // Phase A UX gap の最小修正: 通常のキャラ/ワールド選択変更 1 回で完結する selection-change レポートの
+    // publish / auto-copy。bounded diagnostic が分類状態 / window 終了 / bounded timeout / session 終了に
+    // 到達した時点で 1 度だけ、専用ファイル（title-background-selection-change-diag.txt）へ保存し
+    // clipboard キューへ積む。OneClick / AutomaticQuickCheck は開始しない。config も一切触らない。
+    // 「どの選択変更ぶんを publish 済みか」を SelectionChangeReArmCount で追跡する（次の switch で
+    // カウントが進み再度 publish 可能に。Reset で 0 へ戻れば publishedForReArmCount も 0 に戻す）。
+    private int _fruSelectionChangeReportPublishedForReArmCount;
+    private string _fruSelectionChangePendingClipboardText = string.Empty;
+
     // OnFrameworkUpdate から毎フレーム呼ぶ。FRU candidate かつ pre-login + CharaSelect session + hook Ready +
     // static-anchor 認可済み + current lobby map == CharaSelect + loaded ActiveLayout（InitState 7 /
     // territory 1238 / layer 0）のときだけ 1 パス走査する。window が閉じたら以降書かない。
@@ -52,8 +61,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 _charaSelectSceneObjectSuppression.RecordCleanupState("stopped-on-login");
             }
 
+            // session 終了は hard stop: 未 publish の selection-change レポートがあれば今出す。
+            MaybePublishFruSelectionChangeReport(candidate.Id, sessionEnding: true);
             return;
         }
+
+        // pre-login: 分類確定 / window 終了 / bounded timeout に到達していれば selection-change レポートを
+        // 1 度だけ publish する（後続の gate 失敗フレームでも出せるよう、ここで判定する）。
+        MaybePublishFruSelectionChangeReport(candidate.Id, sessionEnding: false);
 
         if (!_charaSelectTitleBackgroundSessionActive
             || _hookLifecycle.State != TitleBackgroundServiceState.Ready)
@@ -299,5 +314,99 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 _charaSelectSceneObjectSuppression.RecordFailure($"set-active:{ex.GetType().Name}");
             }
         }
+    }
+
+    // Phase A UX gap の最小修正。選択変更が 1 回観測され、その分類が確定した / bounded window が終了した /
+    // bounded timeout を超えた / session が終了した時点で、selection-change レポートを 1 度だけ
+    // 専用ファイルへ保存し、clipboard キューへ積む。OneClick / AutomaticQuickCheck は開始しない。
+    // config mutation なし。deny list / suppression timing / fade semantics / native hook 変更なし。
+    private void MaybePublishFruSelectionChangeReport(string candidateId, bool sessionEnding)
+    {
+        var suppression = _charaSelectSceneObjectSuppression;
+        var reArmCount = suppression.SelectionChangeReArmCount;
+
+        // Reset / new scene generation / candidate 変更で証拠がクリアされ再カウントが始まったら、
+        // publish 済みマーカーも戻す（カウントが後退した = 別セッション扱い）。
+        if (reArmCount < _fruSelectionChangeReportPublishedForReArmCount)
+        {
+            _fruSelectionChangeReportPublishedForReArmCount = 0;
+        }
+
+        if (reArmCount == 0 || reArmCount <= _fruSelectionChangeReportPublishedForReArmCount)
+        {
+            // まだ選択変更が無い、またはこの（もしくは後続の）選択変更ぶんは publish 済み。
+            return;
+        }
+
+        var selectionChangeClass = suppression.SelectionChangeClass;
+        var eventTick = suppression.SelectionChangeEventTickMs;
+        var elapsedMs = eventTick > 0 ? Math.Max(0L, Environment.TickCount64 - eventTick) : -1L;
+
+        if (!TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
+                selectionChangeClass,
+                suppression.Completed,
+                elapsedMs,
+                sessionEnding))
+        {
+            return;
+        }
+
+        var trigger = sessionEnding
+            ? "session-end"
+            : selectionChangeClass != TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence
+                ? "classified"
+                : suppression.Completed
+                    ? "window-closed"
+                    : "timeout";
+
+        string report;
+        try
+        {
+            report = TitleBackgroundSelectionChangeReportBuilder.Build(
+                DateTimeOffset.Now,
+                candidateId,
+                trigger,
+                suppression.BuildDiagnosticLines(candidateId, true).ToArray());
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "[XMU BG] Failed to build FRU selection-change diagnostic.");
+            return;
+        }
+
+        // clipboard 引き渡しを primary contract にする（file 保存は best-effort）。
+        _fruSelectionChangeReportPublishedForReArmCount = reArmCount;
+        _fruSelectionChangePendingClipboardText = report;
+
+        try
+        {
+            Directory.CreateDirectory(_configDirectory);
+            File.WriteAllText(
+                Path.Combine(_configDirectory, TitleBackgroundSelectionChangeReportBuilder.FileName),
+                report);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "[XMU BG] Failed to persist FRU selection-change diagnostic.");
+        }
+
+        _log.Information(
+            "[XMU BG] FRU selection-change diagnostic published. trigger={Trigger} class={Class} chars={Chars}",
+            trigger,
+            selectionChangeClass,
+            report.Length);
+    }
+
+    // Plugin.UiEvents の Draw ハンドラが 1 フレームに 1 回消費する（既存 auto-check clipboard と同じパターン）。
+    internal bool TryConsumeFruSelectionChangeClipboardText(out string text)
+    {
+        text = _fruSelectionChangePendingClipboardText;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        _fruSelectionChangePendingClipboardText = string.Empty;
+        return true;
     }
 }

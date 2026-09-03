@@ -21,6 +21,20 @@ public sealed partial class Plugin
         _pluginLog.Information("TitleBackground automatic check copied to clipboard. chars={CharacterCount}", text.Length);
     }
 
+    // FRU selection-change 診断の 1 クリック不要フロー: 通常のキャラ/ワールド選択変更 1 回で
+    // サービス側が専用レポートを queue し、ここで clipboard へコピーする（auto-check と同じパターン）。
+    private void CopyPendingFruSelectionChangeDiagnostic()
+    {
+        if (!_titleScreenBackgroundService.TryConsumeFruSelectionChangeClipboardText(out var text))
+        {
+            return;
+        }
+
+        ImGui.SetClipboardText(text);
+        _chatGui.Print("[XIV Mini Util] FRU selection-change 診断を保存し、クリップボードへコピーしました。");
+        _pluginLog.Information("FRU selection-change diagnostic copied to clipboard. chars={CharacterCount}", text.Length);
+    }
+
     private void OpenSettingsWindow()
     {
         _mainWindow.OpenSettingsTab();

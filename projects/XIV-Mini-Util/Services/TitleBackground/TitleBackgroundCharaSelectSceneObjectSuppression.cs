@@ -175,9 +175,73 @@ internal static class TitleBackgroundCharaSelectSceneObjectSuppressionLogic
             "no-active-deny-or-non-deny-sharedgroup-associated-with-switch");
     }
 
+    // Phase A UX: 1 回の通常の選択変更で完結させるための「selection-change レポートを今 publish して
+    // よいか」の純粋判定。bounded diagnostic が分類状態に到達 / bounded window 終了 / bounded timeout /
+    // session 終了のいずれかで true。OneClick / QuickCheck は関与しない。
+    // - positive class（TimingGap / CoverageGap / DeactivationSemantics）は最初の re-arm パス捕捉時 or
+    //   coverage 遷移確認時に確定し以降変化しないため、その時点で publish 可。
+    // - InsufficientEvidence（coverage-candidate 含む）は後続パスで CoverageGap へ昇格しうるため、
+    //   window 終了 or timeout まで待つ。
+    public const long SelectionChangeReportTimeoutMs = 6000;
+
+    public static bool SelectionChangeReportReady(
+        TitleBackgroundSceneObjectSelectionChangeClass currentClass,
+        bool windowCompleted,
+        long elapsedMsSinceEvent,
+        bool sessionEnding)
+    {
+        if (sessionEnding)
+        {
+            return true;
+        }
+
+        if (currentClass != TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence)
+        {
+            return true;
+        }
+
+        return windowCompleted
+            || (elapsedMsSinceEvent >= 0 && elapsedMsSinceEvent >= SelectionChangeReportTimeoutMs);
+    }
+
     internal static string Normalize(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? "none" : value.Trim();
+    }
+}
+
+// Phase A UX: 通常のキャラ/ワールド選択変更 1 回で完結する FRU selection-change 診断レポートの整形。
+// 専用ファイル名を使い、既存の（login フロー依存の）title-background-auto-check.txt を再利用しない。
+// clipboard 引き渡しは既存 Plugin.UiEvents の pending-text パターンを再利用する。
+internal static class TitleBackgroundSelectionChangeReportBuilder
+{
+    public const string FileName = "title-background-selection-change-diag.txt";
+
+    public static string Build(
+        DateTimeOffset completedAt,
+        string candidateId,
+        string trigger,
+        IReadOnlyList<string> suppressionDiagnosticLines)
+    {
+        var lines = new List<string>
+        {
+            "[XIV Mini Util] FRU selection-change diagnostic",
+            $"[XIV Mini Util] completedAt={completedAt:yyyy-MM-dd HH:mm:ss zzz}",
+            $"[XIV Mini Util] candidate={(string.IsNullOrWhiteSpace(candidateId) ? "none" : candidateId)}",
+            $"[XIV Mini Util] trigger={trigger}",
+            "[XIV Mini Util] note=one normal Character Select character/world selection change; OneClick / automatic QuickCheck was not started; config unchanged",
+            "[XIV Mini Util] --- selectionChange ---",
+        };
+
+        foreach (var line in suppressionDiagnosticLines)
+        {
+            if (line.StartsWith("fru.suppression.", StringComparison.Ordinal))
+            {
+                lines.Add($"[XIV Mini Util] {line}");
+            }
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 }
 
@@ -842,21 +906,9 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         yield return $"fru.suppression.suppressedKeys={(_suppressedKeys.Count == 0 ? "none" : string.Join(",", _suppressedKeys))}";
 
         // Phase A: 1 回の代表的なキャラ/ワールド選択変更の分類証拠。
-        var evidence = new TitleBackgroundSceneObjectSelectionChangeEvidence(
-            SelectionChangeObserved: SelectionChangeReArmCount > 0,
-            EventToFirstPassMs: SelectionChangeEventToFirstPassMs,
-            BlockedFramesBeforeFirstPass: SelectionChangeBlockedFramesBeforeFirstPass,
-            FirstBlockingGate: SelectionChangeFirstBlockingGate,
-            FirstReArmedPassCaptured: FirstReArmedPassCaptured,
-            FirstPassMatchedActiveBeforeWrite: FirstReArmedPassMatchedActiveBeforeWrite,
-            FirstPassWrites: FirstReArmedPassWrites,
-            FirstPassConfirmedInactive: FirstReArmedPassConfirmedInactive,
-            FirstPassStillActive: FirstReArmedPassStillActive,
-            ActiveNonDenyKeepPathSampleCount: ActiveNonDenyKeepPathSampleCount,
-            ActiveNonDenyKeepPathResolvedInactiveCount: ActiveNonDenyKeepPathResolvedInactiveCount,
-            WindowStopReason: StopReason);
         var (selectionChangeClass, selectionChangeReason) =
-            TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ClassifySelectionChange(evidence);
+            TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ClassifySelectionChange(
+                BuildSelectionChangeEvidence());
 
         yield return $"fru.suppression.selectionChange.reArmCount={SelectionChangeReArmCount}";
         yield return $"fru.suppression.selectionChange.generationAtEvent={SelectionChangeGenerationAtEvent}";
@@ -880,6 +932,30 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         // SHOULD: auto class は受動証拠の要約。実機の「ちらつきが実際に見えた」外部観測と併せて読む。単体で fade を証明しない。
         yield return "fru.suppression.selectionChange.classNote=auto-class summarises passive suppression-window evidence; read it together with the external observation that a flicker was actually seen; it does not standalone-prove a visual fade";
     }
+
+    // ClassifySelectionChange への入力を現在の証拠フィールドから組み立てる（BuildDiagnosticLines と
+    // SelectionChangeClass で共有）。
+    private TitleBackgroundSceneObjectSelectionChangeEvidence BuildSelectionChangeEvidence()
+    {
+        return new TitleBackgroundSceneObjectSelectionChangeEvidence(
+            SelectionChangeObserved: SelectionChangeReArmCount > 0,
+            EventToFirstPassMs: SelectionChangeEventToFirstPassMs,
+            BlockedFramesBeforeFirstPass: SelectionChangeBlockedFramesBeforeFirstPass,
+            FirstBlockingGate: SelectionChangeFirstBlockingGate,
+            FirstReArmedPassCaptured: FirstReArmedPassCaptured,
+            FirstPassMatchedActiveBeforeWrite: FirstReArmedPassMatchedActiveBeforeWrite,
+            FirstPassWrites: FirstReArmedPassWrites,
+            FirstPassConfirmedInactive: FirstReArmedPassConfirmedInactive,
+            FirstPassStillActive: FirstReArmedPassStillActive,
+            ActiveNonDenyKeepPathSampleCount: ActiveNonDenyKeepPathSampleCount,
+            ActiveNonDenyKeepPathResolvedInactiveCount: ActiveNonDenyKeepPathResolvedInactiveCount,
+            WindowStopReason: StopReason);
+    }
+
+    // 現在の証拠から算出した選択変更分類。selection-change レポートの publish 可否判定に使う。
+    public TitleBackgroundSceneObjectSelectionChangeClass SelectionChangeClass =>
+        TitleBackgroundCharaSelectSceneObjectSuppressionLogic
+            .ClassifySelectionChange(BuildSelectionChangeEvidence()).Class;
 
     private static string Normalize(string? value)
     {
