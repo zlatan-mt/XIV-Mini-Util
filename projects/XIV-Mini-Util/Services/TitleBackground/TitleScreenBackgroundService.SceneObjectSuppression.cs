@@ -219,18 +219,26 @@ public sealed unsafe partial class TitleScreenBackgroundService
             var decision = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.Evaluate(primaryPath, true);
             if (decision.Verdict != TitleBackgroundSceneObjectSuppressionVerdict.Suppress)
             {
-                // Phase A coverage-gap 証拠: 最初の re-arm パスでだけ、deny token 非該当（"no-deny-token"）で
-                // active な SharedGroup の game-asset primary path を bounded に採取する。keep-token 一致
-                // （花畑 / 床 / 遠景 / 照明 = 意図的存置）は対象外。ここでは write を一切しない。
+                // Phase A coverage 証拠（deny token 非該当 = "no-deny-token" の SharedGroup のみ。keep-token
+                // 一致の花畑 / 床 / 遠景 / 照明は対象外）。ここでは write を一切しない。deny list も変更しない。
                 if (decision.Verdict == TitleBackgroundSceneObjectSuppressionVerdict.Keep
-                    && string.Equals(decision.Reason, "no-deny-token", StringComparison.Ordinal)
-                    && _charaSelectSceneObjectSuppression.CapturingFirstReArmedPass)
+                    && string.Equals(decision.Reason, "no-deny-token", StringComparison.Ordinal))
                 {
                     try
                     {
-                        if (instance->IsActive)
+                        if (_charaSelectSceneObjectSuppression.CapturingFirstReArmedPass)
                         {
-                            _charaSelectSceneObjectSuppression.RecordActiveNonDenyKeepPath(primaryPath);
+                            // 最初の re-arm パス: active な非-deny 構造 SharedGroup の path を bounded に採取。
+                            if (instance->IsActive)
+                            {
+                                _charaSelectSceneObjectSuppression.RecordActiveNonDenyKeepPath(primaryPath);
+                            }
+                        }
+                        else if (_charaSelectSceneObjectSuppression.ShouldFollowUpNonDenyKeepPaths)
+                        {
+                            // 後続パス（同一 bounded window 内）: 採取済み path が active -> inactive したかだけを
+                            // read-only で確認する。少なくとも 1 つ遷移すれば CoverageGap 判定の材料になる。
+                            _charaSelectSceneObjectSuppression.RecordNonDenyKeepPathFollowUp(primaryPath, instance->IsActive);
                         }
                     }
                     catch (Exception ex)

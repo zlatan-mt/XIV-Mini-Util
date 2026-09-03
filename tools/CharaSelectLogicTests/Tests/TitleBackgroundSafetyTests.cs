@@ -9022,51 +9022,71 @@ Test(586, "Phase A selection-change classifier maps evidence to timing-gap / cov
 {
     static TitleBackgroundSceneObjectSelectionChangeClass C(TitleBackgroundSceneObjectSelectionChangeEvidence e)
         => TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ClassifySelectionChange(e).Class;
+    static string R(TitleBackgroundSceneObjectSelectionChangeEvidence e)
+        => TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ClassifySelectionChange(e).Reason;
+
+    var thr = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.PromptFirstPassMsThreshold;
+
+    // evidence: (observed, eventToFirstPassMs, blockedFrames, firstBlockingGate, firstPassCaptured,
+    //   firstPassMatchedActiveBeforeWrite, firstPassWrites, firstPassConfirmedInactive, firstPassStillActive,
+    //   activeNonDenyKeepSampleCount, activeNonDenyKeepResolvedInactiveCount, windowStopReason)
 
     // no re-armed pass captured -> insufficient-evidence (never guesses).
-    var notObserved = C(new(false, -1, 0, "none", false, 0, 0, 0, 0, "running"))
+    var notObserved = C(new(false, -1, 0, "none", false, 0, 0, 0, 0, 0, 0, "running"))
         == TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence;
-    var observedButNoPass = C(new(true, -1, 3, "active-layout-not-ready", false, 0, 0, 0, 0, "running"))
+    var observedButNoPass = C(new(true, -1, 3, "active-layout-not-ready", false, 0, 0, 0, 0, 0, 0, "running"))
         == TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence;
 
-    // deny-covered group still active after a gate delay -> timing-gap (blocked frames > 0).
-    var blockedDelay = C(new(true, 40, 2, "active-layout-not-ready", true, 1, 0, 0, 0, "running"))
+    // deny-covered group still active after a gate delay -> timing-gap even if the pass was otherwise a full success.
+    var blockedDelay = C(new(true, 40, 2, "active-layout-not-ready", true, 1, 1, 1, 0, 0, 0, "running"))
         == TitleBackgroundSceneObjectSelectionChangeClass.TimingGap;
     // deny-covered group still active after a long event->first-pass latency -> timing-gap.
-    var latencyDelay = C(new(true,
-        TitleBackgroundCharaSelectSceneObjectSuppressionLogic.PromptFirstPassMsThreshold + 1,
-        0, "authorized", true, 1, 0, 0, 0, "running"))
+    var latencyDelay = C(new(true, thr + 1, 0, "authorized", true, 1, 1, 1, 0, 0, 0, "running"))
         == TitleBackgroundSceneObjectSelectionChangeClass.TimingGap;
 
-    // prompt + authorized + wrote + readback confirmed inactive, symptom still seen -> deactivation-semantics (fade).
-    var fade = C(new(true, 50, 0, "authorized", true, 1, 1, 0, 0, "stable"))
+    // MUST FIX 1: DeactivationSemantics only when EVERY active matched instance was written,
+    // EVERY one confirmed inactive, and none still active in the first re-armed pass.
+    var fullSuccessFade = C(new(true, 50, 0, "authorized", true, 2, 2, 2, 0, 0, 0, "stable"))
         == TitleBackgroundSceneObjectSelectionChangeClass.DeactivationSemantics;
-    // prompt but the write did not confirm inactive this pass -> still timing-gap, not a fade claim.
-    var promptNotConfirmed = C(new(true, 50, 0, "authorized", true, 1, 0, 1, 0, "running"))
+    // partial write (1 of 2) -> timing-gap, not a fade claim.
+    var partialWrite = new TitleBackgroundSceneObjectSelectionChangeEvidence(
+        true, 50, 0, "authorized", true, 2, 1, 1, 1, 0, 0, "running");
+    var partialWriteIsTiming = C(partialWrite) == TitleBackgroundSceneObjectSelectionChangeClass.TimingGap
+        && R(partialWrite).StartsWith("deny-covered-group-partial-suppression-in-first-pass", StringComparison.Ordinal);
+    // partial readback (1 of 2 confirmed) -> timing-gap.
+    var partialReadback = C(new(true, 50, 0, "authorized", true, 2, 2, 1, 1, 0, 0, "running"))
+        == TitleBackgroundSceneObjectSelectionChangeClass.TimingGap;
+    // still-active > 0 blocks the fade claim even when confirmed == active.
+    var stillActiveBlocksFade = C(new(true, 50, 0, "authorized", true, 2, 2, 2, 1, 0, 0, "running"))
         == TitleBackgroundSceneObjectSelectionChangeClass.TimingGap;
 
-    // nothing in the deny set was active, but an active non-deny structural SharedGroup was sampled -> coverage-gap.
-    var coverage = C(new(true, 30, 0, "authorized", true, 0, 0, 0, 2, "no-matched-instances"))
+    // MUST FIX 2: CoverageGap only when a sampled active non-deny SharedGroup was confirmed
+    // active -> inactive within the same window.
+    var coverageConfirmed = C(new(true, 30, 0, "authorized", true, 0, 0, 0, 0, 2, 1, "no-matched-instances"))
         == TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap;
-    // no deny-covered active group and no non-deny structural sample -> insufficient-evidence.
-    var nothingAssociated = C(new(true, 30, 0, "authorized", true, 0, 0, 0, 0, "no-matched-instances"))
+    var coverageUnconfirmed = new TitleBackgroundSceneObjectSelectionChangeEvidence(
+        true, 30, 0, "authorized", true, 0, 0, 0, 0, 2, 0, "stable");
+    var coverageUnconfirmedIsInsufficient =
+        C(coverageUnconfirmed) == TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence
+        && R(coverageUnconfirmed).StartsWith("coverage-candidate-unconfirmed", StringComparison.Ordinal);
+    // no deny-covered active group and no non-deny sample at all -> insufficient-evidence.
+    var nothingAssociated = C(new(true, 30, 0, "authorized", true, 0, 0, 0, 0, 0, 0, "no-matched-instances"))
         == TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence;
 
     // threshold boundary: exactly at the prompt ms threshold with 0 blocked frames is still prompt.
-    var atThreshold = C(new(true,
-        TitleBackgroundCharaSelectSceneObjectSuppressionLogic.PromptFirstPassMsThreshold,
-        0, "authorized", true, 1, 1, 0, 0, "stable"))
+    var atThreshold = C(new(true, thr, 0, "authorized", true, 1, 1, 1, 0, 0, 0, "stable"))
         == TitleBackgroundSceneObjectSelectionChangeClass.DeactivationSemantics;
 
     return notObserved && observedButNoPass && blockedDelay && latencyDelay
-        && fade && promptNotConfirmed && coverage && nothingAssociated && atThreshold;
+        && fullSuccessFade && partialWriteIsTiming && partialReadback && stillActiveBlocksFade
+        && coverageConfirmed && coverageUnconfirmedIsInsufficient && nothingAssociated && atThreshold;
 });
 
 Test(587, "Phase A selection-change evidence: re-arm survives forceReArm, blocked frames counted, first pass snapshot captured, coverage sample bounded+sanitized, cleared on new generation/reset", () =>
 {
     var keyA = ((ulong)10865420u << 32) | 0u;
 
-    // --- prompt path: deny-covered active group suppressed and confirmed in the first re-armed pass ---
+    // --- prompt path: deny-covered active group fully suppressed and confirmed in the first re-armed pass ---
     var s = new TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState();
     s.ArmForGeneration(5);
     s.NoteSelectionChangeReArm(generationAtEvent: 5, generationAtReArm: 5, eventTickMs: 1000, eventToReArmMs: 16);
@@ -9123,7 +9143,7 @@ Test(587, "Phase A selection-change evidence: re-arm survives forceReArm, blocke
     var timingClass = s2.BuildDiagnosticLines("custom:fru-clear-stage", true)
         .Contains("fru.suppression.selectionChange.class=TimingGap");
 
-    // --- coverage path: active non-deny keep paths recorded, bounded, sanitized to game-asset roots ---
+    // --- coverage sampling: active non-deny keep paths recorded, bounded, sanitized to game-asset roots ---
     var s3 = new TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState();
     s3.ArmForGeneration(9);
     s3.NoteSelectionChangeReArm(9, 9, 3000, 10);
@@ -9147,9 +9167,10 @@ Test(587, "Phase A selection-change evidence: re-arm survives forceReArm, blocke
         && s3.ActiveNonDenyKeepPaths.All(p =>
             p.StartsWith("bg/", StringComparison.Ordinal) || p.StartsWith("bgcommon/", StringComparison.Ordinal));
     s3.EndPass();
-    var coverageClass = s3.BuildDiagnosticLines("custom:fru-clear-stage", true)
-        .Contains("fru.suppression.selectionChange.class=CoverageGap");
-    // recording is inert outside the first re-armed pass.
+    // sampling alone (no confirmed transition) does NOT reach CoverageGap (MUST FIX 2).
+    var samplingAloneNotCoverage = s3.BuildDiagnosticLines("custom:fru-clear-stage", true)
+        .Contains("fru.suppression.selectionChange.class=InsufficientEvidence");
+    // recording a first-pass sample is inert outside the first re-armed pass.
     s3.RecordActiveNonDenyKeepPath("bg/ex3/01_nvt_n4/shared/for_bg/sgbg_after_pass.sgb");
     var inertAfterCapture = !s3.ActiveNonDenyKeepPaths.Contains("bg/ex3/01_nvt_n4/shared/for_bg/sgbg_after_pass.sgb");
 
@@ -9159,6 +9180,7 @@ Test(587, "Phase A selection-change evidence: re-arm survives forceReArm, blocke
         && !s.FirstReArmedPassCaptured
         && s.SelectionChangeEventToFirstPassMs == -1
         && s.SelectionChangeFirstBlockingGate == "none"
+        && s.ActiveNonDenyKeepPathResolvedInactiveCount == 0
         && s.BuildDiagnosticLines("custom:fru-clear-stage", true)
             .Contains("fru.suppression.selectionChange.class=InsufficientEvidence");
     s2.Reset();
@@ -9166,10 +9188,11 @@ Test(587, "Phase A selection-change evidence: re-arm survives forceReArm, blocke
         && rl.Contains("fru.suppression.selectionChange.reArmCount=0")
         && rl.Contains("fru.suppression.selectionChange.eventToFirstPassMs=-1")
         && rl.Contains("fru.suppression.selectionChange.activeNonDenyKeepPaths=none")
+        && rl.Contains("fru.suppression.selectionChange.activeNonDenyKeepResolvedInactiveCount=0")
         && rl.Contains("fru.suppression.terminalAtPassCount=-1");
 
     return evidenceSurvivesForceReArm && capturingFlag && firstPassCaptured && promptClass && snapshotStable
-        && blockedCounted && timingClass && coverageBounded && coverageClass && inertAfterCapture
+        && blockedCounted && timingClass && coverageBounded && samplingAloneNotCoverage && inertAfterCapture
         && clearedOnNewGeneration && clearedOnReset;
 });
 
@@ -9186,10 +9209,17 @@ Test(588, "Phase A selection-change diagnostic keys come from the single-source 
         .All(k => emittedKeys.Contains(k));
     var hasPhaseAKeys = emittedKeys.Contains("fru.suppression.selectionChange.class")
         && emittedKeys.Contains("fru.suppression.selectionChange.classReason")
+        && emittedKeys.Contains("fru.suppression.selectionChange.classNote")
         && emittedKeys.Contains("fru.suppression.selectionChange.eventToFirstPassMs")
         && emittedKeys.Contains("fru.suppression.selectionChange.blockedFramesBeforeFirstPass")
         && emittedKeys.Contains("fru.suppression.selectionChange.activeNonDenyKeepPaths")
+        && emittedKeys.Contains("fru.suppression.selectionChange.activeNonDenyKeepResolvedInactiveCount")
         && emittedKeys.Contains("fru.suppression.terminalAtPassCount");
+    // SHOULD: the note line states the auto class must be read with the external "flicker was seen" observation.
+    var classNoteWording = lines.Any(l =>
+        l.StartsWith("fru.suppression.selectionChange.classNote=", StringComparison.Ordinal)
+        && l.Contains("external observation", StringComparison.Ordinal)
+        && l.Contains("does not standalone-prove", StringComparison.Ordinal));
 
     var root = FindRepositoryRoot();
     var quickCheckSource = File.ReadAllText(Path.Combine(
@@ -9203,10 +9233,131 @@ Test(588, "Phase A selection-change diagnostic keys come from the single-source 
     var selected = TitleBackgroundAutomaticCheckDiagnosticSelector.Select(lines);
     var selectorKeepsPhaseA = selected.Any(l =>
         l.StartsWith("fru.suppression.selectionChange.class=", StringComparison.Ordinal))
+        && selected.Any(l => l.StartsWith("fru.suppression.selectionChange.activeNonDenyKeepResolvedInactiveCount=", StringComparison.Ordinal))
         && selected.Any(l => l.StartsWith("fru.suppression.terminalAtPassCount=", StringComparison.Ordinal));
 
-    return everyEmittedAllowlisted && everyAllowlistedEmitted && hasPhaseAKeys
+    return everyEmittedAllowlisted && everyAllowlistedEmitted && hasPhaseAKeys && classNoteWording
         && wired && noHandListedLiterals && selectorKeepsPhaseA;
+});
+
+Test(589, "MUST FIX 1: partial suppression/readback in the first re-armed pass is timing-gap; only a full write+confirm+no-still-active pass is deactivation-semantics", () =>
+{
+    var k1 = ((ulong)111u << 32) | 0u;
+    var k2 = ((ulong)222u << 32) | 0u;
+
+    static TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState Armed(int gen)
+    {
+        var st = new TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState();
+        st.ArmForGeneration(gen);
+        st.NoteSelectionChangeReArm(gen, gen, 100, 5);
+        st.ArmForGeneration(gen, forceReArm: true);
+        st.MarkFirstReArmedPassStarting(20); // prompt: 20ms, 0 blocked frames
+        st.BeginPass();
+        return st;
+    }
+    static string Class(TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState st)
+        => st.BuildDiagnosticLines("custom:fru-clear-stage", true)
+            .First(l => l.StartsWith("fru.suppression.selectionChange.class=", StringComparison.Ordinal))
+            .Split('=')[1];
+
+    // two active deny-covered instances, both written, only ONE confirms inactive, the other stays active.
+    var partial = Armed(2);
+    partial.RecordScanned(); partial.RecordScanned();
+    partial.RecordMatched(k1); partial.TryConsumeWriteBudget(k1); partial.RecordWriteAttempted(k1, "SharedGroup"); partial.RecordConfirmedInactive(k1);
+    partial.RecordMatched(k2); partial.TryConsumeWriteBudget(k2); partial.RecordWriteAttempted(k2, "SharedGroup"); partial.RecordStillActive(k2);
+    partial.EndPass();
+    var partialIsTiming = partial.FirstReArmedPassMatchedActiveBeforeWrite == 2
+        && partial.FirstReArmedPassWrites == 2
+        && partial.FirstReArmedPassConfirmedInactive == 1
+        && partial.FirstReArmedPassStillActive == 1
+        && Class(partial) == "TimingGap";
+
+    // one active deny-covered instance, write budget exhausted so 0 writes -> partial -> timing-gap.
+    var noWrite = Armed(3);
+    noWrite.RecordScanned();
+    noWrite.RecordMatched(k1);
+    noWrite.RecordBudgetExhausted(k1); // no write, still active
+    noWrite.EndPass();
+    var noWriteIsTiming = noWrite.FirstReArmedPassMatchedActiveBeforeWrite == 1
+        && noWrite.FirstReArmedPassWrites == 0
+        && Class(noWrite) == "TimingGap";
+
+    // full success: every active instance written, every one confirmed inactive, none still active.
+    var full = Armed(4);
+    full.RecordScanned(); full.RecordScanned();
+    full.RecordMatched(k1); full.TryConsumeWriteBudget(k1); full.RecordWriteAttempted(k1, "SharedGroup"); full.RecordConfirmedInactive(k1);
+    full.RecordMatched(k2); full.TryConsumeWriteBudget(k2); full.RecordWriteAttempted(k2, "SharedGroup"); full.RecordConfirmedInactive(k2);
+    full.EndPass();
+    var fullIsDeactivation = full.FirstReArmedPassMatchedActiveBeforeWrite == 2
+        && full.FirstReArmedPassWrites == 2
+        && full.FirstReArmedPassConfirmedInactive == 2
+        && full.FirstReArmedPassStillActive == 0
+        && Class(full) == "DeactivationSemantics";
+
+    return partialIsTiming && noWriteIsTiming && fullIsDeactivation;
+});
+
+Test(590, "MUST FIX 2: coverage-gap needs a sampled non-deny SharedGroup confirmed active->inactive by read-only follow-up within the same bounded window", () =>
+{
+    const string p1 = "bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a5_bg01.sgb";
+
+    static TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState Sampled(int gen)
+    {
+        var st = new TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState();
+        st.ArmForGeneration(gen);
+        st.NoteSelectionChangeReArm(gen, gen, 100, 5);
+        st.ArmForGeneration(gen, forceReArm: true);
+        st.MarkFirstReArmedPassStarting(30);
+        st.BeginPass();
+        st.RecordScanned();
+        st.RecordActiveNonDenyKeepPath("bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a5_bg01.sgb");
+        st.RecordActiveNonDenyKeepPath("bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a5_bg02.sgb");
+        st.EndPass();
+        return st;
+    }
+    static string[] Lines(TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState st)
+        => st.BuildDiagnosticLines("custom:fru-clear-stage", true).ToArray();
+
+    // no follow-up transition observed -> coverage-candidate, still InsufficientEvidence.
+    var unconfirmed = Lines(Sampled(10));
+    var staysInsufficient = unconfirmed.Contains("fru.suppression.selectionChange.class=InsufficientEvidence")
+        && unconfirmed.Any(l => l.StartsWith("fru.suppression.selectionChange.classReason=coverage-candidate-unconfirmed", StringComparison.Ordinal))
+        && unconfirmed.Contains("fru.suppression.selectionChange.activeNonDenyKeepResolvedInactiveCount=0");
+
+    // a later pass in the same window observes p1 inactive -> transition confirmed -> CoverageGap.
+    var confirmed = Sampled(11);
+    var followUpEnabled = confirmed.ShouldFollowUpNonDenyKeepPaths;
+    confirmed.BeginPass();
+    confirmed.RecordScanned();
+    confirmed.RecordNonDenyKeepPathFollowUp(p1, isActive: true);  // still active -> not a transition
+    confirmed.RecordNonDenyKeepPathFollowUp("bg/ex3/01_nvt_n4/shared/for_bg/sgbg_unsampled.sgb", isActive: false); // not sampled -> ignored
+    confirmed.RecordNonDenyKeepPathFollowUp(p1, isActive: false); // sampled + inactive -> transition
+    confirmed.EndPass();
+    var confirmedLines = Lines(confirmed);
+    var becomesCoverageGap = followUpEnabled
+        && confirmed.ActiveNonDenyKeepPathResolvedInactiveCount == 1
+        && confirmedLines.Contains("fru.suppression.selectionChange.class=CoverageGap")
+        && confirmedLines.Any(l => l.StartsWith(
+            "fru.suppression.selectionChange.classReason=active-non-deny-sharedgroup-went-inactive-within-window:1/2",
+            StringComparison.Ordinal))
+        && confirmedLines.Contains("fru.suppression.selectionChange.activeNonDenyKeepResolvedInactiveCount=1");
+
+    // follow-up is inert before the first pass is captured (no sample set yet).
+    var beforeCapture = new TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState();
+    beforeCapture.ArmForGeneration(12);
+    beforeCapture.NoteSelectionChangeReArm(12, 12, 100, 5);
+    beforeCapture.ArmForGeneration(12, forceReArm: true);
+    var inertBeforeCapture = !beforeCapture.ShouldFollowUpNonDenyKeepPaths;
+    beforeCapture.RecordNonDenyKeepPathFollowUp(p1, isActive: false);
+    var inertBeforeCaptureNoRecord = beforeCapture.ActiveNonDenyKeepPathResolvedInactiveCount == 0;
+
+    // a new scene generation clears the resolved-inactive set and the sample set.
+    confirmed.ArmForGeneration(99);
+    var clearedOnNewGeneration = confirmed.ActiveNonDenyKeepPathResolvedInactiveCount == 0
+        && confirmed.ActiveNonDenyKeepPathSampleCount == 0;
+
+    return staysInsufficient && becomesCoverageGap && inertBeforeCapture && inertBeforeCaptureNoRecord
+        && clearedOnNewGeneration;
 });
 
     }

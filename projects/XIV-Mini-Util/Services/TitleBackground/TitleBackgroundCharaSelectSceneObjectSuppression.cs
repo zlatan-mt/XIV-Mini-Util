@@ -102,7 +102,14 @@ internal static class TitleBackgroundCharaSelectSceneObjectSuppressionLogic
 
     // Phase A: 1 回の代表的なキャラ/ワールド選択変更で観測した抑止ウィンドウの証拠から、
     // transient geometry を timing-gap / coverage-gap / deactivation-semantics / insufficient-evidence に
-    // 分類する純粋関数。実機の目視 symptom と突き合わせる前提の best-guess であり、fix は選ばない。
+    // 分類する純粋関数。fix は選ばない。
+    //
+    // 重要（SHOULD, ChatGPT review 5097837048）: この auto class は「抑止ウィンドウ内の受動証拠」の要約に
+    // すぎない。実機で「ちらつきが実際に見えた」という外部観測と必ず組み合わせて解釈する診断結果であり、
+    // 単体で visual fade を証明するものではない。DeactivationSemantics は「deny がカバー済みで、遅延なく
+    // 全 active instance を write し、全て readback inactive まで確定したのに外部観測ではまだ見えた」場合の
+    // 仮説ラベルであって、standalone の fade 証明ではない。
+    //
     // 「イベント -> 最初の抑止パス」がこの ms 以内かつ layout gate による blocked frame が 0 なら
     // prompt（遅延なし）とみなす。60fps で約 15 フレーム。超過 / gate 待ちがあれば timing-gap 側の証拠。
     public const long PromptFirstPassMsThreshold = 250;
@@ -128,24 +135,40 @@ internal static class TitleBackgroundCharaSelectSceneObjectSuppressionLogic
                     $"deny-covered-group-active-after-delay:{e.EventToFirstPassMs}ms:blocked{e.BlockedFramesBeforeFirstPass}:{Normalize(e.FirstBlockingGate)}");
             }
 
-            // 遅延なしで走査でき、その場で SetActive(false) -> readback inactive まで確定したのに
-            // まだ見える -> ゲーム側の fade / teardown 区間（現行 API では消せない可能性）。
-            if (e.FirstPassConfirmedInactive > 0 && e.FirstPassStillActive == 0)
+            // DeactivationSemantics は partial success では成立させない（MUST FIX 1）。
+            // 最初のパスで: active だった全 instance に write し、全て readback inactive を確定し、
+            // still-active が 0 の「完全成功」のときだけ、外部観測との突き合わせ用に fade 仮説を出す。
+            var fullySuppressedAndConfirmed =
+                e.FirstPassWrites == e.FirstPassMatchedActiveBeforeWrite
+                && e.FirstPassConfirmedInactive == e.FirstPassMatchedActiveBeforeWrite
+                && e.FirstPassStillActive == 0;
+
+            if (fullySuppressedAndConfirmed)
             {
                 return (TitleBackgroundSceneObjectSelectionChangeClass.DeactivationSemantics,
-                    "deny-covered-group-suppressed-and-confirmed-inactive-in-first-pass");
+                    "deny-covered-group-fully-suppressed-and-confirmed-inactive-in-first-pass");
             }
 
+            // 一部だけ write / 一部だけ readback 成功はレイテンシ問題であり、fade の証明ではない -> timing-gap。
             return (TitleBackgroundSceneObjectSelectionChangeClass.TimingGap,
-                "deny-covered-group-active-not-confirmed-inactive-in-first-pass");
+                $"deny-covered-group-partial-suppression-in-first-pass:writes{e.FirstPassWrites}/active{e.FirstPassMatchedActiveBeforeWrite}:confirmed{e.FirstPassConfirmedInactive}:stillActive{e.FirstPassStillActive}");
         }
 
         // deny set に該当する active group は無かった。deny token 非該当（"no-deny-token"）で active な
-        // 構造 SharedGroup を最初のパスで観測していれば、それが未カバーの大型ジオメトリの候補。
+        // 構造 SharedGroup を最初のパスで観測していても、それだけでは CoverageGap にしない（MUST FIX 2）。
+        // 同じ bounded window 内の read-only follow-up で、少なくとも 1 つが active -> inactive したと
+        // 確認できたときだけ CoverageGap（症状「一瞬見えて消える」に一致）。確認できなければ
+        // coverage-candidate として InsufficientEvidence に落とす。deny list は変更しない。
         if (e.ActiveNonDenyKeepPathSampleCount > 0)
         {
-            return (TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap,
-                $"active-non-deny-sharedgroups:{e.ActiveNonDenyKeepPathSampleCount}");
+            if (e.ActiveNonDenyKeepPathResolvedInactiveCount > 0)
+            {
+                return (TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap,
+                    $"active-non-deny-sharedgroup-went-inactive-within-window:{e.ActiveNonDenyKeepPathResolvedInactiveCount}/{e.ActiveNonDenyKeepPathSampleCount}");
+            }
+
+            return (TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence,
+                $"coverage-candidate-unconfirmed:{e.ActiveNonDenyKeepPathSampleCount}-active-non-deny-sharedgroups-no-inactive-transition");
         }
 
         return (TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence,
@@ -176,9 +199,11 @@ internal readonly record struct TitleBackgroundSceneObjectSelectionChangeEvidenc
     string FirstBlockingGate,
     bool FirstReArmedPassCaptured,
     int FirstPassMatchedActiveBeforeWrite,
+    int FirstPassWrites,
     int FirstPassConfirmedInactive,
     int FirstPassStillActive,
     int ActiveNonDenyKeepPathSampleCount,
+    int ActiveNonDenyKeepPathResolvedInactiveCount,
     string WindowStopReason);
 
 // scene-generation 単位の bounded write window の run-scoped 状態。auto-copy report が参照する。
@@ -250,9 +275,11 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         "fru.suppression.selectionChange.firstPassConfirmedInactive",
         "fru.suppression.selectionChange.firstPassStillActive",
         "fru.suppression.selectionChange.activeNonDenyKeepSampleCount",
+        "fru.suppression.selectionChange.activeNonDenyKeepResolvedInactiveCount",
         "fru.suppression.selectionChange.activeNonDenyKeepPaths",
         "fru.suppression.selectionChange.class",
         "fru.suppression.selectionChange.classReason",
+        "fru.suppression.selectionChange.classNote",
     ];
 
     public bool Attempted { get; private set; }
@@ -341,9 +368,22 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
 
     public IReadOnlyList<string> ActiveNonDenyKeepPaths => _activeNonDenyKeepPaths;
 
+    // MUST FIX 2: 最初の re-arm パスで採った sanitized path のうち、同じ bounded window 内の
+    // read-only follow-up で active -> inactive の遷移を確認できたもの。
+    public int ActiveNonDenyKeepPathResolvedInactiveCount => _nonDenyKeepPathResolvedInactive.Count;
+
+    // follow-up の read-only 観測を続けるべきか（最初のパス採取済み・window open・未解決が残っている）。
+    public bool ShouldFollowUpNonDenyKeepPaths =>
+        FirstReArmedPassCaptured
+        && !_capturingFirstReArmedPass
+        && !Completed
+        && _activeNonDenyKeepPaths.Count > 0
+        && _nonDenyKeepPathResolvedInactive.Count < _activeNonDenyKeepPaths.Count;
+
     private bool _capturingFirstReArmedPass;
     private int _passWrites;
     private readonly List<string> _activeNonDenyKeepPaths = [];
+    private readonly HashSet<string> _nonDenyKeepPathResolvedInactive = new(StringComparer.Ordinal);
 
     private readonly List<string> _suppressedKeys = [];
     private readonly Dictionary<ulong, int> _writeAttempts = [];
@@ -426,6 +466,7 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         FirstReArmedPassConfirmedInactive = 0;
         FirstReArmedPassStillActive = 0;
         _activeNonDenyKeepPaths.Clear();
+        _nonDenyKeepPathResolvedInactive.Clear();
     }
 
     // 最初の re-arm パスの BeginPass 直前に呼ぶ（サービスが gate 通過を確認済みのとき）。
@@ -458,6 +499,23 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         }
 
         _activeNonDenyKeepPaths.Add(sanitized);
+    }
+
+    // MUST FIX 2: 後続パスの read-only follow-up。最初のパスで採った sanitized path が、同じ bounded
+    // window 内で active -> inactive したかだけを記録する。write は一切しない。deny list も変更しない。
+    // 最初のパスでは active な instance だけを採取しているため、後で inactive を観測した = 遷移確認。
+    public void RecordNonDenyKeepPathFollowUp(string? primaryPath, bool isActive)
+    {
+        if (isActive || !ShouldFollowUpNonDenyKeepPaths)
+        {
+            return;
+        }
+
+        var sanitized = SanitizeGameAssetPath(primaryPath);
+        if (sanitized.Length != 0 && _activeNonDenyKeepPaths.Contains(sanitized))
+        {
+            _nonDenyKeepPathResolvedInactive.Add(sanitized);
+        }
     }
 
     // 診断へ出すのはゲームアセットパス（bg/ ・ bgcommon/）だけ。fail-closed で他は空にする。
@@ -495,6 +553,7 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         FirstReArmedPassConfirmedInactive = 0;
         FirstReArmedPassStillActive = 0;
         _activeNonDenyKeepPaths.Clear();
+        _nonDenyKeepPathResolvedInactive.Clear();
     }
 
     // window がまだ書込を試みてよいか（bounded）。
@@ -754,9 +813,11 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
             FirstBlockingGate: SelectionChangeFirstBlockingGate,
             FirstReArmedPassCaptured: FirstReArmedPassCaptured,
             FirstPassMatchedActiveBeforeWrite: FirstReArmedPassMatchedActiveBeforeWrite,
+            FirstPassWrites: FirstReArmedPassWrites,
             FirstPassConfirmedInactive: FirstReArmedPassConfirmedInactive,
             FirstPassStillActive: FirstReArmedPassStillActive,
             ActiveNonDenyKeepPathSampleCount: ActiveNonDenyKeepPathSampleCount,
+            ActiveNonDenyKeepPathResolvedInactiveCount: ActiveNonDenyKeepPathResolvedInactiveCount,
             WindowStopReason: StopReason);
         var (selectionChangeClass, selectionChangeReason) =
             TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ClassifySelectionChange(evidence);
@@ -776,9 +837,12 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         yield return $"fru.suppression.selectionChange.firstPassConfirmedInactive={FirstReArmedPassConfirmedInactive}";
         yield return $"fru.suppression.selectionChange.firstPassStillActive={FirstReArmedPassStillActive}";
         yield return $"fru.suppression.selectionChange.activeNonDenyKeepSampleCount={ActiveNonDenyKeepPathSampleCount}";
+        yield return $"fru.suppression.selectionChange.activeNonDenyKeepResolvedInactiveCount={ActiveNonDenyKeepPathResolvedInactiveCount}";
         yield return $"fru.suppression.selectionChange.activeNonDenyKeepPaths={(_activeNonDenyKeepPaths.Count == 0 ? "none" : string.Join(",", _activeNonDenyKeepPaths))}";
         yield return $"fru.suppression.selectionChange.class={selectionChangeClass}";
         yield return $"fru.suppression.selectionChange.classReason={Normalize(selectionChangeReason)}";
+        // SHOULD: auto class は受動証拠の要約。実機の「ちらつきが実際に見えた」外部観測と併せて読む。単体で fade を証明しない。
+        yield return "fru.suppression.selectionChange.classNote=auto-class summarises passive suppression-window evidence; read it together with the external observation that a flicker was actually seen; it does not standalone-prove a visual fade";
     }
 
     private static string Normalize(string? value)
