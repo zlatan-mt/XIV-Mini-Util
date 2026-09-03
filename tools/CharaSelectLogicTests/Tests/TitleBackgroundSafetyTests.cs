@@ -9741,6 +9741,17 @@ Test(597, "Phase A UX: coverage follow-up clock advances with no native reads / 
     var scanGateFirst = scanPass.Length > 0 && gateIdx >= 0 && beginIdx >= 0 && gateIdx < beginIdx
         && scanPass.Contains("TryResolveAuthorizedFruActiveLayout(candidate, out var activeLayout, out var gate)", StringComparison.Ordinal);
 
+    // MUST FIX (review 5098578049): the identity resolve helper call is INSIDE the follow-up scan's
+    // exception boundary; on exception it fails closed via RecordFailure + return and does no native write.
+    var tryIdx = scanPass.IndexOf("try", StringComparison.Ordinal);
+    var resolveIdx = scanPass.IndexOf("TryResolveAuthorizedFruActiveLayout(", StringComparison.Ordinal);
+    var catchIdx = scanPass.IndexOf("catch (Exception ex)", StringComparison.Ordinal);
+    var scanFailIdx = scanPass.IndexOf("RecordFailure($\"coverage-followup-scan:{ex.GetType().Name}\")", StringComparison.Ordinal);
+    var identityInsideExceptionBoundary = scanPass.Length > 0
+        && tryIdx >= 0 && resolveIdx > tryIdx && catchIdx > resolveIdx && scanFailIdx > catchIdx
+        && scanPass.IndexOf("return;", catchIdx, StringComparison.Ordinal) > scanFailIdx
+        && !scanPass.Contains("SetActive", StringComparison.Ordinal);
+
     // #6 (read-only): the scan only uses GetPrimaryPath + IsActive; never SetActive / deny / write budget.
     var scanReadOnly = scanPaths.Length > 0
         && scanPaths.Contains("GetPrimaryPath()", StringComparison.Ordinal)
@@ -9763,7 +9774,8 @@ Test(597, "Phase A UX: coverage follow-up clock advances with no native reads / 
         && suppression.Contains("instance->SetActive(false);", StringComparison.Ordinal)
         && suppression.Contains("TryConsumeWriteBudget(key)", StringComparison.Ordinal);
 
-    return clockNoNativeReads && scanGateFirst && scanReadOnly && sessionEndOrder && writePathIntact;
+    return clockNoNativeReads && scanGateFirst && identityInsideExceptionBoundary
+        && scanReadOnly && sessionEndOrder && writePathIntact;
 });
 
     }

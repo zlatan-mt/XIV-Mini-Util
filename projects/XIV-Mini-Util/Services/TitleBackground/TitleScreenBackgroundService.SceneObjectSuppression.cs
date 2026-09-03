@@ -256,6 +256,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     // READ-ONLY coverage follow-up の 1 パス。identity gate を満たすフレームでのみ native を読む。
     // 満たさないフレームでは何も読まず待つ（timeout は AdvanceFruCoverageFollowUpClock 側で進む）。
+    // MUST FIX (review 5098578049): identity resolve（native 読取を含む）も follow-up scan と
+    // 同じ exception boundary の中で行う。例外時は fail closed で戻る（native write は行わない）。
     private void ScanFruCoverageFollowUpPass(in TitleBackgroundCharacterSelectOverrideCandidate candidate)
     {
         var st = _charaSelectSceneObjectSuppression;
@@ -264,21 +266,25 @@ public sealed unsafe partial class TitleScreenBackgroundService
             return;
         }
 
-        if (!TryResolveAuthorizedFruActiveLayout(candidate, out var activeLayout, out var gate))
-        {
-            st.RecordGateStatus($"coverage-followup:{gate}");
-            return;
-        }
-
         try
         {
+            // gate 未成立（例外ではない）は従来どおり gate status を記録して待つ。
+            // TryResolveAuthorizedFruActiveLayout の 4 チェック・順序は変更しない。
+            if (!TryResolveAuthorizedFruActiveLayout(candidate, out var activeLayout, out var gate))
+            {
+                st.RecordGateStatus($"coverage-followup:{gate}");
+                return;
+            }
+
             st.BeginCoverageFollowUpPass();
             ScanCoverageFollowUpSampledPaths(activeLayout);
             st.EndCoverageFollowUpPass();
         }
         catch (Exception ex)
         {
+            // fail closed: 例外時は何も観測せず戻る。native write は元々一切行わない。
             st.RecordFailure($"coverage-followup-scan:{ex.GetType().Name}");
+            return;
         }
 
         if (st.ActiveNonDenyKeepPathResolvedInactiveCount > 0)
