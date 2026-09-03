@@ -48,15 +48,21 @@ internal static class TitleBackgroundSelectionChangeDeltaLogic
     //  1. eligible SharedGroup の active-instance 数 delta -> sharedgroup-delta
     //     （Phase B が既存の検証済み SharedGroup suppression を使えるため最優先）
     //  2. それ以外で typed VFX identity/state delta -> vfx-delta
-    //  3. 2500ms 完走 + valid scan あり + 実質的な read/gate failure なし -> no-safe-layout-delta
-    //  4. それ以外 -> incomplete
+    //  3. 2500ms 完走 + SG/VFX の valid scan あり + pre-event baseline を明示的に取得済み +
+    //     read/gate failure が 1 件も無い -> no-safe-layout-delta（信頼できる negative）
+    //  4. それ以外（gate blocked / read failure / baseline 未取得 等）-> incomplete
+    // review 5099109840: gateBlockedPassCount>0 の negative は no-safe-layout-delta にしない。
+    // baseline 未取得なら appeared/change を positive delta にせず、outcome は incomplete。
     public static string ClassifyFinalOutcome(
         int sharedGroupChangedCount,
         int vfxChangedCount,
         bool windowComplete,
         int sharedGroupValidPassCount,
         int vfxValidPassCount,
-        int readFailureCount)
+        int readFailureCount,
+        int gateBlockedPassCount,
+        bool sharedGroupBaselineAvailable,
+        bool vfxBaselineAvailable)
     {
         if (sharedGroupChangedCount > 0)
         {
@@ -70,6 +76,9 @@ internal static class TitleBackgroundSelectionChangeDeltaLogic
 
         if (windowComplete
             && readFailureCount == 0
+            && gateBlockedPassCount == 0
+            && sharedGroupBaselineAvailable
+            && vfxBaselineAvailable
             && sharedGroupValidPassCount > 0
             && vfxValidPassCount > 0)
         {
@@ -98,6 +107,8 @@ internal static class TitleBackgroundSelectionChangeDeltaLogic
             "fru.suppression.selectionChange.final.vfxValidPassCount",
             "fru.suppression.selectionChange.final.readFailureCount",
             "fru.suppression.selectionChange.final.gateBlockedPassCount",
+            "fru.suppression.selectionChange.final.sharedGroupBaselineAvailable",
+            "fru.suppression.selectionChange.final.vfxBaselineAvailable",
         };
 
         for (var i = 0; i < MaxReportedChanged; i++)
@@ -211,9 +222,20 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
 
     public int GateBlockedPassCount { get; private set; }
 
+    // review 5099109840: pre-event baseline を明示管理する。
+    // SharedGroup baseline = re-arm 前に valid な通常 suppression pass を 1 回以上取得済みか
+    //   （path が 0 件でも valid pass なら「空 baseline あり」= true）。
+    // VFX baseline = re-arm 時に current-generation の信頼できる既存 VFX inventory snapshot を受け取れたか。
+    public bool SharedGroupBaselineAvailable { get; private set; }
+
+    public bool VfxBaselineAvailable { get; private set; }
+
     // --- SharedGroup ---
     // 選択変更 re-arm 前の「直近の authorized な通常 suppression pass」の path->activeCount（managed copy）。
     private readonly Dictionary<string, int> _latestOrdinaryPassCounts = new(StringComparer.Ordinal);
+
+    // 上記が valid な pass 由来か（空でも true になりうる）。ArmFromReArm で SharedGroupBaselineAvailable へ写す。
+    private bool _latestOrdinaryPassValid;
 
     // re-arm 時に _latestOrdinaryPassCounts から snapshot した baseline。
     private readonly Dictionary<string, int> _baseline = new(StringComparer.Ordinal);
@@ -280,6 +302,8 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
             return;
         }
 
+        // valid な通常 pass を 1 回でも取得できれば SharedGroup baseline は「取得済み」（空でも可）。
+        _latestOrdinaryPassValid = true;
         _latestOrdinaryPassCounts.Clear();
         foreach (var kv in _passCounts)
         {
@@ -294,7 +318,9 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
     // accumulated SG/VFX delta をリセットしない。まだ観測中（Armed かつ未 terminal）なら no-op で、
     // burst の最初の re-arm が張った baseline を維持し、early delta を取りこぼさない。
     // window が terminal（timeout / session end）or Reset() の後は、次の switch で改めて re-baseline する。
-    public void ArmFromReArm(IReadOnlyList<TitleBackgroundVfxDetailEntry> vfxSnapshot)
+    // vfxSnapshotReliable: この switch の scene generation に対応する、信頼できる既存 VFX inventory
+    // snapshot（valid な完了パスあり）を受け取れたか。false のとき VFX baseline は「未取得」とする。
+    public void ArmFromReArm(IReadOnlyList<TitleBackgroundVfxDetailEntry> vfxSnapshot, bool vfxSnapshotReliable)
     {
         if (Armed && !Complete)
         {
@@ -305,20 +331,25 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         Armed = true;
         Outcome = "observing";
 
-        foreach (var kv in _latestOrdinaryPassCounts)
+        SharedGroupBaselineAvailable = _latestOrdinaryPassValid;
+        if (SharedGroupBaselineAvailable)
         {
-            if (_baseline.Count >= TitleBackgroundSelectionChangeDeltaLogic.MaxTrackedSharedGroupPaths)
+            foreach (var kv in _latestOrdinaryPassCounts)
             {
-                SharedGroupPathCapReached = true;
-                break;
-            }
+                if (_baseline.Count >= TitleBackgroundSelectionChangeDeltaLogic.MaxTrackedSharedGroupPaths)
+                {
+                    SharedGroupPathCapReached = true;
+                    break;
+                }
 
-            _baseline[kv.Key] = kv.Value;
+                _baseline[kv.Key] = kv.Value;
+            }
         }
 
-        if (vfxSnapshot != null)
+        VfxBaselineAvailable = vfxSnapshotReliable && vfxSnapshot != null && vfxSnapshot.Count > 0;
+        if (VfxBaselineAvailable)
         {
-            foreach (var e in vfxSnapshot)
+            foreach (var e in vfxSnapshot!)
             {
                 if (_vfxBaseline.Count >= TitleBackgroundSelectionChangeDeltaLogic.MaxVfxScanEntries)
                 {
@@ -393,6 +424,14 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
 
         SharedGroupValidPassCount++;
 
+        // review 5099109840: pre-event baseline 未取得なら appeared/change を positive delta にしない。
+        if (!SharedGroupBaselineAvailable)
+        {
+            _passCounts.Clear();
+            RecomputeOutcome();
+            return;
+        }
+
         // observed path ∪ baseline path。baseline にあってこの valid pass に現れない path は current=0。
         var paths = new HashSet<string>(_passCounts.Keys, StringComparer.Ordinal);
         foreach (var b in _baseline.Keys)
@@ -456,6 +495,14 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         }
 
         VfxValidPassCount++;
+
+        // review 5099109840: VFX baseline 未取得なら appeared/disappeared/change を positive delta にしない。
+        if (!VfxBaselineAvailable)
+        {
+            _vfxCurrent.Clear();
+            RecomputeOutcome();
+            return;
+        }
 
         foreach (var kv in _vfxCurrent)
         {
@@ -554,7 +601,10 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
             WindowComplete,
             SharedGroupValidPassCount,
             VfxValidPassCount,
-            ReadFailureCount);
+            ReadFailureCount,
+            GateBlockedPassCount,
+            SharedGroupBaselineAvailable,
+            VfxBaselineAvailable);
     }
 
     // ---- report ----
@@ -573,6 +623,8 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         yield return $"fru.suppression.selectionChange.final.vfxValidPassCount={VfxValidPassCount}";
         yield return $"fru.suppression.selectionChange.final.readFailureCount={ReadFailureCount}";
         yield return $"fru.suppression.selectionChange.final.gateBlockedPassCount={GateBlockedPassCount}";
+        yield return $"fru.suppression.selectionChange.final.sharedGroupBaselineAvailable={SharedGroupBaselineAvailable}";
+        yield return $"fru.suppression.selectionChange.final.vfxBaselineAvailable={VfxBaselineAvailable}";
 
         var sgIndex = 0;
         foreach (var kv in _tracking)
@@ -622,6 +674,8 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         SharedGroupPathCapReached = false;
         SharedGroupValidPassCount = 0;
         VfxValidPassCount = 0;
+        SharedGroupBaselineAvailable = false;
+        VfxBaselineAvailable = false;
         _passReadFailed = false;
         _baseline.Clear();
         _tracking.Clear();
@@ -638,5 +692,6 @@ internal sealed class TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState
         Armed = false;
         ResetObservation();
         _latestOrdinaryPassCounts.Clear();
+        _latestOrdinaryPassValid = false;
     }
 }

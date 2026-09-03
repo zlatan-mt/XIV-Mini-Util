@@ -9832,7 +9832,7 @@ Test(599, "Phase A final diagnostic: SharedGroup count-delta tracker detects 2->
         d.RecordSharedGroupInstance("bg/a/pa.sgb", true);
         d.RecordSharedGroupInstance("bg/a/pb.sgb", false);
         d.FinishSharedGroupPass(valid: true, elapsedMs: -1);
-        d.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+        d.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: true);
         return d;
     }
 
@@ -9867,7 +9867,7 @@ Test(599, "Phase A final diagnostic: SharedGroup count-delta tracker detects 2->
     d2.RecordSharedGroupInstance("bg/a/pa.sgb", true);
     d2.RecordSharedGroupInstance("bg/a/pa.sgb", true);
     d2.FinishSharedGroupPass(valid: true, elapsedMs: -1);
-    d2.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+    d2.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: true);
     for (var i = 0; i < 3; i++)
     {
         d2.BeginSharedGroupPass();
@@ -9884,7 +9884,7 @@ Test(599, "Phase A final diagnostic: SharedGroup count-delta tracker detects 2->
     d3.BeginSharedGroupPass();
     d3.RecordSharedGroupInstance("bg/a/pa.sgb", true);
     d3.FinishSharedGroupPass(valid: true, elapsedMs: -1);
-    d3.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+    d3.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: true);
     d3.BeginSharedGroupPass();               // valid pass, pathA not observed
     d3.FinishSharedGroupPass(valid: true, elapsedMs: 50);
     var disappearanceDetected = d3.SharedGroupChangedCount == 1
@@ -9895,7 +9895,7 @@ Test(599, "Phase A final diagnostic: SharedGroup count-delta tracker detects 2->
     d4.BeginSharedGroupPass();
     d4.RecordSharedGroupInstance("bg/a/pa.sgb", true);
     d4.FinishSharedGroupPass(valid: true, elapsedMs: -1);
-    d4.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+    d4.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: true);
     d4.BeginSharedGroupPass();
     d4.FinishSharedGroupPass(valid: false, elapsedMs: 50);   // partial scan -> ignored
     var partialNoSynthesis = d4.SharedGroupChangedCount == 0 && d4.SharedGroupValidPassCount == 0;
@@ -9919,7 +9919,7 @@ Test(600, "Phase A final diagnostic: typed VFX delta compares managed snapshots 
     };
 
     var d = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
-    d.ArmFromReArm(baseline);
+    d.ArmFromReArm(baseline, vfxSnapshotReliable: true);
 
     d.BeginVfxPass();
     d.RecordVfxInstance(TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(1, 0u), isActive: false, loaded: true, gfx: true, pathHash: 0xAAu, "bg/vfx/1.avfx");
@@ -9942,7 +9942,7 @@ Test(600, "Phase A final diagnostic: typed VFX delta compares managed snapshots 
 
     // partial VFX pass -> no disappearance synthesised.
     var d2 = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
-    d2.ArmFromReArm(baseline);
+    d2.ArmFromReArm(baseline, vfxSnapshotReliable: true);
     d2.BeginVfxPass();
     d2.FinishVfxPass(valid: false);
     var partialNoSynthesis = d2.VfxChangedCount == 0 && d2.VfxValidPassCount == 0;
@@ -9952,8 +9952,11 @@ Test(600, "Phase A final diagnostic: typed VFX delta compares managed snapshots 
 
 Test(601, "Phase A final diagnostic: outcome precedence SharedGroup > VFX > no-safe-layout-delta > incomplete; report keys come from the single-source list", () =>
 {
-    static string O(int sg, int vfx, bool complete, int sgPasses, int vfxPasses, int readFail)
-        => TitleBackgroundSelectionChangeDeltaLogic.ClassifyFinalOutcome(sg, vfx, complete, sgPasses, vfxPasses, readFail);
+    // (sg, vfx, complete, sgPasses, vfxPasses, readFail, gateBlocked, sgBaseline, vfxBaseline)
+    static string O(int sg, int vfx, bool complete, int sgPasses, int vfxPasses, int readFail,
+        int gateBlocked = 0, bool sgBaseline = true, bool vfxBaseline = true)
+        => TitleBackgroundSelectionChangeDeltaLogic.ClassifyFinalOutcome(
+            sg, vfx, complete, sgPasses, vfxPasses, readFail, gateBlocked, sgBaseline, vfxBaseline);
 
     var precedence =
         O(1, 1, true, 5, 5, 0) == "sharedgroup-delta"          // SG wins even if VFX also changed
@@ -9962,10 +9965,13 @@ Test(601, "Phase A final diagnostic: outcome precedence SharedGroup > VFX > no-s
         && O(0, 0, true, 0, 3, 0) == "incomplete"              // no valid SG pass
         && O(0, 0, true, 3, 0, 0) == "incomplete"              // no valid VFX pass
         && O(0, 0, true, 3, 3, 2) == "incomplete"              // read failures
-        && O(0, 0, false, 3, 3, 0) == "incomplete";            // window not complete
+        && O(0, 0, false, 3, 3, 0) == "incomplete"             // window not complete
+        && O(0, 0, true, 3, 3, 0, gateBlocked: 1) == "incomplete"          // MUST FIX #1: gate-blocked negative
+        && O(0, 0, true, 3, 3, 0, sgBaseline: false) == "incomplete"       // SG baseline not available
+        && O(0, 0, true, 3, 3, 0, vfxBaseline: false) == "incomplete";     // VFX baseline not available
 
     var d = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
-    d.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+    d.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: true);
     d.MarkWindowComplete();
     var emitted = d.BuildFinalDiagnosticLines().Select(l => l[..l.IndexOf('=')]).ToArray();
     var everyEmittedListed = emitted.All(k => TitleBackgroundSelectionChangeDeltaLogic.DiagnosticKeys.Contains(k));
@@ -9975,7 +9981,9 @@ Test(601, "Phase A final diagnostic: outcome precedence SharedGroup > VFX > no-s
         && emitted.Contains("fru.suppression.selectionChange.final.sharedGroupChangedCount")
         && emitted.Contains("fru.suppression.selectionChange.final.vfxChangedCount")
         && emitted.Contains("fru.suppression.selectionChange.final.readFailureCount")
-        && emitted.Contains("fru.suppression.selectionChange.final.gateBlockedPassCount");
+        && emitted.Contains("fru.suppression.selectionChange.final.gateBlockedPassCount")
+        && emitted.Contains("fru.suppression.selectionChange.final.sharedGroupBaselineAvailable")
+        && emitted.Contains("fru.suppression.selectionChange.final.vfxBaselineAvailable");
     // an unarmed tracker reports armed=False / outcome=not-run and Reset clears it.
     d.Reset();
     var resetClears = d.BuildFinalDiagnosticLines().Contains("fru.suppression.selectionChange.final.armed=False")
@@ -10060,7 +10068,7 @@ Test(603, "MUST FIX (review 5098946239 #1): multiple re-arms during one switch b
     var vfxBaseline = new[] { V(1, active: true) };
 
     // first re-arm of the burst -> baseline snapshot.
-    d.ArmFromReArm(vfxBaseline);
+    d.ArmFromReArm(vfxBaseline, vfxSnapshotReliable: true);
 
     // an early delta pass while the burst is still firing: pathA 2 -> 1, uuid1 active -> inactive.
     d.BeginSharedGroupPass();
@@ -10074,8 +10082,8 @@ Test(603, "MUST FIX (review 5098946239 #1): multiple re-arms during one switch b
         && d.SharedGroupValidPassCount == 1 && d.VfxValidPassCount == 1;
 
     // subsequent re-arms in the SAME burst (Armed && !Complete) are no-ops: baseline + accumulated delta survive.
-    d.ArmFromReArm(new[] { V(1, active: true), V(9, active: true) });   // would have added uuid9 / re-baselined
-    d.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>()); // would have wiped the VFX baseline
+    d.ArmFromReArm(new[] { V(1, active: true), V(9, active: true) }, vfxSnapshotReliable: true);   // would have added uuid9 / re-baselined
+    d.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: true); // would have wiped the VFX baseline
     var survivedReArms = d.SharedGroupChangedCount == 1
         && d.VfxChangedCount == 1
         && d.SharedGroupValidPassCount == 1
@@ -10084,7 +10092,7 @@ Test(603, "MUST FIX (review 5098946239 #1): multiple re-arms during one switch b
 
     // after the window is terminal, a genuinely new switch DOES re-baseline.
     d.MarkWindowComplete();
-    d.ArmFromReArm(new[] { V(1, active: true), V(2, active: true) });
+    d.ArmFromReArm(new[] { V(1, active: true), V(2, active: true) }, vfxSnapshotReliable: true);
     var reBaselineAfterComplete = !d.WindowComplete && d.VfxBaselineCount == 2
         && d.SharedGroupChangedCount == 0 && d.VfxChangedCount == 0;
 
@@ -10103,7 +10111,7 @@ Test(604, "MUST FIX (review 5098946239 #2): a pass with any per-instance read fa
     sg.BeginSharedGroupPass();
     sg.RecordSharedGroupInstance("bg/a/pa.sgb", true);
     sg.FinishSharedGroupPass(valid: true, elapsedMs: -1);
-    sg.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+    sg.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: true);
 
     // failed pass: the scan hit a per-instance read failure and pathA was not observed.
     sg.BeginSharedGroupPass();
@@ -10122,7 +10130,7 @@ Test(604, "MUST FIX (review 5098946239 #2): a pass with any per-instance read fa
 
     // --- VFX: read failure in a pass must not turn a baseline uuid into "disappeared" ---
     var vfx = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
-    vfx.ArmFromReArm(new[] { V(1), V(2) });
+    vfx.ArmFromReArm(new[] { V(1), V(2) }, vfxSnapshotReliable: true);
     vfx.BeginVfxPass();
     vfx.RecordVfxInstance(TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(1, 0u), isActive: true, loaded: true, gfx: true, pathHash: 0xAAu, "bg/vfx/1.avfx");
     vfx.RecordReadFailure();                      // uuid2's read threw
@@ -10142,7 +10150,7 @@ Test(604, "MUST FIX (review 5098946239 #2): a pass with any per-instance read fa
 
     // the per-pass flag is scoped to the pass: a subsequent Begin*Pass clears it.
     var flagScoped = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
-    flagScoped.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+    flagScoped.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: true);
     flagScoped.BeginSharedGroupPass();
     flagScoped.RecordReadFailure();
     flagScoped.FinishSharedGroupPass(valid: true, elapsedMs: 10);   // dropped
@@ -10153,6 +10161,84 @@ Test(604, "MUST FIX (review 5098946239 #2): a pass with any per-instance read fa
 
     return sgFailedPassDropped && laterCleanSgDelta && vfxFailedPassDropped
         && laterCleanVfxDelta && flagCleared;
+});
+
+Test(605, "MUST FIX (review 5099109840): baseline availability is explicit - no baseline -> no positive delta -> incomplete; a valid empty SG baseline still yields a real appearance delta; gate-blocked negative -> incomplete", () =>
+{
+    static TitleBackgroundVfxDetailEntry E(uint key)
+        => new(((ulong)key << 32), key, 0u,
+            TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(key, 0u),
+            true, true, true, 0xAAu, $"bg/vfx/{key}.avfx");
+
+    // --- no baseline at all (no valid ordinary SG pass, no reliable VFX snapshot): a post-event
+    //     entry must NOT become a positive delta, and the outcome must be incomplete ---
+    var nb = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    nb.ArmFromReArm(new[] { E(1) }, vfxSnapshotReliable: false);   // VFX snapshot present but NOT reliable
+    var baselineFlags = !nb.SharedGroupBaselineAvailable && !nb.VfxBaselineAvailable;
+    nb.BeginSharedGroupPass();
+    nb.RecordSharedGroupInstance("bg/a/pnew.sgb", true);           // "new" path, but we have no baseline
+    nb.FinishSharedGroupPass(valid: true, elapsedMs: 20);
+    nb.BeginVfxPass();
+    nb.RecordVfxInstance(TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(1, 0u), isActive: false, loaded: true, gfx: true, pathHash: 0xAAu, "bg/vfx/1.avfx"); // would be "active" change
+    nb.RecordVfxInstance(TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(7, 0u), isActive: true, loaded: true, gfx: true, pathHash: 0xBBu, "bg/vfx/7.avfx");   // would be "appeared"
+    nb.FinishVfxPass(valid: true);
+    nb.MarkWindowComplete();
+    var noBaselineNoPositiveDelta = nb.SharedGroupChangedCount == 0
+        && nb.VfxChangedCount == 0
+        && nb.Outcome == "incomplete"
+        && nb.BuildFinalDiagnosticLines().Contains("fru.suppression.selectionChange.final.sharedGroupBaselineAvailable=False")
+        && nb.BuildFinalDiagnosticLines().Contains("fru.suppression.selectionChange.final.vfxBaselineAvailable=False");
+
+    // --- a VALID but empty SG baseline (a valid ordinary pass ran and saw no eligible path):
+    //     a subsequent appearance IS a real delta ---
+    var eb = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    eb.BeginSharedGroupPass();
+    eb.FinishSharedGroupPass(valid: true, elapsedMs: -1);          // valid ordinary pass, zero eligible paths
+    eb.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>(), vfxSnapshotReliable: false);
+    var emptyButAvailable = eb.SharedGroupBaselineAvailable;
+    eb.BeginSharedGroupPass();
+    eb.RecordSharedGroupInstance("bg/a/pappear.sgb", true);
+    eb.FinishSharedGroupPass(valid: true, elapsedMs: 40);
+    var emptyBaselineRealDelta = emptyButAvailable
+        && eb.SharedGroupChangedCount == 1
+        && eb.BuildFinalDiagnosticLines().Any(l => l.Contains("path=bg/a/pappear.sgb baseline=0", StringComparison.Ordinal) && l.Contains("final=1", StringComparison.Ordinal));
+
+    // --- gate-blocked negative run: valid scans, no delta, but gateBlockedPassCount > 0 -> incomplete ---
+    var gb = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    gb.BeginSharedGroupPass();
+    gb.FinishSharedGroupPass(valid: true, elapsedMs: -1);
+    gb.ArmFromReArm(new[] { E(1) }, vfxSnapshotReliable: true);
+    gb.BeginSharedGroupPass();
+    gb.RecordSharedGroupInstance("bg/a/px.sgb", false);           // no delta
+    gb.FinishSharedGroupPass(valid: true, elapsedMs: 30);
+    gb.BeginVfxPass();
+    gb.RecordVfxInstance(TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(1, 0u), isActive: true, loaded: true, gfx: true, pathHash: 0xAAu, "bg/vfx/1.avfx"); // no change
+    gb.FinishVfxPass(valid: true);
+    gb.RecordGateBlockedPass();                                    // a frame where identity was not safe
+    gb.MarkWindowComplete();
+    var gateBlockedIncomplete = gb.SharedGroupChangedCount == 0
+        && gb.VfxChangedCount == 0
+        && gb.SharedGroupValidPassCount > 0
+        && gb.VfxValidPassCount > 0
+        && gb.GateBlockedPassCount == 1
+        && gb.Outcome == "incomplete";
+
+    // --- the same run with NO gate-blocked pass reaches no-safe-layout-delta (control) ---
+    var ok = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    ok.BeginSharedGroupPass();
+    ok.FinishSharedGroupPass(valid: true, elapsedMs: -1);
+    ok.ArmFromReArm(new[] { E(1) }, vfxSnapshotReliable: true);
+    ok.BeginSharedGroupPass();
+    ok.RecordSharedGroupInstance("bg/a/px.sgb", false);
+    ok.FinishSharedGroupPass(valid: true, elapsedMs: 30);
+    ok.BeginVfxPass();
+    ok.RecordVfxInstance(TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(1, 0u), isActive: true, loaded: true, gfx: true, pathHash: 0xAAu, "bg/vfx/1.avfx");
+    ok.FinishVfxPass(valid: true);
+    ok.MarkWindowComplete();
+    var cleanNegativeIsNoSafeDelta = ok.Outcome == "no-safe-layout-delta";
+
+    return baselineFlags && noBaselineNoPositiveDelta && emptyBaselineRealDelta
+        && gateBlockedIncomplete && cleanNegativeIsNoSafeDelta;
 });
 
     }

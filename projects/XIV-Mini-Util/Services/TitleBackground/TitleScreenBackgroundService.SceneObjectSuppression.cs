@@ -135,9 +135,14 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 eventToReArmMs);
 
             // 最終診断: managed baseline を snapshot する（native scan は増やさない）。
-            // - SharedGroup baseline = 直近の authorized な通常 suppression pass の path->activeCount。
-            // - VFX baseline = 既存 VFX inventory の最新 managed スナップショット（frozen で可）。
-            _charaSelectSelectionChangeDelta.ArmFromReArm(_charaSelectVfxInventory.DetailSnapshot);
+            // - SharedGroup baseline = 直近の authorized な valid 通常 suppression pass の path->activeCount。
+            // - VFX baseline = この scene generation の信頼できる既存 VFX inventory スナップショット
+            //   （current-gen で arm 済み + valid な完了パスあり）。frozen で可。未取得なら
+            //   appeared/change を positive delta にしない（outcome は incomplete 側）。
+            _charaSelectSelectionChangeDelta.ArmFromReArm(
+                _charaSelectVfxInventory.DetailSnapshot,
+                vfxSnapshotReliable: _charaSelectVfxInventory.DetailSnapshotCount > 0
+                    && _charaSelectVfxInventory.ArmedSceneGeneration == generation);
         }
 
         _charaSelectSceneObjectSuppression.ArmForGeneration(generation, forceReArm);
