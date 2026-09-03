@@ -100,6 +100,39 @@ internal static class TitleBackgroundCharaSelectSceneObjectSuppressionLogic
         return null;
     }
 
+    // 診断専用: game-asset path（bg/ ・ bgcommon/）だけを小文字 sanitized で返す。他は空文字（fail-closed）。
+    // suppression 挙動には使わない。
+    public static string SanitizeGameAssetPathForDiagnostics(string? path)
+    {
+        var p = (path ?? string.Empty).Trim().ToLowerInvariant();
+        if (p.Length is 0 or > 128)
+        {
+            return string.Empty;
+        }
+
+        return p.StartsWith("bg/", StringComparison.Ordinal)
+            || p.StartsWith("bgcommon/", StringComparison.Ordinal)
+                ? p
+                : string.Empty;
+    }
+
+    // review 5521774559 A.2: 最終診断の eligible SharedGroup path =
+    // SharedGroup + deny token 非該当（Evaluate が Keep/no-deny-token を返す）+ 既知 KeepPathToken 非該当。
+    // Evaluate / DenyPathTokens / KeepPathTokens / precedence / suppression 挙動は一切変更しない。
+    public static bool IsEligibleDeltaSharedGroupPath(string? primaryPath)
+    {
+        var decision = Evaluate(primaryPath, true);
+        if (decision.Verdict != TitleBackgroundSceneObjectSuppressionVerdict.Keep
+            || !string.Equals(decision.Reason, "no-deny-token", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var sanitized = SanitizeGameAssetPathForDiagnostics(primaryPath);
+        return sanitized.Length != 0
+            && !TitleBackgroundSelectionChangeDeltaLogic.MatchesKnownKeepToken(sanitized);
+    }
+
     // Phase A: 1 回の代表的なキャラ/ワールド選択変更で観測した抑止ウィンドウの証拠から、
     // transient geometry を timing-gap / coverage-gap / deactivation-semantics / insufficient-evidence に
     // 分類する純粋関数。fix は選ばない。
@@ -188,41 +221,41 @@ internal static class TitleBackgroundCharaSelectSceneObjectSuppressionLogic
     // 実機で non-deny candidate の遅い active->inactive transition を観測するための追加観測窓。
     public const long CoverageFollowUpDurationMs = 2500;
 
-    // READ-ONLY coverage follow-up window を arm すべきか。
-    // - selection-change sample が存在
-    // - activeNonDenyKeepSampleCount > 0
-    // - CoverageGap 未確定（resolvedInactiveCount == 0）
-    // - 通常 suppression WRITE window が completed
-    // のとき true。WRITE window（stable streak / pass budget / SetActive / deny list）は一切変更しない。
+    // WRITE window 終了後に走る bounded READ-ONLY 観測窓（selection-change 最終診断の 2500ms 窓）を
+    // arm すべきか。1 回の通常の選択変更後、WRITE window が completed した時点で常に arm する
+    // （SharedGroup count-delta / VFX delta を早い変化も含めて観測するため）。
+    // WRITE window（stable streak / pass budget / retry budget / SetActive / deny list）は一切変更しない。
     public static bool ShouldArmCoverageFollowUp(
         bool selectionChangeObserved,
-        int activeNonDenyKeepSampleCount,
-        int activeNonDenyKeepResolvedInactiveCount,
         bool writeWindowCompleted)
     {
-        return selectionChangeObserved
-            && writeWindowCompleted
-            && activeNonDenyKeepSampleCount > 0
-            && activeNonDenyKeepResolvedInactiveCount == 0;
+        return selectionChangeObserved && writeWindowCompleted;
     }
 
     // selection-change レポートを publish してよいか。
     // - session 終了は hard stop。
-    // - positive class（TimingGap / CoverageGap / DeactivationSemantics）確定なら即 publish。
-    // - InsufficientEvidence かつ non-deny sample が存在するなら、READ-ONLY coverage follow-up window が
-    //   terminal（transition 確認 or 2500ms timeout）になるまで publish しない。
-    // - InsufficientEvidence かつ sample が無いなら、旧挙動どおり WRITE window close or bounded timeout。
+    // - 最終診断（final delta window）が armed なら、旧 classifier が positive になっても早期 publish せず、
+    //   その bounded 観測窓が terminal（2500ms 完走 or session end）になるまで待つ。
+    //   -> 1 つの clipboard レポートに SharedGroup と VFX の両方の証拠を含めるため。
+    // - final 診断が armed でない（switch なし等）場合のみ旧挙動。
     public static bool SelectionChangeReportReady(
         TitleBackgroundSceneObjectSelectionChangeClass currentClass,
         bool windowCompleted,
         long elapsedMsSinceEvent,
         bool sessionEnding,
         int activeNonDenyKeepSampleCount,
-        bool coverageFollowUpTerminal)
+        bool coverageFollowUpTerminal,
+        bool finalDiagnosticArmed,
+        bool finalDiagnosticComplete)
     {
         if (sessionEnding)
         {
             return true;
+        }
+
+        if (finalDiagnosticArmed)
+        {
+            return finalDiagnosticComplete;
         }
 
         if (currentClass != TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence)
@@ -623,6 +656,9 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
 
     // 最初の re-arm パスでだけ、deny token 非該当かつ active な SharedGroup の game-asset primary path を
     // bounded に記録する（coverage-gap 証拠）。write は一切しない。
+    // review 5521774559 #4: Evaluate は deny token が無いと KeepPathTokens を見る前に Keep/no-deny-token を
+    // 返すため、_flo/_lig 等の既知 clear-stage keep content が sample slot を食う bias がある。
+    // Evaluate / KeepPathTokens は変更せず、診断候補選定でのみ既知 keep-token を除外する。
     public void RecordActiveNonDenyKeepPath(string? primaryPath)
     {
         if (!_capturingFirstReArmedPass
@@ -632,7 +668,9 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         }
 
         var sanitized = SanitizeGameAssetPath(primaryPath);
-        if (sanitized.Length == 0 || _activeNonDenyKeepPaths.Contains(sanitized))
+        if (sanitized.Length == 0
+            || TitleBackgroundSelectionChangeDeltaLogic.MatchesKnownKeepToken(sanitized)
+            || _activeNonDenyKeepPaths.Contains(sanitized))
         {
             return;
         }

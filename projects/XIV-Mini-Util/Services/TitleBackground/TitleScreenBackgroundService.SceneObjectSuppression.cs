@@ -37,6 +37,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
     private int _fruSelectionChangeReportPublishedForReArmCount;
     private string _fruSelectionChangePendingClipboardText = string.Empty;
 
+    // Phase A 最終診断（review 5521774559）: 1 回の通常の選択変更で sharedgroup-delta / vfx-delta /
+    // no-safe-layout-delta / incomplete のいずれかへ確定させる、bounded・READ-ONLY・managed な delta 証拠。
+    // WRITE window / deny list / SetActive / native hook は一切変更しない。VFX write なし。
+    private readonly TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState _charaSelectSelectionChangeDelta = new();
+
     // OnFrameworkUpdate から毎フレーム呼ぶ。FRU candidate かつ pre-login + CharaSelect session + hook Ready +
     // static-anchor 認可済み + current lobby map == CharaSelect + loaded ActiveLayout（InitState 7 /
     // territory 1238 / layer 0）のときだけ 1 パス走査する。window が閉じたら以降書かない。
@@ -61,9 +66,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 _charaSelectSceneObjectSuppression.RecordCleanupState("stopped-on-login");
             }
 
-            // session 終了は hard stop: READ-ONLY follow-up を安全停止し、未 publish の
-            // selection-change レポートがあれば今出す。
+            // session 終了は hard stop: READ-ONLY follow-up / 最終 delta 観測窓を安全停止し、
+            // 未 publish の selection-change レポートがあれば今出す。
             _charaSelectSceneObjectSuppression.StopCoverageFollowUp("session-end");
+            _charaSelectSelectionChangeDelta.MarkSessionEnd();
             MaybePublishFruSelectionChangeReport(candidate.Id, sessionEnding: true);
             return;
         }
@@ -127,6 +133,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 generation,
                 eventTick,
                 eventToReArmMs);
+
+            // 最終診断: managed baseline を snapshot する（native scan は増やさない）。
+            // - SharedGroup baseline = 直近の authorized な通常 suppression pass の path->activeCount。
+            // - VFX baseline = 既存 VFX inventory の最新 managed スナップショット（frozen で可）。
+            _charaSelectSelectionChangeDelta.ArmFromReArm(_charaSelectVfxInventory.DetailSnapshot);
         }
 
         _charaSelectSceneObjectSuppression.ArmForGeneration(generation, forceReArm);
@@ -162,8 +173,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
             }
 
             _charaSelectSceneObjectSuppression.BeginPass();
-            SuppressSharedGroups(activeLayout);
+            // 最終診断: 同じ WRITE scan の中で eligible SharedGroup の active-instance 数も数える
+            // （新しい native scan は増やさない）。再 arm 前は baseline source、再 arm 後は delta として畳み込む。
+            _charaSelectSelectionChangeDelta.BeginSharedGroupPass();
+            var writeSgScanOk = SuppressSharedGroups(activeLayout);
             _charaSelectSceneObjectSuppression.EndPass();
+            _charaSelectSelectionChangeDelta.FinishSharedGroupPass(writeSgScanOk, ComputeSelectionChangeElapsedMs());
             _charaSelectSceneObjectSuppression.RecordCleanupState(
                 _charaSelectSceneObjectSuppression.Completed
                     ? $"window-closed:{_charaSelectSceneObjectSuppression.StopReason}"
@@ -217,18 +232,25 @@ public sealed unsafe partial class TitleScreenBackgroundService
         return true;
     }
 
-    // READ-ONLY coverage follow-up の時計だけを進める（毎 pre-login フレームで呼ぶ。native 読取なし）。
-    // WRITE window 終了 + 未解決の non-deny sample あり + CoverageGap 未確定なら arm し、
-    // transition 確認 or 2500ms timeout で stop する。identity gate 待ちでも timeout は延長しない。
+    // selection-change イベントからの monotonic 経過 ms（未観測なら -1）。native 読取なし。
+    private long ComputeSelectionChangeElapsedMs()
+    {
+        var eventTick = _charaSelectSceneObjectSuppression.SelectionChangeEventTickMs;
+        return eventTick > 0 ? Math.Max(0L, Environment.TickCount64 - eventTick) : -1L;
+    }
+
+    // 最終診断の bounded 観測窓（= 2500ms READ-ONLY window）の時計だけを進める。
+    // 毎 pre-login フレームで呼ぶ。native 読取なし。1 回の選択変更 + WRITE window 終了で常に arm し、
+    // 2500ms 完走でのみ stop（旧 classifier が positive になっても早期停止しない）。
+    // identity gate 待ちでも timeout は延長しない。
     private void AdvanceFruCoverageFollowUpClock()
     {
         var st = _charaSelectSceneObjectSuppression;
 
         if (!st.CoverageFollowUpArmed
+            && _charaSelectSelectionChangeDelta.Armed
             && TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(
                 st.SelectionChangeReArmCount > 0,
-                st.ActiveNonDenyKeepPathSampleCount,
-                st.ActiveNonDenyKeepPathResolvedInactiveCount,
                 st.Completed))
         {
             st.ArmCoverageFollowUp(Environment.TickCount64);
@@ -242,15 +264,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var elapsedMs = Math.Max(0L, Environment.TickCount64 - st.CoverageFollowUpStartTickMs);
         st.RecordCoverageFollowUpElapsed(elapsedMs);
 
-        if (st.ActiveNonDenyKeepPathResolvedInactiveCount > 0)
-        {
-            st.StopCoverageFollowUp("coverage-confirmed");
-            return;
-        }
-
         if (elapsedMs >= TitleBackgroundCharaSelectSceneObjectSuppressionLogic.CoverageFollowUpDurationMs)
         {
             st.StopCoverageFollowUp("followup-timeout");
+            _charaSelectSelectionChangeDelta.MarkWindowComplete();
         }
     }
 
@@ -273,24 +290,156 @@ public sealed unsafe partial class TitleScreenBackgroundService
             if (!TryResolveAuthorizedFruActiveLayout(candidate, out var activeLayout, out var gate))
             {
                 st.RecordGateStatus($"coverage-followup:{gate}");
+                _charaSelectSelectionChangeDelta.RecordGateBlockedPass();
                 return;
             }
+
+            var elapsedMs = ComputeSelectionChangeElapsedMs();
 
             st.BeginCoverageFollowUpPass();
             ScanCoverageFollowUpSampledPaths(activeLayout);
             st.EndCoverageFollowUpPass();
+
+            // 最終診断: 同じ authorized フレームで eligible SharedGroup の count-delta と typed VFX delta を
+            // READ-ONLY 観測する（active 切替なし・deny 変更なし・VFX write なし・pointer 保持なし）。
+            _charaSelectSelectionChangeDelta.BeginSharedGroupPass();
+            var sgOk = ScanSelectionChangeDeltaSharedGroups(activeLayout);
+            _charaSelectSelectionChangeDelta.FinishSharedGroupPass(sgOk, elapsedMs);
+
+            _charaSelectSelectionChangeDelta.BeginVfxPass();
+            var vfxOk = ScanSelectionChangeDeltaVfx(activeLayout);
+            _charaSelectSelectionChangeDelta.FinishVfxPass(vfxOk);
         }
         catch (Exception ex)
         {
             // fail closed: 例外時は何も観測せず戻る。native write は元々一切行わない。
             st.RecordFailure($"coverage-followup-scan:{ex.GetType().Name}");
+            _charaSelectSelectionChangeDelta.RecordReadFailure();
             return;
         }
+    }
 
-        if (st.ActiveNonDenyKeepPathResolvedInactiveCount > 0)
+    // 最終診断: eligible SharedGroup path（SharedGroup + non-deny + 非 KeepPathToken）の
+    // active-instance 数をこの 1 パスで数える。READ-ONLY（GetPrimaryPath / IsActive のみ）。
+    // 戻り値 = SharedGroup map を最後まで走査できたか（partial/failed なら false で 0 を合成させない）。
+    private bool ScanSelectionChangeDeltaSharedGroups(LayoutManager* activeLayout)
+    {
+        if (!activeLayout->InstancesByType.TryGetValuePointer(InstanceType.SharedGroup, out var innerMapPtr)
+            || innerMapPtr == null)
         {
-            st.StopCoverageFollowUp("coverage-confirmed");
+            return false;
         }
+
+        var innerMap = innerMapPtr->Value;
+        if (innerMap == null)
+        {
+            return false;
+        }
+
+        foreach (var entry in *innerMap)
+        {
+            var instance = entry.Item2.Value;
+            if (instance == null)
+            {
+                continue;
+            }
+
+            string primaryPath;
+            try
+            {
+                var cptr = instance->GetPrimaryPath();
+                primaryPath = cptr.HasValue ? cptr.ToString() : string.Empty;
+            }
+            catch (Exception ex)
+            {
+                _charaSelectSelectionChangeDelta.RecordReadFailure();
+                _charaSelectSceneObjectSuppression.RecordFailure($"delta-sg-path:{ex.GetType().Name}");
+                continue;
+            }
+
+            if (!TitleBackgroundCharaSelectSceneObjectSuppressionLogic.IsEligibleDeltaSharedGroupPath(primaryPath))
+            {
+                continue;
+            }
+
+            bool isActive;
+            try
+            {
+                isActive = instance->IsActive;
+            }
+            catch (Exception ex)
+            {
+                _charaSelectSelectionChangeDelta.RecordReadFailure();
+                _charaSelectSceneObjectSuppression.RecordFailure($"delta-sg-active:{ex.GetType().Name}");
+                continue;
+            }
+
+            _charaSelectSelectionChangeDelta.RecordSharedGroupInstance(
+                TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SanitizeGameAssetPathForDiagnostics(primaryPath),
+                isActive);
+        }
+
+        return true;
+    }
+
+    // 最終診断: InstanceType.Vfx を READ-ONLY 観測する。既存 ScanVfxInventory と同じ typed read だけを使う
+    // （Id.InstanceKey / SubId / IsActive / GetPrimaryPath / IsPrimaryLoaded / GetGraphics()!=null）。
+    // VFX write は 1 件も行わない。戻り値 = Vfx map を最後まで走査できたか。
+    private bool ScanSelectionChangeDeltaVfx(LayoutManager* activeLayout)
+    {
+        if (!activeLayout->InstancesByType.TryGetValuePointer(InstanceType.Vfx, out var innerMapPtr)
+            || innerMapPtr == null)
+        {
+            return false;
+        }
+
+        var innerMap = innerMapPtr->Value;
+        if (innerMap == null)
+        {
+            return false;
+        }
+
+        var scanned = 0;
+        foreach (var entry in *innerMap)
+        {
+            if (scanned >= TitleBackgroundSelectionChangeDeltaLogic.MaxVfxScanEntries)
+            {
+                break;
+            }
+
+            var instance = entry.Item2.Value;
+            if (instance == null)
+            {
+                continue;
+            }
+
+            scanned++;
+            try
+            {
+                var subId = instance->SubId;
+                var instanceKey = instance->Id.InstanceKey;
+                var isActive = instance->IsActive;
+                var cptr = instance->GetPrimaryPath();
+                var primaryPath = cptr.HasValue ? cptr.ToString() : string.Empty;
+                var isPrimaryLoaded = instance->IsPrimaryLoaded();
+                var hasGraphicsObject = instance->GetGraphics() != null;
+
+                _charaSelectSelectionChangeDelta.RecordVfxInstance(
+                    TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(instanceKey, subId),
+                    isActive,
+                    isPrimaryLoaded,
+                    hasGraphicsObject,
+                    TitleBackgroundCharaSelectVfxInventoryLogic.HashPath(primaryPath),
+                    primaryPath);
+            }
+            catch (Exception ex)
+            {
+                _charaSelectSelectionChangeDelta.RecordReadFailure();
+                _charaSelectSceneObjectSuppression.RecordFailure($"delta-vfx:{ex.GetType().Name}");
+            }
+        }
+
+        return true;
     }
 
     // sampled non-deny path の instance だけを READ-ONLY 観測する。
@@ -352,18 +501,20 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     // SharedGroup instance を走査し、deny 判定のものを bounded に SetActive(false) する。
     // pointer はこの呼び出し内だけで使う。既に inactive なものは write しない（idempotent）。
-    private void SuppressSharedGroups(LayoutManager* activeLayout)
+    // 戻り値 = SharedGroup map を最後まで走査できたか（最終診断の count-delta が partial pass で
+    // 0 を合成しないための valid フラグ。suppression の write / stable 判定挙動は変更なし）。
+    private bool SuppressSharedGroups(LayoutManager* activeLayout)
     {
         if (!activeLayout->InstancesByType.TryGetValuePointer(InstanceType.SharedGroup, out var innerMapPtr)
             || innerMapPtr == null)
         {
-            return;
+            return false;
         }
 
         var innerMap = innerMapPtr->Value;
         if (innerMap == null)
         {
-            return;
+            return false;
         }
 
         foreach (var entry in *innerMap)
@@ -393,17 +544,21 @@ public sealed unsafe partial class TitleScreenBackgroundService
             var decision = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.Evaluate(primaryPath, true);
             if (decision.Verdict != TitleBackgroundSceneObjectSuppressionVerdict.Suppress)
             {
-                // Phase A coverage 証拠（deny token 非該当 = "no-deny-token" の SharedGroup のみ。keep-token
-                // 一致の花畑 / 床 / 遠景 / 照明は対象外）。ここでは write を一切しない。deny list も変更しない。
+                // deny token 非該当（"no-deny-token"）の SharedGroup のみ。ここでは write を一切しない。
+                // deny list / Evaluate / KeepPathTokens は変更しない。
                 if (decision.Verdict == TitleBackgroundSceneObjectSuppressionVerdict.Keep
                     && string.Equals(decision.Reason, "no-deny-token", StringComparison.Ordinal))
                 {
                     try
                     {
+                        var nonDenyActive = instance->IsActive;
+                        var sanitizedDiag = TitleBackgroundCharaSelectSceneObjectSuppressionLogic
+                            .SanitizeGameAssetPathForDiagnostics(primaryPath);
+
                         if (_charaSelectSceneObjectSuppression.CapturingFirstReArmedPass)
                         {
                             // 最初の re-arm パス: active な非-deny 構造 SharedGroup の path を bounded に採取。
-                            if (instance->IsActive)
+                            if (nonDenyActive)
                             {
                                 _charaSelectSceneObjectSuppression.RecordActiveNonDenyKeepPath(primaryPath);
                             }
@@ -411,8 +566,16 @@ public sealed unsafe partial class TitleScreenBackgroundService
                         else if (_charaSelectSceneObjectSuppression.ShouldFollowUpNonDenyKeepPaths)
                         {
                             // 後続パス（同一 bounded window 内）: 採取済み path が active -> inactive したかだけを
-                            // read-only で確認する。少なくとも 1 つ遷移すれば CoverageGap 判定の材料になる。
-                            _charaSelectSceneObjectSuppression.RecordNonDenyKeepPathFollowUp(primaryPath, instance->IsActive);
+                            // read-only で確認する。
+                            _charaSelectSceneObjectSuppression.RecordNonDenyKeepPathFollowUp(primaryPath, nonDenyActive);
+                        }
+
+                        // 最終診断 (review 5521774559 A): eligible SharedGroup（非 keep-token）の
+                        // active-instance 数をこの WRITE scan で数える（新しい native scan は増やさない）。
+                        if (sanitizedDiag.Length != 0
+                            && !TitleBackgroundSelectionChangeDeltaLogic.MatchesKnownKeepToken(sanitizedDiag))
+                        {
+                            _charaSelectSelectionChangeDelta.RecordSharedGroupInstance(sanitizedDiag, nonDenyActive);
                         }
                     }
                     catch (Exception ex)
@@ -473,6 +636,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 _charaSelectSceneObjectSuppression.RecordFailure($"set-active:{ex.GetType().Name}");
             }
         }
+
+        return true;
     }
 
     // Phase A UX gap の最小修正。選択変更が 1 回観測され、その分類が確定した / bounded window が終了した /
@@ -501,36 +666,44 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var eventTick = suppression.SelectionChangeEventTickMs;
         var elapsedMs = eventTick > 0 ? Math.Max(0L, Environment.TickCount64 - eventTick) : -1L;
 
-        // WRITE window が stable になっただけでは、READ-ONLY coverage follow-up が pending なら publish しない。
+        // 最終診断が armed なら、旧 classifier が positive になっても早期 publish せず、
+        // bounded 観測窓（2500ms）が terminal / session end になるまで待つ。
         if (!TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
                 selectionChangeClass,
                 suppression.Completed,
                 elapsedMs,
                 sessionEnding,
                 suppression.ActiveNonDenyKeepPathSampleCount,
-                suppression.CoverageFollowUpTerminal))
+                suppression.CoverageFollowUpTerminal,
+                _charaSelectSelectionChangeDelta.Armed,
+                _charaSelectSelectionChangeDelta.Complete))
         {
             return;
         }
 
         var trigger = sessionEnding
             ? "session-end"
-            : selectionChangeClass != TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence
-                ? "classified"
-                : suppression.CoverageFollowUpTerminal
-                    ? $"coverage-followup:{suppression.CoverageFollowUpStopReason}"
-                    : suppression.Completed
-                        ? "window-closed"
-                        : "timeout";
+            : _charaSelectSelectionChangeDelta.Armed
+                ? $"final:{_charaSelectSelectionChangeDelta.Outcome}"
+                : selectionChangeClass != TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence
+                    ? "classified"
+                    : suppression.CoverageFollowUpTerminal
+                        ? $"coverage-followup:{suppression.CoverageFollowUpStopReason}"
+                        : suppression.Completed
+                            ? "window-closed"
+                            : "timeout";
 
         string report;
         try
         {
+            var reportLines = suppression.BuildDiagnosticLines(candidateId, true)
+                .Concat(_charaSelectSelectionChangeDelta.BuildFinalDiagnosticLines())
+                .ToArray();
             report = TitleBackgroundSelectionChangeReportBuilder.Build(
                 DateTimeOffset.Now,
                 candidateId,
                 trigger,
-                suppression.BuildDiagnosticLines(candidateId, true).ToArray());
+                reportLines);
         }
         catch (Exception ex)
         {

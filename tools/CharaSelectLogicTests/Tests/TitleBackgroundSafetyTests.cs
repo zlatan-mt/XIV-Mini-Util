@@ -9418,46 +9418,49 @@ Test(591, "MUST FIX (review 5097939613): coverage follow-up aggregates per-path 
         && resolvedWhenAllInactive && notResolvedWhenUnobserved;
 });
 
-Test(592, "Phase A UX: SelectionChangeReportReady - positive class immediate; InsufficientEvidence with samples waits for the read-only coverage follow-up, else window-close/timeout; session end always", () =>
+Test(592, "Phase A UX: SelectionChangeReportReady - when the final delta diagnostic is armed, publish waits for the bounded window terminal / session end, ignoring the old classifier", () =>
 {
-    static bool Ready(TitleBackgroundSceneObjectSelectionChangeClass c, bool completed, long elapsedMs, bool sessionEnding, int sample, bool followUpTerminal)
-        => TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(c, completed, elapsedMs, sessionEnding, sample, followUpTerminal);
+    static bool Ready(
+        TitleBackgroundSceneObjectSelectionChangeClass c, bool completed, long elapsedMs, bool sessionEnding,
+        int sample, bool followUpTerminal, bool finalArmed, bool finalComplete)
+        => TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
+            c, completed, elapsedMs, sessionEnding, sample, followUpTerminal, finalArmed, finalComplete);
 
     var timeout = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportTimeoutMs;
     var insufficient = TitleBackgroundSceneObjectSelectionChangeClass.InsufficientEvidence;
+    var coverageGap = TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap;
 
-    // session end is a hard stop regardless of class / follow-up state.
+    // session end is a hard stop regardless of everything.
     var sessionEndAlways =
-        Ready(insufficient, false, 0, true, 12, false)
-        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap, false, 0, true, 0, false);
+        Ready(insufficient, false, 0, true, 12, false, true, false)
+        && Ready(coverageGap, false, 0, true, 0, false, false, false);
 
-    // any positive classification is stable enough to hand off immediately.
-    var positiveImmediate =
-        Ready(TitleBackgroundSceneObjectSelectionChangeClass.TimingGap, false, 10, false, 0, false)
-        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap, false, 10, false, 5, false)
-        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.DeactivationSemantics, false, 10, false, 0, false);
+    // final diagnostic armed: even a positive old class does NOT publish early; only window terminal does.
+    var finalArmedWaitsForWindow =
+        !Ready(coverageGap, true, timeout + 1, false, 0, true, /*finalArmed*/ true, /*finalComplete*/ false)
+        && !Ready(insufficient, true, timeout + 1, false, 12, true, true, false)
+        && Ready(insufficient, true, 0, false, 12, false, /*finalArmed*/ true, /*finalComplete*/ true)
+        && Ready(coverageGap, false, 0, false, 0, false, true, true);
 
-    // InsufficientEvidence WITH unresolved non-deny samples: WRITE-window stable alone is not enough;
-    // publish only once the read-only coverage follow-up window is terminal.
-    var samplesWaitForFollowUp =
-        !Ready(insufficient, true, timeout + 1, false, 12, false)
-        && Ready(insufficient, true, 0, false, 12, true);
+    // final diagnostic NOT armed: legacy behaviour (positive class immediate; samples wait for follow-up).
+    var legacyPositiveImmediate =
+        Ready(TitleBackgroundSceneObjectSelectionChangeClass.TimingGap, false, 10, false, 0, false, false, false)
+        && Ready(TitleBackgroundSceneObjectSelectionChangeClass.DeactivationSemantics, false, 10, false, 0, false, false, false);
+    var legacySamplesWaitForFollowUp =
+        !Ready(insufficient, true, timeout + 1, false, 12, false, false, false)
+        && Ready(insufficient, true, 0, false, 12, true, false, false);
+    var legacyNoSamples =
+        !Ready(insufficient, false, timeout - 1, false, 0, false, false, false)
+        && Ready(insufficient, true, 0, false, 0, false, false, false);
 
-    // InsufficientEvidence WITHOUT samples: old behaviour (WRITE-window close or the event timeout).
-    var noSamplesOldBehaviour =
-        !Ready(insufficient, false, timeout - 1, false, 0, false)
-        && Ready(insufficient, true, 0, false, 0, false)
-        && Ready(insufficient, false, timeout, false, 0, false);
-
-    // ShouldArmCoverageFollowUp gate.
+    // ShouldArmCoverageFollowUp: after one switch + WRITE-window completion, the bounded window always arms.
     var armGate =
-        TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(true, 12, 0, true)
-        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(true, 12, 0, false)
-        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(true, 0, 0, true)
-        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(true, 12, 1, true)
-        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(false, 12, 0, true);
+        TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(true, true)
+        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(true, false)
+        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(false, true);
 
-    return sessionEndAlways && positiveImmediate && samplesWaitForFollowUp && noSamplesOldBehaviour && armGate;
+    return sessionEndAlways && finalArmedWaitsForWindow
+        && legacyPositiveImmediate && legacySamplesWaitForFollowUp && legacyNoSamples && armGate;
 });
 
 Test(593, "Phase A UX: FRU selection-change report uses a dedicated file, keeps only fru.suppression.* lines, and never reuses the auto-check report", () =>
@@ -9585,7 +9588,7 @@ Test(595, "Phase A UX: READ-ONLY coverage follow-up runs after the WRITE window 
 
     // #2: the READ-ONLY follow-up window arms and its passes run AFTER Completed.
     var shouldArm = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.ShouldArmCoverageFollowUp(
-        s.SelectionChangeReArmCount > 0, s.ActiveNonDenyKeepPathSampleCount, s.ActiveNonDenyKeepPathResolvedInactiveCount, s.Completed);
+        s.SelectionChangeReArmCount > 0, s.Completed);
     s.ArmCoverageFollowUp(0);
     var armed = shouldArm && s.CoverageFollowUpArmed && s.CoverageFollowUpActive && !s.CoverageFollowUpTerminal;
 
@@ -9610,7 +9613,8 @@ Test(595, "Phase A UX: READ-ONLY coverage follow-up runs after the WRITE window 
     var allResolved = s.ActiveNonDenyKeepPathResolvedInactiveCount == 3
         && s.SelectionChangeClass == TitleBackgroundSceneObjectSelectionChangeClass.CoverageGap;
     var reportReadyOnCoverageGap = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
-        s.SelectionChangeClass, s.Completed, 999, false, s.ActiveNonDenyKeepPathSampleCount, s.CoverageFollowUpTerminal);
+        s.SelectionChangeClass, s.Completed, 999, false, s.ActiveNonDenyKeepPathSampleCount, s.CoverageFollowUpTerminal,
+        finalDiagnosticArmed: false, finalDiagnosticComplete: false);
 
     var lines = s.BuildDiagnosticLines("custom:fru-clear-stage", true).ToArray();
     var diagOk = lines.Contains("fru.suppression.selectionChange.followUp.armed=True")
@@ -9659,7 +9663,8 @@ Test(596, "Phase A UX: coverage follow-up 2500ms timeout leaves class Insufficie
     t.ArmCoverageFollowUp(0);
     // report is NOT ready while the follow-up window is still running (write-window stable alone is insufficient).
     var notReadyWhileRunning = !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
-        t.SelectionChangeClass, t.Completed, 100_000, false, t.ActiveNonDenyKeepPathSampleCount, t.CoverageFollowUpTerminal);
+        t.SelectionChangeClass, t.Completed, 100_000, false, t.ActiveNonDenyKeepPathSampleCount, t.CoverageFollowUpTerminal,
+        finalDiagnosticArmed: false, finalDiagnosticComplete: false);
     for (var i = 1; i <= 3; i++)
     {
         t.RecordCoverageFollowUpElapsed(600 * i);
@@ -9677,7 +9682,8 @@ Test(596, "Phase A UX: coverage follow-up 2500ms timeout leaves class Insufficie
         && t.CoverageFollowUpElapsedMs == dur
         && t.CoverageFollowUpPassCount == 3;
     var timeoutReportReady = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
-        t.SelectionChangeClass, t.Completed, -1, false, t.ActiveNonDenyKeepPathSampleCount, t.CoverageFollowUpTerminal);
+        t.SelectionChangeClass, t.Completed, -1, false, t.ActiveNonDenyKeepPathSampleCount, t.CoverageFollowUpTerminal,
+        finalDiagnosticArmed: false, finalDiagnosticComplete: false);
 
     // --- session end: safe stop + report ready regardless of the follow-up window ---
     var e = StableWithSamples(11);
@@ -9689,7 +9695,8 @@ Test(596, "Phase A UX: coverage follow-up 2500ms timeout leaves class Insufficie
         && e.CoverageFollowUpElapsedMs == 300
         && e.CoverageFollowUpTerminal;
     var sessionEndReportReady = TitleBackgroundCharaSelectSceneObjectSuppressionLogic.SelectionChangeReportReady(
-        e.SelectionChangeClass, e.Completed, 50, sessionEnding: true, e.ActiveNonDenyKeepPathSampleCount, e.CoverageFollowUpTerminal);
+        e.SelectionChangeClass, e.Completed, 50, sessionEnding: true, e.ActiveNonDenyKeepPathSampleCount, e.CoverageFollowUpTerminal,
+        finalDiagnosticArmed: false, finalDiagnosticComplete: false);
 
     e.Reset();
     var clearedOnReset = !e.CoverageFollowUpArmed && !e.CoverageFollowUpActive
@@ -9776,6 +9783,265 @@ Test(597, "Phase A UX: coverage follow-up clock advances with no native reads / 
 
     return clockNoNativeReads && scanGateFirst && identityInsideExceptionBoundary
         && scanReadOnly && sessionEndOrder && writePathIntact;
+});
+
+Test(598, "Phase A final diagnostic: keep-token exclusion drops _flo/_lig from the eligible SharedGroup candidate set without changing Evaluate() suppression", () =>
+{
+    static TitleBackgroundSceneObjectSuppressionVerdict V(string p)
+        => TitleBackgroundCharaSelectSceneObjectSuppressionLogic.Evaluate(p, true).Verdict;
+
+    const string flo = "bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a6_flo00.sgb";
+    const string lig = "bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a1_lig02.sgb";
+    const string zon = "bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a4_zon11.sgb";
+    const string gmc = "bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_a2_gmc01.sgb";
+
+    // Evaluate() suppression semantics are unchanged: gmc still Suppress, flo/lig/zon still Keep.
+    var evaluateUnchanged =
+        V(gmc) == TitleBackgroundSceneObjectSuppressionVerdict.Suppress
+        && V(flo) == TitleBackgroundSceneObjectSuppressionVerdict.Keep
+        && V(lig) == TitleBackgroundSceneObjectSuppressionVerdict.Keep
+        && V(zon) == TitleBackgroundSceneObjectSuppressionVerdict.Keep;
+
+    // diagnostic-only keep-token detector.
+    var keepTokenDetector =
+        TitleBackgroundSelectionChangeDeltaLogic.MatchesKnownKeepToken(flo)
+        && TitleBackgroundSelectionChangeDeltaLogic.MatchesKnownKeepToken(lig)
+        && !TitleBackgroundSelectionChangeDeltaLogic.MatchesKnownKeepToken(zon)
+        && !TitleBackgroundSelectionChangeDeltaLogic.MatchesKnownKeepToken("")
+        && !TitleBackgroundSelectionChangeDeltaLogic.MatchesKnownKeepToken(null);
+
+    // eligible delta path = SharedGroup + no-deny-token + not a known keep token.
+    var eligibility =
+        TitleBackgroundCharaSelectSceneObjectSuppressionLogic.IsEligibleDeltaSharedGroupPath(zon)
+        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.IsEligibleDeltaSharedGroupPath(flo)
+        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.IsEligibleDeltaSharedGroupPath(lig)
+        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.IsEligibleDeltaSharedGroupPath(gmc)   // deny-covered
+        && !TitleBackgroundCharaSelectSceneObjectSuppressionLogic.IsEligibleDeltaSharedGroupPath("plugin/local/x.sgb"); // not a game asset
+
+    return evaluateUnchanged && keepTokenDetector && eligibility;
+});
+
+Test(599, "Phase A final diagnostic: SharedGroup count-delta tracker detects 2->1, 0->1->0, appear/disappear, same-count stability; a partial pass never synthesises disappearance", () =>
+{
+    static TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState Armed()
+    {
+        var d = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+        // pre-re-arm ordinary pass establishes the baseline: pathA=2 active, pathB=0 active (present), pathC absent.
+        d.BeginSharedGroupPass();
+        d.RecordSharedGroupInstance("bg/a/pa.sgb", true);
+        d.RecordSharedGroupInstance("bg/a/pa.sgb", true);
+        d.RecordSharedGroupInstance("bg/a/pb.sgb", false);
+        d.FinishSharedGroupPass(valid: true, elapsedMs: -1);
+        d.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+        return d;
+    }
+
+    // pathA 2 -> 1 (count delta), pathB 0 -> 1 -> 0 (transient), pathC appears (0 -> 1), pathD stable (never present).
+    var d1 = Armed();
+    // pass 1: A=1, B=1, C=1
+    d1.BeginSharedGroupPass();
+    d1.RecordSharedGroupInstance("bg/a/pa.sgb", true);
+    d1.RecordSharedGroupInstance("bg/a/pb.sgb", true);
+    d1.RecordSharedGroupInstance("bg/a/pc.sgb", true);
+    d1.FinishSharedGroupPass(valid: true, elapsedMs: 100);
+    // pass 2: A=1, B=0, C=1
+    d1.BeginSharedGroupPass();
+    d1.RecordSharedGroupInstance("bg/a/pa.sgb", true);
+    d1.RecordSharedGroupInstance("bg/a/pb.sgb", false);
+    d1.RecordSharedGroupInstance("bg/a/pc.sgb", true);
+    d1.FinishSharedGroupPass(valid: true, elapsedMs: 200);
+    d1.MarkWindowComplete();
+
+    var lines1 = d1.BuildFinalDiagnosticLines().ToArray();
+    // A (2->1), B (0->1->0) and C (appeared) all changed; tracked >= 3.
+    var deltasDetected = d1.SharedGroupChangedCount == 3
+        && d1.SharedGroupValidPassCount == 2
+        && lines1.Any(l => l.Contains("path=bg/a/pa.sgb baseline=2", StringComparison.Ordinal) && l.Contains("min=1", StringComparison.Ordinal))
+        && lines1.Any(l => l.Contains("path=bg/a/pb.sgb baseline=0", StringComparison.Ordinal) && l.Contains("max=1", StringComparison.Ordinal) && l.Contains("final=0", StringComparison.Ordinal))
+        && lines1.Any(l => l.Contains("path=bg/a/pc.sgb baseline=0", StringComparison.Ordinal) && l.Contains("final=1", StringComparison.Ordinal))
+        && lines1.Contains("fru.suppression.selectionChange.final.outcome=sharedgroup-delta");
+
+    // same-count stability: baseline pathA=2 stays 2 for two passes -> no change.
+    var d2 = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    d2.BeginSharedGroupPass();
+    d2.RecordSharedGroupInstance("bg/a/pa.sgb", true);
+    d2.RecordSharedGroupInstance("bg/a/pa.sgb", true);
+    d2.FinishSharedGroupPass(valid: true, elapsedMs: -1);
+    d2.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+    for (var i = 0; i < 3; i++)
+    {
+        d2.BeginSharedGroupPass();
+        d2.RecordSharedGroupInstance("bg/a/pa.sgb", true);
+        d2.RecordSharedGroupInstance("bg/a/pa.sgb", true);
+        d2.FinishSharedGroupPass(valid: true, elapsedMs: 100 * i);
+    }
+    d2.MarkWindowComplete();
+    var stableNoDelta = d2.SharedGroupChangedCount == 0
+        && d2.SharedGroupValidPassCount == 3;
+
+    // disappearance: baseline pathA present, then a COMPLETE valid pass with no pathA -> current 0 -> changed.
+    var d3 = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    d3.BeginSharedGroupPass();
+    d3.RecordSharedGroupInstance("bg/a/pa.sgb", true);
+    d3.FinishSharedGroupPass(valid: true, elapsedMs: -1);
+    d3.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+    d3.BeginSharedGroupPass();               // valid pass, pathA not observed
+    d3.FinishSharedGroupPass(valid: true, elapsedMs: 50);
+    var disappearanceDetected = d3.SharedGroupChangedCount == 1
+        && d3.BuildFinalDiagnosticLines().Any(l => l.Contains("path=bg/a/pa.sgb baseline=1", StringComparison.Ordinal) && l.Contains("final=0", StringComparison.Ordinal));
+
+    // a partial/failed pass must NOT synthesise disappearance (valid:false is dropped).
+    var d4 = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    d4.BeginSharedGroupPass();
+    d4.RecordSharedGroupInstance("bg/a/pa.sgb", true);
+    d4.FinishSharedGroupPass(valid: true, elapsedMs: -1);
+    d4.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+    d4.BeginSharedGroupPass();
+    d4.FinishSharedGroupPass(valid: false, elapsedMs: 50);   // partial scan -> ignored
+    var partialNoSynthesis = d4.SharedGroupChangedCount == 0 && d4.SharedGroupValidPassCount == 0;
+
+    return deltasDetected && stableNoDelta && disappearanceDetected && partialNoSynthesis;
+});
+
+Test(600, "Phase A final diagnostic: typed VFX delta compares managed snapshots and detects appear/disappear + active/loaded/gfx/path changes; a partial pass never synthesises disappearance", () =>
+{
+    static TitleBackgroundVfxDetailEntry E(uint key, bool active, bool loaded, bool gfx, uint hash)
+        => new(((ulong)key << 32), key, 0u,
+            TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(key, 0u),
+            active, loaded, gfx, hash, $"bg/vfx/{key}.avfx");
+
+    var baseline = new[]
+    {
+        E(1, active: true, loaded: true, gfx: true, hash: 0xAAu),   // will change active
+        E(2, active: false, loaded: true, gfx: true, hash: 0xBBu),  // will change loaded + gfx + path
+        E(3, active: true, loaded: true, gfx: true, hash: 0xCCu),   // will disappear
+        E(4, active: true, loaded: true, gfx: true, hash: 0xDDu),   // unchanged
+    };
+
+    var d = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    d.ArmFromReArm(baseline);
+
+    d.BeginVfxPass();
+    d.RecordVfxInstance(TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(1, 0u), isActive: false, loaded: true, gfx: true, pathHash: 0xAAu, "bg/vfx/1.avfx");
+    d.RecordVfxInstance(TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(2, 0u), isActive: false, loaded: false, gfx: false, pathHash: 0x99u, "bg/vfx/2b.avfx");
+    d.RecordVfxInstance(TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(4, 0u), isActive: true, loaded: true, gfx: true, pathHash: 0xDDu, "bg/vfx/4.avfx");
+    d.RecordVfxInstance(TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(5, 0u), isActive: true, loaded: true, gfx: true, pathHash: 0xEEu, "bg/vfx/5.avfx"); // appeared
+    d.FinishVfxPass(valid: true);
+    d.MarkWindowComplete();
+
+    var lines = d.BuildFinalDiagnosticLines().ToArray();
+    // uuid1 active changed, uuid2 loaded+gfx+path changed, uuid3 disappeared, uuid5 appeared; uuid4 unchanged.
+    var detected = d.VfxChangedCount == 4
+        && d.VfxValidPassCount == 1
+        && d.VfxBaselineCount == 4
+        && lines.Contains("fru.suppression.selectionChange.final.vfxChangedCount=4")
+        && lines.Any(l => l.Contains($"uuid={TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(1, 0u)} change=active", StringComparison.Ordinal))
+        && lines.Any(l => l.Contains("change=loaded+gfx+path", StringComparison.Ordinal))
+        && lines.Any(l => l.Contains($"uuid={TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(3, 0u)} change=disappeared", StringComparison.Ordinal))
+        && lines.Any(l => l.Contains($"uuid={TitleBackgroundCharaSelectVfxInventoryLogic.DeriveTitleEditUuid(5, 0u)} change=appeared", StringComparison.Ordinal));
+
+    // partial VFX pass -> no disappearance synthesised.
+    var d2 = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    d2.ArmFromReArm(baseline);
+    d2.BeginVfxPass();
+    d2.FinishVfxPass(valid: false);
+    var partialNoSynthesis = d2.VfxChangedCount == 0 && d2.VfxValidPassCount == 0;
+
+    return detected && partialNoSynthesis;
+});
+
+Test(601, "Phase A final diagnostic: outcome precedence SharedGroup > VFX > no-safe-layout-delta > incomplete; report keys come from the single-source list", () =>
+{
+    static string O(int sg, int vfx, bool complete, int sgPasses, int vfxPasses, int readFail)
+        => TitleBackgroundSelectionChangeDeltaLogic.ClassifyFinalOutcome(sg, vfx, complete, sgPasses, vfxPasses, readFail);
+
+    var precedence =
+        O(1, 1, true, 5, 5, 0) == "sharedgroup-delta"          // SG wins even if VFX also changed
+        && O(0, 1, false, 0, 0, 0) == "vfx-delta"              // VFX wins when no SG delta
+        && O(0, 0, true, 3, 3, 0) == "no-safe-layout-delta"    // full valid observation, nothing changed
+        && O(0, 0, true, 0, 3, 0) == "incomplete"              // no valid SG pass
+        && O(0, 0, true, 3, 0, 0) == "incomplete"              // no valid VFX pass
+        && O(0, 0, true, 3, 3, 2) == "incomplete"              // read failures
+        && O(0, 0, false, 3, 3, 0) == "incomplete";            // window not complete
+
+    var d = new TitleBackgroundCharaSelectSelectionChangeDeltaRuntimeState();
+    d.ArmFromReArm(System.Array.Empty<TitleBackgroundVfxDetailEntry>());
+    d.MarkWindowComplete();
+    var emitted = d.BuildFinalDiagnosticLines().Select(l => l[..l.IndexOf('=')]).ToArray();
+    var everyEmittedListed = emitted.All(k => TitleBackgroundSelectionChangeDeltaLogic.DiagnosticKeys.Contains(k));
+    var hasCoreKeys = emitted.Contains("fru.suppression.selectionChange.final.outcome")
+        && emitted.Contains("fru.suppression.selectionChange.final.armed")
+        && emitted.Contains("fru.suppression.selectionChange.final.complete")
+        && emitted.Contains("fru.suppression.selectionChange.final.sharedGroupChangedCount")
+        && emitted.Contains("fru.suppression.selectionChange.final.vfxChangedCount")
+        && emitted.Contains("fru.suppression.selectionChange.final.readFailureCount")
+        && emitted.Contains("fru.suppression.selectionChange.final.gateBlockedPassCount");
+    // an unarmed tracker reports armed=False / outcome=not-run and Reset clears it.
+    d.Reset();
+    var resetClears = d.BuildFinalDiagnosticLines().Contains("fru.suppression.selectionChange.final.armed=False")
+        && d.BuildFinalDiagnosticLines().Contains("fru.suppression.selectionChange.final.outcome=not-run")
+        && !d.Armed && !d.Complete;
+
+    return precedence && everyEmittedListed && hasCoreKeys && resetClears;
+});
+
+Test(602, "Phase A final diagnostic: the VFX delta scan uses only the verified typed reads and no write; the WRITE suppression path and its identity gates are unchanged", () =>
+{
+    var root = FindRepositoryRoot();
+    var suppression = File.ReadAllText(Path.Combine(
+        root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.SceneObjectSuppression.cs"));
+
+    string Body(string signature)
+    {
+        var start = suppression.IndexOf(signature, StringComparison.Ordinal);
+        if (start < 0) return string.Empty;
+        var brace = suppression.IndexOf('{', start);
+        if (brace < 0) return string.Empty;
+        var depth = 0;
+        for (var i = brace; i < suppression.Length; i++)
+        {
+            if (suppression[i] == '{') depth++;
+            else if (suppression[i] == '}' && --depth == 0) return suppression[brace..(i + 1)];
+        }
+        return string.Empty;
+    }
+
+    var vfxScan = Body("private bool ScanSelectionChangeDeltaVfx(");
+    var sgScan = Body("private bool ScanSelectionChangeDeltaSharedGroups(");
+
+    // VFX delta scan: only the same typed reads ScanVfxInventory uses; absolutely no write ops.
+    var vfxTypedReadOnly = vfxScan.Length > 0
+        && vfxScan.Contains("instance->SubId", StringComparison.Ordinal)
+        && vfxScan.Contains("instance->Id.InstanceKey", StringComparison.Ordinal)
+        && vfxScan.Contains("instance->IsActive", StringComparison.Ordinal)
+        && vfxScan.Contains("instance->GetPrimaryPath()", StringComparison.Ordinal)
+        && vfxScan.Contains("instance->IsPrimaryLoaded()", StringComparison.Ordinal)
+        && vfxScan.Contains("instance->GetGraphics() != null", StringComparison.Ordinal)
+        && !vfxScan.Contains("SetActive", StringComparison.Ordinal)
+        && !vfxScan.Contains("vfunc", StringComparison.Ordinal)
+        && !vfxScan.Contains("Marshal.Write", StringComparison.Ordinal)
+        && !vfxScan.Contains("->TriggerIndex", StringComparison.Ordinal);
+
+    // SG delta scan: read-only (GetPrimaryPath + IsActive), no write / deny mutation.
+    var sgReadOnly = sgScan.Length > 0
+        && sgScan.Contains("instance->GetPrimaryPath()", StringComparison.Ordinal)
+        && sgScan.Contains("instance->IsActive", StringComparison.Ordinal)
+        && !sgScan.Contains("SetActive", StringComparison.Ordinal)
+        && !sgScan.Contains("TryConsumeWriteBudget", StringComparison.Ordinal);
+
+    // WRITE suppression path unchanged: deny match -> RecordMatched -> budget -> SetActive(false) -> readback.
+    var writeSuppress = Body("private bool SuppressSharedGroups(");
+    var writePathIntact = writeSuppress.Contains("RecordMatched(key)", StringComparison.Ordinal)
+        && writeSuppress.Contains("TryConsumeWriteBudget(key)", StringComparison.Ordinal)
+        && writeSuppress.Contains("instance->SetActive(false);", StringComparison.Ordinal)
+        && writeSuppress.Contains("RecordConfirmedInactive(key)", StringComparison.Ordinal)
+        // identity gate helper still holds the four ordered checks + authorized.
+        && suppression.Contains("gateStatus = \"active-layout-null\";", StringComparison.Ordinal)
+        && suppression.Contains("gateStatus = \"active-layout-not-ready\";", StringComparison.Ordinal)
+        && suppression.Contains("gateStatus = \"loaded-layout-territory-mismatch\";", StringComparison.Ordinal)
+        && suppression.Contains("gateStatus = \"loaded-layout-layer-mismatch\";", StringComparison.Ordinal);
+
+    return vfxTypedReadOnly && sgReadOnly && writePathIntact;
 });
 
     }

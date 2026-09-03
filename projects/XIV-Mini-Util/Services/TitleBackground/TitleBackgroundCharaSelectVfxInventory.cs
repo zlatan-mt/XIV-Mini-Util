@@ -324,6 +324,10 @@ internal sealed class TitleBackgroundCharaSelectVfxInventoryRuntimeState
     // 詳細診断ファイル側の最新（=最後に完了した pass）スナップショット件数。
     public int DetailSnapshotCount => _detailSnapshot.Count;
 
+    // 最新の（最後に完了した pass の）managed VFX スナップショット。selection-change 最終診断の
+    // VFX baseline に使う（raw pointer なし・read-only）。
+    public IReadOnlyList<TitleBackgroundVfxDetailEntry> DetailSnapshot => _detailSnapshot;
+
     // 詳細診断ファイルの状態: not-run / pending（arm 済み未書込）/ ready（snapshot あり未書込）/
     // empty（arm したが 0 件）/ written / write-failed。compact report にそのまま出す。
     public string DetailStatus { get; private set; } = "not-run";
