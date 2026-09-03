@@ -9324,14 +9324,13 @@ Test(590, "MUST FIX 2: coverage-gap needs a sampled non-deny SharedGroup confirm
         && unconfirmed.Any(l => l.StartsWith("fru.suppression.selectionChange.classReason=coverage-candidate-unconfirmed", StringComparison.Ordinal))
         && unconfirmed.Contains("fru.suppression.selectionChange.activeNonDenyKeepResolvedInactiveCount=0");
 
-    // a later pass in the same window observes p1 inactive -> transition confirmed -> CoverageGap.
+    // a later pass in the same window observes p1 with NO active instance -> transition confirmed -> CoverageGap.
     var confirmed = Sampled(11);
     var followUpEnabled = confirmed.ShouldFollowUpNonDenyKeepPaths;
     confirmed.BeginPass();
     confirmed.RecordScanned();
-    confirmed.RecordNonDenyKeepPathFollowUp(p1, isActive: true);  // still active -> not a transition
     confirmed.RecordNonDenyKeepPathFollowUp("bg/ex3/01_nvt_n4/shared/for_bg/sgbg_unsampled.sgb", isActive: false); // not sampled -> ignored
-    confirmed.RecordNonDenyKeepPathFollowUp(p1, isActive: false); // sampled + inactive -> transition
+    confirmed.RecordNonDenyKeepPathFollowUp(p1, isActive: false); // sampled, no active instance this pass -> transition
     confirmed.EndPass();
     var confirmedLines = Lines(confirmed);
     var becomesCoverageGap = followUpEnabled
@@ -9358,6 +9357,65 @@ Test(590, "MUST FIX 2: coverage-gap needs a sampled non-deny SharedGroup confirm
 
     return staysInsufficient && becomesCoverageGap && inertBeforeCapture && inertBeforeCaptureNoRecord
         && clearedOnNewGeneration;
+});
+
+Test(591, "MUST FIX (review 5097939613): coverage follow-up aggregates per-path per-pass; a pass with any active instance of a sampled path does not resolve it", () =>
+{
+    // one sampled primary path, backed by two in-game SharedGroup instances.
+    const string shared = "bg/ex3/01_nvt_n4/shared/for_bg/sgbg_n4gw_shared.sgb";
+
+    var st = new TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState();
+    st.ArmForGeneration(40);
+    st.NoteSelectionChangeReArm(40, 40, 100, 5);
+    st.ArmForGeneration(40, forceReArm: true);
+    st.MarkFirstReArmedPassStarting(30);
+    st.BeginPass();
+    st.RecordScanned();
+    st.RecordActiveNonDenyKeepPath(shared);
+    st.EndPass();
+    var sampledOnce = st.ActiveNonDenyKeepPathSampleCount == 1;
+
+    // follow-up pass 1: two instances of the same primary path - one inactive, one still active.
+    // per-path per-pass aggregation must NOT resolve while any instance of the path is active.
+    st.BeginPass();
+    st.RecordScanned();
+    st.RecordScanned();
+    st.RecordNonDenyKeepPathFollowUp(shared, isActive: false);
+    st.RecordNonDenyKeepPathFollowUp(shared, isActive: true);
+    st.EndPass();
+    var notResolvedWhileOneActive = st.ActiveNonDenyKeepPathResolvedInactiveCount == 0
+        && st.ShouldFollowUpNonDenyKeepPaths; // window still open, still chasing the transition
+    var stillInsufficient = st.BuildDiagnosticLines("custom:fru-clear-stage", true)
+        .Contains("fru.suppression.selectionChange.class=InsufficientEvidence");
+
+    // follow-up pass 2: every observed instance of the path is inactive -> now resolved -> CoverageGap.
+    st.BeginPass();
+    st.RecordScanned();
+    st.RecordScanned();
+    st.RecordNonDenyKeepPathFollowUp(shared, isActive: false);
+    st.RecordNonDenyKeepPathFollowUp(shared, isActive: false);
+    st.EndPass();
+    var resolvedWhenAllInactive = st.ActiveNonDenyKeepPathResolvedInactiveCount == 1
+        && st.BuildDiagnosticLines("custom:fru-clear-stage", true)
+            .Contains("fru.suppression.selectionChange.class=CoverageGap");
+
+    // a pass where the sampled path is not observed at all must not resolve it.
+    var st2 = new TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeState();
+    st2.ArmForGeneration(41);
+    st2.NoteSelectionChangeReArm(41, 41, 100, 5);
+    st2.ArmForGeneration(41, forceReArm: true);
+    st2.MarkFirstReArmedPassStarting(30);
+    st2.BeginPass();
+    st2.RecordScanned();
+    st2.RecordActiveNonDenyKeepPath(shared);
+    st2.EndPass();
+    st2.BeginPass();
+    st2.RecordScanned(); // sampled path not seen this pass
+    st2.EndPass();
+    var notResolvedWhenUnobserved = st2.ActiveNonDenyKeepPathResolvedInactiveCount == 0;
+
+    return sampledOnce && notResolvedWhileOneActive && stillInsufficient
+        && resolvedWhenAllInactive && notResolvedWhenUnobserved;
 });
 
     }

@@ -369,7 +369,8 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
     public IReadOnlyList<string> ActiveNonDenyKeepPaths => _activeNonDenyKeepPaths;
 
     // MUST FIX 2: 最初の re-arm パスで採った sanitized path のうち、同じ bounded window 内の
-    // read-only follow-up で active -> inactive の遷移を確認できたもの。
+    // read-only follow-up で「ある pass 全体を通じて active instance を 1 つも観測しなかった」ことを
+    // 確認できたもの。primary path を共有する別 instance が active なら resolved にしない。
     public int ActiveNonDenyKeepPathResolvedInactiveCount => _nonDenyKeepPathResolvedInactive.Count;
 
     // follow-up の read-only 観測を続けるべきか（最初のパス採取済み・window open・未解決が残っている）。
@@ -384,6 +385,10 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
     private int _passWrites;
     private readonly List<string> _activeNonDenyKeepPaths = [];
     private readonly HashSet<string> _nonDenyKeepPathResolvedInactive = new(StringComparer.Ordinal);
+    // follow-up の pass 単位・path 単位の一時集約（pass 終了時に畳み込んでクリア）。
+    // sanitized path だけを持ち、native pointer / address / instance identifier は保存しない。
+    private readonly HashSet<string> _followUpPassObserved = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _followUpPassAnyActive = new(StringComparer.Ordinal);
 
     private readonly List<string> _suppressedKeys = [];
     private readonly Dictionary<ulong, int> _writeAttempts = [];
@@ -467,6 +472,8 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         FirstReArmedPassStillActive = 0;
         _activeNonDenyKeepPaths.Clear();
         _nonDenyKeepPathResolvedInactive.Clear();
+        _followUpPassObserved.Clear();
+        _followUpPassAnyActive.Clear();
     }
 
     // 最初の re-arm パスの BeginPass 直前に呼ぶ（サービスが gate 通過を確認済みのとき）。
@@ -501,21 +508,45 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         _activeNonDenyKeepPaths.Add(sanitized);
     }
 
-    // MUST FIX 2: 後続パスの read-only follow-up。最初のパスで採った sanitized path が、同じ bounded
-    // window 内で active -> inactive したかだけを記録する。write は一切しない。deny list も変更しない。
-    // 最初のパスでは active な instance だけを採取しているため、後で inactive を観測した = 遷移確認。
+    // MUST FIX (review 5097939613): 後続パスの read-only follow-up は path 単位・pass 単位で集約する。
+    // scan は同じ primary path を共有する複数 instance を個別に渡してくる。ここでは pass 内で
+    // 「その path を観測したか」「active instance を 1 つでも見たか」だけを一時集約し、
+    // 実際の resolved-inactive 判定は pass 終了時（FoldNonDenyKeepFollowUpPass）に行う。
+    // write は一切しない。deny list も変更しない。native pointer / address / instance id は保存しない。
     public void RecordNonDenyKeepPathFollowUp(string? primaryPath, bool isActive)
     {
-        if (isActive || !ShouldFollowUpNonDenyKeepPaths)
+        if (!ShouldFollowUpNonDenyKeepPaths)
         {
             return;
         }
 
         var sanitized = SanitizeGameAssetPath(primaryPath);
-        if (sanitized.Length != 0 && _activeNonDenyKeepPaths.Contains(sanitized))
+        if (sanitized.Length == 0 || !_activeNonDenyKeepPaths.Contains(sanitized))
         {
-            _nonDenyKeepPathResolvedInactive.Add(sanitized);
+            return;
         }
+
+        _followUpPassObserved.Add(sanitized);
+        if (isActive)
+        {
+            _followUpPassAnyActive.Add(sanitized);
+        }
+    }
+
+    // pass 終了時に follow-up の一時集約を畳み込む。ある sampled path について、この pass で
+    // 観測した AND active instance を 1 つも見なかった場合だけ resolved-inactive にする。
+    private void FoldNonDenyKeepFollowUpPass()
+    {
+        foreach (var path in _followUpPassObserved)
+        {
+            if (!_followUpPassAnyActive.Contains(path))
+            {
+                _nonDenyKeepPathResolvedInactive.Add(path);
+            }
+        }
+
+        _followUpPassObserved.Clear();
+        _followUpPassAnyActive.Clear();
     }
 
     // 診断へ出すのはゲームアセットパス（bg/ ・ bgcommon/）だけ。fail-closed で他は空にする。
@@ -554,6 +585,8 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         FirstReArmedPassStillActive = 0;
         _activeNonDenyKeepPaths.Clear();
         _nonDenyKeepPathResolvedInactive.Clear();
+        _followUpPassObserved.Clear();
+        _followUpPassAnyActive.Clear();
     }
 
     // window がまだ書込を試みてよいか（bounded）。
@@ -575,6 +608,8 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         _passAlreadyInactive = 0;
         _passDirty = false;
         _passWrites = 0;
+        _followUpPassObserved.Clear();
+        _followUpPassAnyActive.Clear();
     }
 
     public void RecordScanned()
@@ -661,6 +696,7 @@ internal sealed class TitleBackgroundCharaSelectSceneObjectSuppressionRuntimeSta
         }
 
         CaptureFirstReArmedPassIfPending();
+        FoldNonDenyKeepFollowUpPass();
 
         var passClean = _passMatched > 0
             && _passAlreadyInactive == _passMatched
