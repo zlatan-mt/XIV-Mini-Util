@@ -25,25 +25,31 @@ A rare failure was reproduced once:
 - FRU background/scene override was visibly active;
 - selected character was not visible;
 - ordinary Dalamud log showed successful Character Select placement evidence, including repeated stable capture (`stableSamples=5`);
-- the dedicated PR #8 cold-start report was not produced, and expected `Cold-start diagnostic armed` evidence was absent from the available log.
+- the loaded dev plugin identified itself only as `XivMiniUtil.Dev v0.4.2.0`;
+- the available log contains no `Cold-start diagnostic armed` / recorder-init evidence and no dedicated PR #8 report.
 
-This is partial evidence only. It does not authorize an H1 owner migration fix, draw/camera fix, or other Phase B repair. The missing report is itself a Phase A defect: the recorder can miss the rare event it exists to diagnose.
+Important evidence limit: the log does **not** prove that the exact PR #8 diagnostic binary was deployed. Therefore the missing report must not yet be classified as a recorder arm bug; it can also be build/deployment mismatch. Phase A2 must make recorder presence and arm/skip state unambiguous.
+
+This evidence does not authorize an H1 owner migration fix, draw/camera fix, or other Phase B repair.
 
 ## Phase A2 — rare-event passive recorder hardening
 ### Objective
-Capture the first eligible pre-login FRU Character Select lifecycle without settings changes, button presses, preset re-selection, probe operations, or an intentional reproduction attempt.
+Capture the first eligible pre-login FRU Character Select lifecycle during normal use without settings changes, button presses, preset re-selection, probe operations, or an intentional reproduction attempt.
 
 ### Required behavior
-1. Preserve startup owner/config snapshot even if the diagnostic does not arm immediately.
-2. Record compact pointer-free startup arm result / skip reason.
-3. If startup arm was missed, permit a passive first-scene fallback arm when the first eligible pre-login FRU Character Select is reached, but only if OneClick/probe/config mutation state would not make evidence ambiguous.
-4. Observation is bounded/run-scoped and stops on login, Character Select session end, dispose, or timeout.
-5. Reuse existing service/update/diagnostic paths. No new native hook or generic logging framework.
-6. Auto-save and queue one compact report for clipboard; no manual diagnostic lookup.
+1. Emit one privacy-safe recorder-presence marker at plugin/service startup regardless of arm eligibility (for example `coldStart.recorderSchema=2`). This must not mutate runtime/config state.
+2. Preserve the startup owner/config snapshot even if the diagnostic does not arm immediately.
+3. Record compact startup arm result / skip or block reason.
+4. If startup arm was missed, permit a passive first-scene fallback arm when the first eligible pre-login FRU Character Select is reached, but only if OneClick/probe/config-mutation state would not make evidence ambiguous.
+5. Observation is bounded/run-scoped and stops on login, Character Select session end, dispose, or timeout.
+6. Reuse existing service/update/diagnostic paths. No new native hook or generic logging framework.
+7. Save a compact terminal report to a deterministic bounded/rolling diagnostic file so normal gameplay does not depend on reproducing the bug again. Avoid unbounded files or per-frame logging.
+8. Existing automatic clipboard handoff may be reused for anomalous/explicit diagnostic completion, but do not require repeated user actions or manual diagnostic-key lookup.
 
 ### Evidence
 Retain existing startup/scene/static-anchor/placement/V2 evidence and add only:
-- arm mode and startup skip/block reason;
+- recorder schema/presence;
+- arm mode (`startup` / `first-scene-fallback`) and startup skip/block reason;
 - first scene generation/owner;
 - resolver attempt/success counters and resolve source;
 - `DrawReady` at first valid resolve, ever-true flag, transition count;
@@ -80,13 +86,13 @@ Do not log/persist character names, ContentId, raw pointers/addresses, credentia
 
 ## Acceptance criteria — Phase A2
 1. Sync PR #8 branch with latest `main` before production edits without undoing v0.4.3 cleanup.
-2. Recorder cannot silently miss the first eligible pre-login FRU Character Select merely because startup arm did not occur.
-3. Startup snapshot remains available for H1 classification.
-4. Report explains arm mode/skip reason and includes draw-ready, actor-epoch, placement/write/readback evidence.
-5. Recorder mutates no config/candidate/camera/placement/scene/probe state.
-6. No raw identity/private output.
-7. Bounded completion on login/session-end/dispose/timeout.
-8. Automatic report save/copy with no additional user action.
+2. Logs/report can distinguish `recorder not present` from `present but not armed` and include a concrete arm/skip reason.
+3. Recorder cannot silently miss the first eligible pre-login FRU Character Select merely because startup arm did not occur.
+4. Startup snapshot remains available for H1 classification.
+5. Report includes draw-ready, actor-epoch, placement/write/readback evidence.
+6. Recorder mutates no config/candidate/camera/placement/scene/probe state.
+7. No raw identity/private output.
+8. Bounded completion on login/session-end/dispose/timeout and bounded file/history retention.
 9. No Phase B production behavior change without evidence.
 
 ## Validation
@@ -96,14 +102,19 @@ dotnet build projects/XIV-Mini-Util/XivMiniUtil.csproj
 git diff --check
 ```
 
-Add only focused tests for startup snapshot retention, arm skip reason, fallback eligibility/blocking, draw-ready/actor-epoch counters, bounded cleanup, and privacy-safe report output.
+Add only focused tests for recorder-presence/arm reason, startup snapshot retention, fallback eligibility/blocking, draw-ready/actor-epoch counters, bounded cleanup/retention, and privacy-safe report output.
 
-Real-game validation for Phase A2 is not "reproduce the bug again". Deploy the exact validated HEAD and return to normal use; the next naturally occurring failure should be captured automatically.
+Real-game validation for Phase A2 is **not** “reproduce the bug again”. Deploy the exact validated HEAD and return to normal use; the next naturally occurring failure should leave a usable report automatically.
 
-## Planning self-review
-1. Scope review: reuse PR #8; no duplicate PR, Phase B guess, release/UI work, or unrelated refactor.
-2. Safety/evidence review: passive only, bounded, no pointer/ContentId/private output, no new hook, safety contracts preserved.
-3. Integration/current-state review: stale v0.4.2/blocked-PR-#7 assumptions removed; latest-main sync mandatory; removed diagnostics must not be reintroduced.
+## Planning self-review — 3 passes
+### Review 1 — scope/current state
+Found stale assumptions from the original task: v0.4.2 and blocked PR #7 are no longer current. Revised the plan to use v0.4.3 `main`, reuse PR #8 only, and require latest-main synchronization before production edits.
+
+### Review 2 — evidence quality
+Found an overclaim: absence of the cold-start report does not prove the recorder failed to arm because the Dalamud log only identifies `XivMiniUtil.Dev v0.4.2.0`, not exact PR #8 HEAD. Revised Phase A2 to emit an unconditional recorder-presence/schema marker and explicit arm/skip reasons before diagnosing an arm bug.
+
+### Review 3 — safety/operability
+Rejected deliberate reproduction, unbounded logging, new hooks, broad visual fixes, and per-login heavy diagnostics. Revised the recorder to remain passive/bounded, use transition counters and a bounded terminal report, preserve all existing safety gates, and defer Phase B until evidence identifies the failing stage.
 
 ## Review / merge
 Same task spec + branch + Draft PR #8 throughout. No replacement PR. Final implementation review is ChatGPT/manual exact-HEAD review; Sol Review is not used. Do not merge Phase B until root cause and real-game behavior are established.
