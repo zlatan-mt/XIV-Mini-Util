@@ -15,8 +15,7 @@ Canonical repository: `zlatan-mt/XIV-Mini-Util`.
 - platform: Dalamud API 15 / .NET 10
 - task branch: `task/cold-start-character-select-visibility`
 - existing Draft PR: `#8`
-- pre-refresh PR HEAD: `70a46a6655611a94c2830b4ae34b21bee4a76f86`
-- planning refresh commits: `5950cfd173cfbeb05d5dcf63195d3bb01255733a`, `000f8215ddc1250a5c9d30086f699438e4d706ad`
+- original Phase A reviewed HEAD: `70a46a6655611a94c2830b4ae34b21bee4a76f86`
 - target candidate: `custom:fru-clear-stage`
 
 The task branch was created from `c69579db02775cce4916eb2558df703b4f61ffab` and is currently behind `main`. Before production-code edits, bring this same branch forward to current `main` and preserve the v0.4.3 / pre-release diagnostic-cleanup changes. Do not recreate diagnostics removed by the cleanup task merely because the old PR branch still contains older references.
