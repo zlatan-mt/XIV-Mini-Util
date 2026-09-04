@@ -33,7 +33,7 @@ FFXIV 用 Dalamud プラグイン `XIV Mini Util` の開発リポジトリ。古
 - **通常タスク**: まず変更対象ファイル・影響範囲・確認方法を短く把握する。既存の C# / Dalamud / ImGui 実装パターン（`GameUiService` + `AddonStateTracker`、`ShopDataCache.InitializeAsync()`、`OnSearchCompleted` 等）に合わせる。
 - **ビルド／リリース**: §6 のコマンド。配布に影響する変更は `pluginmaster.json`、`CHANGELOG.md`、`docs/release/custom-plugin-distribution.md` を確認する。
 - **Title Background / Character Select を触る場合のみ**: `docs/agent-guides/title-background.md` と `/title-background` skill を先に読む。Sonnet/Codex へ委譲する subagent プロンプトを書く前、実機レポート判読前も同じ。それ以外のタスクではこの契約を読む必要はない。
-- **review 判断基準**: 共通の Web Sol review policy は Sol Review Bridge が review prompt へ自動注入するため、このリポジトリの agent がファイル参照する必要はない。XIV 固有の差分だけを §7 に定義する。
+- **review 判断基準**: 共通のreview policyは承認済みworkflowで選択されたreview orchestrationの責務とし、このrepoはXIV固有の差分だけを §7 に定義する。Sol Review Bridgeは `RETIRED_FROM_ACTIVE_AGENT_ROUTING` であり、Alpheusは利用可能になった場合の将来のreview orchestration ownerである。ここでAlpheusのimplementationやreadinessを断定しない。
 - **主な機能領域**: `Services/Materia`（マテリア精製）、`Services/Desynth`（分解）、`Services/Shop`（NPC 販売検索）、`Services/Market`（Universalis 価格）、`Services/Checklist`（日課・週課）、`Services/Submarine`（潜水艦）、`Services/Notification`（Discord / シャキ通知）。
 
 ## 5. Core invariants
