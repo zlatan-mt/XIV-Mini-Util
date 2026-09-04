@@ -5,8 +5,8 @@
     "Punchline": "Materia精製と分解を手早く支援します。",
     "Description": "マテリア精製とアイテム分解、NPC販売場所検索を支援するミニユーティリティです。",
     "InternalName": "XivMiniUtil",
-    "AssemblyVersion": "0.4.2.0",
-    "TestingAssemblyVersion": "0.4.2.0",
+    "AssemblyVersion": "0.4.3.0",
+    "TestingAssemblyVersion": "0.4.3.0",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
     "TestingDalamudApiLevel": 15,
@@ -22,11 +22,11 @@
     "RepoUrl": "https://github.com/zlatan-mt/XIV-Mini-Util",
     "IconUrl": "https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/images/icon.png",
     "ImageUrls": [],
-    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.2/XivMiniUtil.zip",
-    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.2/XivMiniUtil.zip",
-    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.2/XivMiniUtil.zip",
-    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.2/XivMiniUtil.zip",
-    "Changelog": "0.4.2: fresh install / 未promotion 設定で「FRU クリア後ステージ」背景を選ぶとキャラクターが表示されないことがある不具合を修正（検証済みの静的アンカー配置を通常選択でも有効化）。",
+    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.3/XivMiniUtil.zip",
+    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.3/XivMiniUtil.zip",
+    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.3/XivMiniUtil.zip",
+    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.3/XivMiniUtil.zip",
+    "Changelog": "0.4.3: 「FRU クリア後ステージ」背景の固定時刻を 15:17 ET から 13:00 ET (DayTimeSeconds=46800) へ調整。Clear Skies / 配置 / カメラ / 静的アンカー / 抑止の挙動は変更なし。VFX への書き込みは引き続き 0 件。",
     "LastUpdate": 1788255240
   }
 ]
