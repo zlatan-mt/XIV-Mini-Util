@@ -203,7 +203,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             _charaSelectSourceLayout.Reset();
             _charaSelectStaticAnchor.Reset();
             _charaSelectSceneObjectSuppression.Reset();
-            _charaSelectVfxInventory.Reset();
         }
 
         _configuration.Save();
@@ -263,7 +262,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
             _charaSelectSourceLayout.Reset();
             _charaSelectStaticAnchor.Reset();
             _charaSelectSceneObjectSuppression.Reset();
-            _charaSelectVfxInventory.Reset();
         }
         _configuration.Save();
         RecordTransitionEvent(
@@ -544,7 +542,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _charaSelectSourceLayout.Reset();
         _charaSelectStaticAnchor.Reset();
         _charaSelectSceneObjectSuppression.Reset();
-        _charaSelectVfxInventory.Reset();
         _charaSelectCameraAdapter.Configure(false, TitleBackgroundCharaSelectCameraInput.FromConfiguration(_configuration));
         ResetCameraOverrideObservation();
         ResetSceneOverrideObservation();
@@ -628,7 +625,6 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _charaSelectSourceLayout.Reset();
         _charaSelectStaticAnchor.Reset();
         _charaSelectSceneObjectSuppression.Reset();
-        _charaSelectVfxInventory.Reset();
         ResetCameraOverrideObservation();
         _loadingLobbyType = GameLobbyType.None;
         _lastLobbyUpdateMapId = GameLobbyType.None;

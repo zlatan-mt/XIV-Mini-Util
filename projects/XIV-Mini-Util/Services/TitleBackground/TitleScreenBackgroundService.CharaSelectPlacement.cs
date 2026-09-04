@@ -557,12 +557,6 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 string.Equals(
                     ResolveCurrentOverrideCandidate().Id,
                     TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
-                    StringComparison.Ordinal)))
-            .Concat(_charaSelectVfxInventory.BuildDiagnosticLines(
-                ResolveCurrentOverrideCandidate().Id,
-                string.Equals(
-                    ResolveCurrentOverrideCandidate().Id,
-                    TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
                     StringComparison.Ordinal)));
     }
 
