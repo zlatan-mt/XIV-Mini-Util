@@ -1253,8 +1253,6 @@ public sealed unsafe partial class TitleScreenBackgroundService
         MaintainCharaSelectEnvironmentClearSky();
         // FRU candidate 固有: 戦闘用 gimmick / VFX telegraph の抑止（pre-login CharaSelect のみ）。
         MaintainFruSceneObjectSuppression();
-        // FRU candidate 固有: loaded VFX instance の read-only インベントリ（pre-login CharaSelect のみ・write なし）。
-        MaintainFruVfxInventory();
         UpdateAutomaticQuickCheck();
     }
 }
