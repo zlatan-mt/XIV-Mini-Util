@@ -140,6 +140,7 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
     public static (bool Eligible, string Reason) EvaluateFallbackArm(
         bool isLoggedIn,
         GameLobbyType lobbyType,
+        in TitleBackgroundColdStartOwnerSnapshot startup,
         in TitleBackgroundColdStartOwnerSnapshot current,
         bool automaticCheckActive,
         bool probeTransactionActive)
@@ -172,7 +173,29 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
             return (false, "unsafe-transaction-active");
         }
 
+        if (!IsStartupStateConsistent(startup, current))
+        {
+            return (false, "startup-state-changed");
+        }
+
         return (true, "ok");
+    }
+
+    public static bool IsStartupStateConsistent(
+        in TitleBackgroundColdStartOwnerSnapshot startup,
+        in TitleBackgroundColdStartOwnerSnapshot current)
+    {
+        if (string.IsNullOrEmpty(startup.CandidateId))
+        {
+            return false;
+        }
+
+        return string.Equals(startup.CandidateId, current.CandidateId, StringComparison.Ordinal)
+            && startup.OverrideEnabled == current.OverrideEnabled
+            && startup.V2Enabled == current.V2Enabled
+            && startup.PlacementEnabled == current.PlacementEnabled
+            && string.Equals(startup.PlacementCandidateId, current.PlacementCandidateId, StringComparison.Ordinal)
+            && startup.PositionCaptured == current.PositionCaptured;
     }
 
     public static string Classify(in TitleBackgroundColdStartDiagnosisInput input)
@@ -633,10 +656,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
             || _automaticCheck.PlacementProofArmed
             || _automaticCheck.State != TitleBackgroundAutomaticCheckState.Idle;
         var probeTransactionActive = _probeTimeline.ActiveProbeSession != null;
+        var startupSnapshot = _coldStartDiagnostic.StartupBefore;
 
         var (eligible, reason) = TitleBackgroundColdStartDiagnosticLogic.EvaluateFallbackArm(
             _clientState.IsLoggedIn,
             currentMap,
+            startupSnapshot,
             currentSnapshot,
             automaticCheckActive,
             probeTransactionActive);
@@ -646,11 +671,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
             return;
         }
 
-        var before = _coldStartDiagnostic.StartupBefore.OverrideEnabled
-            ? _coldStartDiagnostic.StartupBefore
-            : currentSnapshot;
-
-        _coldStartDiagnostic.Arm(before, currentSnapshot, ColdStartArmMode.FirstSceneFallback);
+        // MUST FIX: StartupBefore is immutable evidence; never replace it with currentSnapshot.
+        _coldStartDiagnostic.Arm(startupSnapshot, currentSnapshot, ColdStartArmMode.FirstSceneFallback);
         if (!_coldStartDiagnostic.Subscribed)
         {
             _framework.Update += OnColdStartDiagnosticFrameworkUpdate;
@@ -660,7 +682,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         _log.Information(
             "[XMU BG] Cold-start diagnostic armed via first-scene fallback. reason={Reason}, ownerBefore={OwnerBefore}, ownerAfter={OwnerAfter}, expected={ExpectedOwner}",
             reason,
-            before.ActualOwner,
+            startupSnapshot.ActualOwner,
             currentSnapshot.ActualOwner,
             currentSnapshot.ExpectedOwner);
     }

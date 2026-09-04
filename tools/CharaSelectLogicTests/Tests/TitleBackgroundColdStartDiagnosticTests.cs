@@ -273,42 +273,48 @@ internal static partial class TestRunner
             var (okEligible, okReason) = TitleBackgroundColdStartDiagnosticLogic.EvaluateFallbackArm(
                 isLoggedIn: false,
                 GameLobbyType.CharaSelect,
-                fru,
+                startup: fru,
+                current: fru,
                 automaticCheckActive: false,
                 probeTransactionActive: false);
 
             var (loginEligible, _) = TitleBackgroundColdStartDiagnosticLogic.EvaluateFallbackArm(
                 isLoggedIn: true,
                 GameLobbyType.CharaSelect,
-                fru,
+                startup: fru,
+                current: fru,
                 automaticCheckActive: false,
                 probeTransactionActive: false);
 
             var (lobbyEligible, _) = TitleBackgroundColdStartDiagnosticLogic.EvaluateFallbackArm(
                 isLoggedIn: false,
                 GameLobbyType.Title,
-                fru,
+                startup: fru,
+                current: fru,
                 automaticCheckActive: false,
                 probeTransactionActive: false);
 
             var (disabledEligible, _) = TitleBackgroundColdStartDiagnosticLogic.EvaluateFallbackArm(
                 isLoggedIn: false,
                 GameLobbyType.CharaSelect,
-                fru with { OverrideEnabled = false },
+                startup: fru with { OverrideEnabled = false },
+                current: fru with { OverrideEnabled = false },
                 automaticCheckActive: false,
                 probeTransactionActive: false);
 
             var (otherEligible, _) = TitleBackgroundColdStartDiagnosticLogic.EvaluateFallbackArm(
                 isLoggedIn: false,
                 GameLobbyType.CharaSelect,
-                fru with { CandidateId = TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId },
+                startup: fru with { CandidateId = TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId },
+                current: fru with { CandidateId = TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId },
                 automaticCheckActive: false,
                 probeTransactionActive: false);
 
             var (transEligible, _) = TitleBackgroundColdStartDiagnosticLogic.EvaluateFallbackArm(
                 isLoggedIn: false,
                 GameLobbyType.CharaSelect,
-                fru,
+                startup: fru,
+                current: fru,
                 automaticCheckActive: true,
                 probeTransactionActive: false);
 
@@ -401,6 +407,56 @@ internal static partial class TestRunner
                 && report.Contains("placement.actorEpochChangedAfterConfirmedWrite=", StringComparison.Ordinal)
                 && !report.Contains("0x", StringComparison.Ordinal)
                 && TitleScreenBackgroundService.ColdStartDiagnosticPreviousFileName == "title-background-cold-start-diag.prev.txt";
+        });
+
+        Test(649, "cold-start fallback arm blocks when startup state changed before first scene", () =>
+        {
+            var fruCurrent = new TitleBackgroundColdStartOwnerSnapshot(
+                TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+                OverrideEnabled: true,
+                V2Enabled: false,
+                PlacementEnabled: true,
+                PlacementCandidateId: TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+                PositionCaptured: false,
+                ActualOwner: "placement",
+                ExpectedOwner: "placement");
+
+            // Case 1: startup had override disabled, then user enabled FRU before reaching Character Select
+            var startupDisabled = fruCurrent with { OverrideEnabled = false };
+            var (case1Eligible, case1Reason) = TitleBackgroundColdStartDiagnosticLogic.EvaluateFallbackArm(
+                isLoggedIn: false,
+                GameLobbyType.CharaSelect,
+                startup: startupDisabled,
+                current: fruCurrent,
+                automaticCheckActive: false,
+                probeTransactionActive: false);
+
+            // Case 2: startup had a different candidate, then user switched to FRU before reaching Character Select
+            var startupOtherCandidate = fruCurrent with
+            {
+                CandidateId = TitleBackgroundCharacterSelectOverrideCandidateRegistry.DefaultCandidateId,
+            };
+            var (case2Eligible, case2Reason) = TitleBackgroundColdStartDiagnosticLogic.EvaluateFallbackArm(
+                isLoggedIn: false,
+                GameLobbyType.CharaSelect,
+                startup: startupOtherCandidate,
+                current: fruCurrent,
+                automaticCheckActive: false,
+                probeTransactionActive: false);
+
+            // Fail-closed case: startup snapshot missing / empty
+            var startupEmpty = default(TitleBackgroundColdStartOwnerSnapshot);
+            var (emptyEligible, emptyReason) = TitleBackgroundColdStartDiagnosticLogic.EvaluateFallbackArm(
+                isLoggedIn: false,
+                GameLobbyType.CharaSelect,
+                startup: startupEmpty,
+                current: fruCurrent,
+                automaticCheckActive: false,
+                probeTransactionActive: false);
+
+            return !case1Eligible && case1Reason == "startup-state-changed"
+                && !case2Eligible && case2Reason == "startup-state-changed"
+                && !emptyEligible && emptyReason == "startup-state-changed";
         });
     }
 }
