@@ -16,7 +16,7 @@ Canonical repository: `zlatan-mt/XIV-Mini-Util`.
 - task branch: `task/cold-start-character-select-visibility`
 - existing Draft PR: `#8`
 - original Phase A reviewed HEAD: `70a46a6655611a94c2830b4ae34b21bee4a76f86`
-- planning refresh HEAD before implementation: `69ab30ead0fbcc7f8b2993682741c605c228af7f`
+- planning refresh branch now contains only task-spec commits after that original Phase A HEAD; implementation must determine the current exact branch HEAD from GitHub before editing code
 - target candidate: `custom:fru-clear-stage`
 
 The task branch was created from `c69579db02775cce4916eb2558df703b4f61ffab` and is currently behind `main`. Before production-code edits, bring this same branch forward to current `main` and preserve the v0.4.3 / pre-release diagnostic-cleanup changes. Do not recreate diagnostics removed by the cleanup task merely because the old PR branch still contains older references.
