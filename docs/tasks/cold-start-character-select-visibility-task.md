@@ -3,7 +3,7 @@
 ## Goal
 Investigate and fix the rare first Character Select / first-login path where the FRU background loads but the selected character is missing or rendered abnormally.
 
-This task must not require deliberate reproduction. First harden the passive recorder so the next naturally occurring failure is captured automatically; then implement only the root-cause repair justified by evidence.
+Do not require deliberate reproduction. First harden the passive recorder so the next naturally occurring failure is captured automatically; then implement only the root-cause repair justified by evidence.
 
 Canonical repository: `zlatan-mt/XIV-Mini-Util`.
 
