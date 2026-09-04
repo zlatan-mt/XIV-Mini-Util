@@ -7,6 +7,21 @@ using XivMiniUtil.Services.CharaSelect;
 
 namespace XivMiniUtil.Services.TitleBackground;
 
+internal enum ColdStartArmStatus
+{
+    NotEvaluated,
+    Armed,
+    Skipped,
+    Blocked,
+}
+
+internal enum ColdStartArmMode
+{
+    None,
+    Startup,
+    FirstSceneFallback,
+}
+
 internal readonly record struct TitleBackgroundColdStartOwnerSnapshot(
     string CandidateId,
     bool OverrideEnabled,
@@ -24,6 +39,7 @@ internal readonly record struct TitleBackgroundColdStartDiagnosisInput(
     int PlacementSceneGeneration,
     int ActiveSceneGeneration,
     bool ResolverEverValid,
+    bool DrawReadyEverTrue,
     bool StaticAnchorEvaluated,
     bool StaticAnchorAuthorized,
     string StaticAnchorReason,
@@ -33,10 +49,12 @@ internal readonly record struct TitleBackgroundColdStartDiagnosisInput(
     bool PlacementWriteConfirmed,
     int UniqueResolvedActorCount,
     int ConfirmedWriteKeyCount,
+    bool ActorEpochChangedAfterConfirmedWrite,
     bool LoginObserved);
 
 internal static class TitleBackgroundColdStartDiagnosticLogic
 {
+    public const int RecorderSchema = 2;
     public const int ResolverAttemptBudget = 120;
     public static readonly TimeSpan MaxDuration = TimeSpan.FromMinutes(10);
 
@@ -84,13 +102,78 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
             expectedOwner);
     }
 
-    public static bool ShouldArm(bool isLoggedIn, in TitleBackgroundColdStartOwnerSnapshot before)
-        => !isLoggedIn
-            && before.OverrideEnabled
-            && string.Equals(
+    public static (ColdStartArmStatus Status, string Reason) EvaluateStartupArm(
+        bool isLoggedIn,
+        in TitleBackgroundColdStartOwnerSnapshot before,
+        bool automaticCheckRequested,
+        bool placementProofArmed)
+    {
+        if (isLoggedIn)
+        {
+            return (ColdStartArmStatus.Skipped, "already-logged-in");
+        }
+
+        if (!before.OverrideEnabled)
+        {
+            return (ColdStartArmStatus.Skipped, "override-disabled");
+        }
+
+        if (!string.Equals(
                 before.CandidateId,
                 TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
-                StringComparison.Ordinal);
+                StringComparison.Ordinal))
+        {
+            return (ColdStartArmStatus.Skipped, "candidate-not-fru");
+        }
+
+        if (automaticCheckRequested || placementProofArmed)
+        {
+            return (ColdStartArmStatus.Blocked, "automatic-check-active");
+        }
+
+        return (ColdStartArmStatus.Armed, "ok");
+    }
+
+    public static bool ShouldArm(bool isLoggedIn, in TitleBackgroundColdStartOwnerSnapshot before)
+        => EvaluateStartupArm(isLoggedIn, before, automaticCheckRequested: false, placementProofArmed: false).Status == ColdStartArmStatus.Armed;
+
+    public static (bool Eligible, string Reason) EvaluateFallbackArm(
+        bool isLoggedIn,
+        GameLobbyType lobbyType,
+        in TitleBackgroundColdStartOwnerSnapshot current,
+        bool automaticCheckActive,
+        bool probeTransactionActive)
+    {
+        if (isLoggedIn)
+        {
+            return (false, "already-logged-in");
+        }
+
+        if (lobbyType != GameLobbyType.CharaSelect)
+        {
+            return (false, "not-chara-select");
+        }
+
+        if (!current.OverrideEnabled)
+        {
+            return (false, "override-disabled");
+        }
+
+        if (!string.Equals(
+                current.CandidateId,
+                TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+                StringComparison.Ordinal))
+        {
+            return (false, "candidate-not-fru");
+        }
+
+        if (automaticCheckActive || probeTransactionActive)
+        {
+            return (false, "unsafe-transaction-active");
+        }
+
+        return (true, "ok");
+    }
 
     public static string Classify(in TitleBackgroundColdStartDiagnosisInput input)
     {
@@ -135,13 +218,18 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
         }
 
         if (input.PlacementWriteConfirmed
-            && input.UniqueResolvedActorCount > input.ConfirmedWriteKeyCount
-            && input.UniqueResolvedActorCount > 1)
+            && (input.ActorEpochChangedAfterConfirmedWrite
+                || (input.UniqueResolvedActorCount > input.ConfirmedWriteKeyCount && input.UniqueResolvedActorCount > 1)))
         {
             return "actor-recreation";
         }
 
-        return input.PlacementWriteConfirmed ? "post-placement-visual" : "insufficient-evidence";
+        if (!input.DrawReadyEverTrue)
+        {
+            return "draw-readiness";
+        }
+
+        return input.PlacementWriteConfirmed ? "post-placement-visual-candidate" : "insufficient-evidence";
     }
 }
 
@@ -151,6 +239,10 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     public bool Subscribed { get; set; }
     public bool Completed { get; private set; }
     public DateTimeOffset StartedAt { get; private set; }
+    public ColdStartArmMode ArmMode { get; private set; } = ColdStartArmMode.None;
+    public ColdStartArmStatus StartupArmStatus { get; private set; } = ColdStartArmStatus.NotEvaluated;
+    public string StartupArmReason { get; private set; } = "not-evaluated";
+    public TitleBackgroundColdStartOwnerSnapshot StartupBefore { get; private set; }
     public TitleBackgroundColdStartOwnerSnapshot Before { get; private set; }
     public TitleBackgroundColdStartOwnerSnapshot After { get; private set; }
 
@@ -178,6 +270,15 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     public bool IdentityConsistent { get; private set; }
     public bool DrawReady { get; private set; }
 
+    public bool? DrawReadyAtFirstValid { get; private set; }
+    public bool DrawReadyEverTrue { get; private set; }
+    public int DrawReadyTransitionCount { get; private set; }
+    private bool? _lastObservedDrawReady;
+
+    public int ActorIdentityEpoch { get; private set; }
+    public int ActorRecreationCount { get; private set; }
+    private CharaSelectActorIdentityKey _lastValidIdentityKey;
+
     public bool StaticAnchorEvaluated { get; private set; }
     public bool StaticAnchorAuthorized { get; private set; }
     public string StaticAnchorReason { get; private set; } = "not-run";
@@ -193,6 +294,7 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     public string PlacementLastReason { get; private set; } = "not-run";
     public int UniqueResolvedActorCount { get; private set; }
     public int ConfirmedWriteKeyCount { get; private set; }
+    public bool ActorEpochChangedAfterConfirmedWrite { get; private set; }
 
     public int V2FramingAttemptCount { get; private set; }
     public int V2FramingAppliedCount { get; private set; }
@@ -207,12 +309,25 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     public string Diagnosis { get; private set; } = "not-completed";
     public string PendingClipboardText { get; set; } = string.Empty;
 
+    public void RecordStartupSnapshot(in TitleBackgroundColdStartOwnerSnapshot startupBefore)
+    {
+        StartupBefore = startupBefore;
+    }
+
+    public void RecordStartupArmResult(ColdStartArmStatus status, string reason)
+    {
+        StartupArmStatus = status;
+        StartupArmReason = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
+    }
+
     public void Arm(
         in TitleBackgroundColdStartOwnerSnapshot before,
-        in TitleBackgroundColdStartOwnerSnapshot after)
+        in TitleBackgroundColdStartOwnerSnapshot after,
+        ColdStartArmMode mode)
     {
         Before = before;
         After = after;
+        ArmMode = mode;
         StartedAt = DateTimeOffset.UtcNow;
         Active = true;
         Completed = false;
@@ -260,6 +375,46 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         ObjectResolved |= actor.ObjectResolved;
         IdentityConsistent |= actor.IdentityConsistent;
         DrawReady |= actor.DrawReady;
+
+        if (actor.Valid && !DrawReadyAtFirstValid.HasValue)
+        {
+            DrawReadyAtFirstValid = actor.DrawReady;
+        }
+
+        if (actor.DrawReady)
+        {
+            DrawReadyEverTrue = true;
+        }
+
+        if (!_lastObservedDrawReady.HasValue)
+        {
+            _lastObservedDrawReady = actor.DrawReady;
+        }
+        else if (_lastObservedDrawReady.Value != actor.DrawReady)
+        {
+            DrawReadyTransitionCount++;
+            _lastObservedDrawReady = actor.DrawReady;
+        }
+
+        if (actor.Valid)
+        {
+            if (!_lastValidIdentityKey.Valid)
+            {
+                _lastValidIdentityKey = actor.IdentityKey;
+                ActorIdentityEpoch = 1;
+            }
+            else if (_lastValidIdentityKey != actor.IdentityKey)
+            {
+                _lastValidIdentityKey = actor.IdentityKey;
+                ActorIdentityEpoch++;
+                ActorRecreationCount++;
+
+                if (PlacementWriteConfirmed)
+                {
+                    ActorEpochChangedAfterConfirmedWrite = true;
+                }
+            }
+        }
     }
 
     public void RecordRuntimeEvidence(
@@ -279,7 +434,8 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         CaptureStableSamples = Math.Max(CaptureStableSamples, placement.CaptureStableSamplesAtPersist);
         PlacementApplyCount = Math.Max(PlacementApplyCount, placement.PlacementApplyCount);
         PlacementWriteAttemptCount = Math.Max(PlacementWriteAttemptCount, placement.PlacementWriteAttemptCount);
-        PlacementWriteConfirmed |= placement.LastWriteReadbackConfirmed;
+        var writeConfirmed = placement.LastWriteReadbackConfirmed;
+        PlacementWriteConfirmed |= writeConfirmed;
         PositionReadbackConfirmed |= placement.LastWritePositionReadbackConfirmed;
         RotationReadbackConfirmed |= placement.LastWriteRotationReadbackConfirmed;
         if (!string.Equals(placement.LastWriteStatus, "not-attempted", StringComparison.Ordinal))
@@ -331,8 +487,12 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         var lines = new List<string>
         {
             "[XIV Mini Util] Title Background cold-start diagnostic",
+            $"coldStart.recorderSchema={TitleBackgroundColdStartDiagnosticLogic.RecorderSchema}",
             $"coldStart.diagnosis={Diagnosis}",
             $"coldStart.completed={B(Completed)}",
+            $"coldStart.armMode={ArmMode}",
+            $"coldStart.startupArmStatus={StartupArmStatus}",
+            $"coldStart.startupArmReason={StartupArmReason}",
             $"startup.before.candidate={N(Before.CandidateId)}",
             $"startup.before.overrideEnabled={B(Before.OverrideEnabled)}",
             $"startup.before.v2Enabled={B(Before.V2Enabled)}",
@@ -372,6 +532,11 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             $"resolver.objectResolved={B(ObjectResolved)}",
             $"resolver.identityConsistent={B(IdentityConsistent)}",
             $"resolver.drawReady={B(DrawReady)}",
+            $"resolver.drawReadyAtFirstValid={(DrawReadyAtFirstValid.HasValue ? B(DrawReadyAtFirstValid.Value) : "none")}",
+            $"resolver.drawReadyEverTrue={B(DrawReadyEverTrue)}",
+            $"resolver.drawReadyTransitionCount={DrawReadyTransitionCount}",
+            $"actor.identityEpoch={ActorIdentityEpoch}",
+            $"actor.recreationCount={ActorRecreationCount}",
             $"staticAnchor.evaluated={B(StaticAnchorEvaluated)}",
             $"staticAnchor.authorized={B(StaticAnchorAuthorized)}",
             $"staticAnchor.reason={StaticAnchorReason}",
@@ -387,6 +552,7 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             $"placement.lastReason={PlacementLastReason}",
             $"placement.uniqueResolvedActorCount={UniqueResolvedActorCount}",
             $"placement.confirmedWriteKeyCount={ConfirmedWriteKeyCount}",
+            $"placement.actorEpochChangedAfterConfirmedWrite={B(ActorEpochChangedAfterConfirmedWrite)}",
             $"v2.framingAttemptCount={V2FramingAttemptCount}",
             $"v2.framingAppliedCount={V2FramingAppliedCount}",
             $"v2.lastFramingStatus={V2LastFramingStatus}",
@@ -403,23 +569,38 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
 public sealed unsafe partial class TitleScreenBackgroundService
 {
     internal const string ColdStartDiagnosticFileName = "title-background-cold-start-diag.txt";
+    internal const string ColdStartDiagnosticPreviousFileName = "title-background-cold-start-diag.prev.txt";
     private readonly TitleBackgroundColdStartDiagnosticRuntimeState _coldStartDiagnostic = new();
 
     internal void StartColdStartDiagnostic(in TitleBackgroundColdStartOwnerSnapshot before)
     {
+        _log.Information(
+            "[XMU BG] Title Background cold-start recorder loaded. coldStart.recorderSchema={Schema}",
+            TitleBackgroundColdStartDiagnosticLogic.RecorderSchema);
+
+        _coldStartDiagnostic.RecordStartupSnapshot(before);
+
         if (_coldStartDiagnostic.Active || _coldStartDiagnostic.Completed)
         {
             return;
         }
 
-        if (!TitleBackgroundColdStartDiagnosticLogic.ShouldArm(_clientState.IsLoggedIn, before))
-        {
-            return;
-        }
+        var (status, reason) = TitleBackgroundColdStartDiagnosticLogic.EvaluateStartupArm(
+            _clientState.IsLoggedIn,
+            before,
+            _automaticCheck.Requested,
+            _automaticCheck.PlacementProofArmed);
 
-        // Interrupted OneClick recovery is a different transaction and can intentionally alter runtime ownership.
-        // Mixing it into this reproduction would make the evidence ambiguous.
-        if (_automaticCheck.Requested || _automaticCheck.PlacementProofArmed)
+        _coldStartDiagnostic.RecordStartupArmResult(status, reason);
+
+        _log.Information(
+            "[XMU BG] Cold-start diagnostic startup arm result: {Status}. reason={Reason}, ownerBefore={OwnerBefore}, expected={ExpectedOwner}",
+            status,
+            reason,
+            before.ActualOwner,
+            before.ExpectedOwner);
+
+        if (status != ColdStartArmStatus.Armed)
         {
             return;
         }
@@ -427,14 +608,61 @@ public sealed unsafe partial class TitleScreenBackgroundService
         var after = TitleBackgroundColdStartDiagnosticLogic.CaptureOwnerSnapshot(
             _configuration,
             TitleBackgroundCharaSelectEngineOwnerLogic.Describe(CharaSelectEngineOwner));
-        _coldStartDiagnostic.Arm(before, after);
+        _coldStartDiagnostic.Arm(before, after, ColdStartArmMode.Startup);
         _framework.Update += OnColdStartDiagnosticFrameworkUpdate;
         _coldStartDiagnostic.Subscribed = true;
+    }
+
+    internal void TryFallbackArmColdStartDiagnostic()
+    {
+        if (_coldStartDiagnostic.Active || _coldStartDiagnostic.Completed)
+        {
+            return;
+        }
+
+        if (!TryReadCurrentLobbyMap(out var currentMap))
+        {
+            return;
+        }
+
+        var currentSnapshot = TitleBackgroundColdStartDiagnosticLogic.CaptureOwnerSnapshot(
+            _configuration,
+            TitleBackgroundCharaSelectEngineOwnerLogic.Describe(CharaSelectEngineOwner));
+
+        var automaticCheckActive = _automaticCheck.Requested
+            || _automaticCheck.PlacementProofArmed
+            || _automaticCheck.State != TitleBackgroundAutomaticCheckState.Idle;
+        var probeTransactionActive = _probeTimeline.ActiveProbeSession != null;
+
+        var (eligible, reason) = TitleBackgroundColdStartDiagnosticLogic.EvaluateFallbackArm(
+            _clientState.IsLoggedIn,
+            currentMap,
+            currentSnapshot,
+            automaticCheckActive,
+            probeTransactionActive);
+
+        if (!eligible)
+        {
+            return;
+        }
+
+        var before = _coldStartDiagnostic.StartupBefore.OverrideEnabled
+            ? _coldStartDiagnostic.StartupBefore
+            : currentSnapshot;
+
+        _coldStartDiagnostic.Arm(before, currentSnapshot, ColdStartArmMode.FirstSceneFallback);
+        if (!_coldStartDiagnostic.Subscribed)
+        {
+            _framework.Update += OnColdStartDiagnosticFrameworkUpdate;
+            _coldStartDiagnostic.Subscribed = true;
+        }
+
         _log.Information(
-            "[XMU BG] Cold-start diagnostic armed. ownerBefore={OwnerBefore}, ownerAfter={OwnerAfter}, expected={ExpectedOwner}",
+            "[XMU BG] Cold-start diagnostic armed via first-scene fallback. reason={Reason}, ownerBefore={OwnerBefore}, ownerAfter={OwnerAfter}, expected={ExpectedOwner}",
+            reason,
             before.ActualOwner,
-            after.ActualOwner,
-            after.ExpectedOwner);
+            currentSnapshot.ActualOwner,
+            currentSnapshot.ExpectedOwner);
     }
 
     internal void StopColdStartDiagnostic()
@@ -547,6 +775,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _coldStartDiagnostic.PlacementSceneGeneration,
             _coldStartDiagnostic.ActiveSceneGeneration,
             _coldStartDiagnostic.ResolverEverValid,
+            _coldStartDiagnostic.DrawReadyEverTrue,
             _coldStartDiagnostic.StaticAnchorEvaluated,
             _coldStartDiagnostic.StaticAnchorAuthorized,
             _coldStartDiagnostic.StaticAnchorReason,
@@ -556,6 +785,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _coldStartDiagnostic.PlacementWriteConfirmed,
             _coldStartDiagnostic.UniqueResolvedActorCount,
             _coldStartDiagnostic.ConfirmedWriteKeyCount,
+            _coldStartDiagnostic.ActorEpochChangedAfterConfirmedWrite,
             _coldStartDiagnostic.LoginObserved);
         return TitleBackgroundColdStartDiagnosticLogic.Classify(input);
     }
@@ -579,9 +809,22 @@ public sealed unsafe partial class TitleScreenBackgroundService
         try
         {
             Directory.CreateDirectory(_configDirectory);
-            File.WriteAllText(
-                Path.Combine(_configDirectory, ColdStartDiagnosticFileName),
-                report + Environment.NewLine);
+            var currentPath = Path.Combine(_configDirectory, ColdStartDiagnosticFileName);
+            var previousPath = Path.Combine(_configDirectory, ColdStartDiagnosticPreviousFileName);
+
+            if (File.Exists(currentPath))
+            {
+                try
+                {
+                    File.Copy(currentPath, previousPath, overwrite: true);
+                }
+                catch (Exception ex)
+                {
+                    _log.Debug(ex, "[XMU BG] Cold-start diagnostic previous report copy skipped.");
+                }
+            }
+
+            File.WriteAllText(currentPath, report + Environment.NewLine);
         }
         catch (Exception ex)
         {

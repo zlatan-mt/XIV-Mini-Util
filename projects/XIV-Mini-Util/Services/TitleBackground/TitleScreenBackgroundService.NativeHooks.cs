@@ -1245,6 +1245,8 @@ public sealed unsafe partial class TitleScreenBackgroundService
         CapturePreLoginCameraOnFrameworkUpdate();
         CaptureViewReplayTraceOnFrameworkUpdate();
         MaintainCharaSelectCharacterPlacement();
+        // FRU cold-start: startup arm を逃した場合に pre-login FRU CharaSelect scene 到達時に受動 fallback arm。
+        TryFallbackArmColdStartDiagnostic();
         // canonical actor の resolve -> capture -> write -> readback は、同じ Framework frame の
         // MaintainTitleEditInformedCharaSelectPlacement 内で完結させる。別 resolve は行わない。
         MaintainTitleEditInformedCharaSelectPlacement();
