@@ -16,6 +16,7 @@ Canonical repository: `zlatan-mt/XIV-Mini-Util`.
 - task branch: `task/cold-start-character-select-visibility`
 - existing Draft PR: `#8`
 - pre-refresh PR HEAD: `70a46a6655611a94c2830b4ae34b21bee4a76f86`
+- planning refresh commit: `5950cfd173cfbeb05d5dcf63195d3bb01255733a`
 - target candidate: `custom:fru-clear-stage`
 
 The task branch was created from `c69579db02775cce4916eb2558df703b4f61ffab` and is currently behind `main`. Before production-code edits, bring this same branch forward to current `main` and preserve the v0.4.3 / pre-release diagnostic-cleanup changes. Do not recreate diagnostics removed by the cleanup task merely because the old PR branch still contains older references.
@@ -152,6 +153,14 @@ Add only focused tests for:
 Do not add a broad test matrix.
 
 Real-game validation for Phase A2 is **not** "reproduce the bug again". Build/deploy the exact validated HEAD and return the plugin to normal use. The next naturally occurring failure should produce the report automatically. Automated validation must not be presented as real-game validation.
+
+## Planning self-review
+
+This plan was reviewed three times before handoff:
+
+1. **Scope review** — confirmed existing PR #8 must be reused; no duplicate PR, Phase B guess, release work, UI work, or unrelated refactor was added.
+2. **Safety / evidence review** — confirmed passive-only observation, bounded lifecycle, no pointer/ContentId/private output, no new native hook, and no weakening of pre-login/static-anchor/login-stop contracts.
+3. **Integration / current-state review** — corrected the stale v0.4.2 / blocked-PR-#7 assumptions, made latest `main` synchronization mandatory, and explicitly prohibited reintroducing diagnostics removed by the v0.4.3 pre-release cleanup.
 
 ## Review / merge
 
