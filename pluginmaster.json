@@ -27,6 +27,6 @@
     "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.3/XivMiniUtil.zip",
     "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.3/XivMiniUtil.zip",
     "Changelog": "0.4.3: 「FRU クリア後ステージ」背景の固定時刻を 15:17 ET から 13:00 ET (DayTimeSeconds=46800) へ調整。Clear Skies / 配置 / カメラ / 静的アンカー / 抑止の挙動は変更なし。VFX への書き込みは引き続き 0 件。",
-    "LastUpdate": 1788255240
+    "LastUpdate": 1788516323
   }
 ]
