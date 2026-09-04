@@ -458,5 +458,175 @@ internal static partial class TestRunner
                 && !case2Eligible && case2Reason == "startup-state-changed"
                 && !emptyEligible && emptyReason == "startup-state-changed";
         });
+
+        Test(650, "cold-start recorder is dev-plugin-only and both arm paths check the gate before any other state", () =>
+        {
+            var (releaseAllowed, releaseReason) = TitleBackgroundColdStartDiagnosticLogic.EvaluateDevGate(isDevPlugin: false);
+            var (devAllowed, devReason) = TitleBackgroundColdStartDiagnosticLogic.EvaluateDevGate(isDevPlugin: true);
+
+            var root = FindRepositoryRoot();
+            var diagnosticPath = Path.Combine(
+                root,
+                "projects",
+                "XIV-Mini-Util",
+                "Services",
+                "TitleBackground",
+                "TitleScreenBackgroundService.ColdStartDiagnostic.cs");
+            var servicePath = Path.Combine(
+                root,
+                "projects",
+                "XIV-Mini-Util",
+                "Services",
+                "TitleBackground",
+                "TitleScreenBackgroundService.cs");
+            var constructionPath = Path.Combine(root, "projects", "XIV-Mini-Util", "Plugin.ServiceConstruction.cs");
+            var diagnosticText = File.ReadAllText(diagnosticPath);
+            var serviceText = File.ReadAllText(servicePath);
+            var constructionText = File.ReadAllText(constructionPath);
+
+            return !releaseAllowed && releaseReason == "release-build"
+                && devAllowed && devReason == "ok"
+                && serviceText.Contains("private readonly bool _isDevPlugin;", StringComparison.Ordinal)
+                && diagnosticText.Contains("TitleBackgroundColdStartDiagnosticLogic.EvaluateDevGate(_isDevPlugin)", StringComparison.Ordinal)
+                && diagnosticText.Contains("if (!_isDevPlugin)", StringComparison.Ordinal)
+                && constructionText.Contains("isDevPlugin: pluginInterface.IsDev", StringComparison.Ordinal);
+        });
+
+        Test(651, "cold-start classification refines confirmed placement into pointer-free visual candidates only when captured", () =>
+        {
+            var owner = new TitleBackgroundColdStartOwnerSnapshot(
+                TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+                OverrideEnabled: true,
+                V2Enabled: false,
+                PlacementEnabled: true,
+                PlacementCandidateId: TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+                PositionCaptured: true,
+                ActualOwner: "placement",
+                ExpectedOwner: "placement");
+
+            TitleBackgroundColdStartDiagnosisInput BaseInput(
+                bool visualCaptured,
+                bool visualVisible,
+                bool modelRenderDisabled,
+                bool scaleFinitePositive,
+                bool drawOffsetFinite)
+                => new(
+                    owner,
+                    owner,
+                    CharaSelectObserved: true,
+                    PlacementSceneGeneration: 1,
+                    ActiveSceneGeneration: 1,
+                    ResolverEverValid: true,
+                    DrawReadyEverTrue: true,
+                    StaticAnchorEvaluated: true,
+                    StaticAnchorAuthorized: true,
+                    StaticAnchorReason: "ok",
+                    CaptureCompleted: true,
+                    CaptureTimedOut: false,
+                    PlacementWriteAttemptCount: 1,
+                    PlacementWriteConfirmed: true,
+                    UniqueResolvedActorCount: 1,
+                    ConfirmedWriteKeyCount: 1,
+                    ActorEpochChangedAfterConfirmedWrite: false,
+                    LoginObserved: true,
+                    LatestVisualCaptured: visualCaptured,
+                    LatestVisualVisible: visualVisible,
+                    LatestVisualModelRenderDisabled: modelRenderDisabled,
+                    LatestVisualScaleFinitePositive: scaleFinitePositive,
+                    LatestVisualDrawOffsetFinite: drawOffsetFinite);
+
+            var hiddenGeneric = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                BaseInput(visualCaptured: true, visualVisible: false, modelRenderDisabled: false, scaleFinitePositive: true, drawOffsetFinite: true));
+            var hiddenModel = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                BaseInput(visualCaptured: true, visualVisible: false, modelRenderDisabled: true, scaleFinitePositive: true, drawOffsetFinite: true));
+            var transformCandidate = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                BaseInput(visualCaptured: true, visualVisible: true, modelRenderDisabled: false, scaleFinitePositive: false, drawOffsetFinite: true));
+            var genericFallback = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                BaseInput(visualCaptured: true, visualVisible: true, modelRenderDisabled: false, scaleFinitePositive: true, drawOffsetFinite: true));
+            // Not captured must never be interpreted as hidden; it must fall back to the pre-existing label.
+            var notCaptured = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                BaseInput(visualCaptured: false, visualVisible: false, modelRenderDisabled: false, scaleFinitePositive: false, drawOffsetFinite: false));
+
+            return hiddenGeneric == "actor-visibility-hidden"
+                && hiddenModel == "actor-model-render-disabled"
+                && transformCandidate == "actor-visual-transform-candidate"
+                && genericFallback == "post-placement-visual-candidate"
+                && notCaptured == "post-placement-visual-candidate";
+        });
+
+        Test(652, "cold-start runtime state captures first-valid and latest visual snapshots with bounded visibility transition count", () =>
+        {
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            var owner = new TitleBackgroundColdStartOwnerSnapshot(
+                TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+                OverrideEnabled: true,
+                V2Enabled: false,
+                PlacementEnabled: true,
+                PlacementCandidateId: TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+                PositionCaptured: false,
+                ActualOwner: "placement",
+                ExpectedOwner: "placement");
+            state.Arm(owner, owner, ColdStartArmMode.Startup);
+
+            var key = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var baseActor = new CharaSelectResolvedActorContext(
+                (nint)0x1000,
+                key,
+                NormalizedIndex: 0,
+                Source: CharaSelectIdentityResolveSource.SelectedCharacterIndex,
+                CurrentCharacterAvailable: true,
+                EntryAvailable: true,
+                SelectedContentAvailable: true,
+                MappingAvailable: true,
+                MappingHit: true,
+                ClientObjectIndexValid: true,
+                ObjectResolved: true,
+                IdentityConsistent: true,
+                DrawReady: true,
+                VisualStateCaptured: true,
+                ActorVisible: true,
+                ModelRenderDisabled: false,
+                DrawObjectPresent: true,
+                ScaleFinitePositive: true,
+                DrawOffsetFinite: true,
+                DrawOffsetNonZero: false);
+
+            // First valid: visible.
+            state.RecordResolverAttempt(baseActor);
+            // Second attempt: becomes hidden (transition 1).
+            var hidden = baseActor with { ActorVisible = false };
+            state.RecordResolverAttempt(hidden);
+            // Third attempt: visible again (transition 2), also the latest/terminal snapshot.
+            state.RecordResolverAttempt(baseActor);
+            // An uncaptured read must not overwrite the latest snapshot with misleading defaults.
+            var uncaptured = default(CharaSelectResolvedActorContext);
+            state.RecordResolverAttempt(uncaptured);
+
+            return state.FirstValidVisualCaptured
+                && state.FirstValidVisualVisible
+                && state.LatestVisualCaptured
+                && state.LatestVisualVisible
+                && state.VisualVisibilityTransitionCount == 2;
+        });
+
+        Test(653, "cold-start diagnostic file retention is bounded and rolls oldest-first without losing the previous-file contract", () =>
+        {
+            var root = FindRepositoryRoot();
+            var diagnosticPath = Path.Combine(
+                root,
+                "projects",
+                "XIV-Mini-Util",
+                "Services",
+                "TitleBackground",
+                "TitleScreenBackgroundService.ColdStartDiagnostic.cs");
+            var diagnosticText = File.ReadAllText(diagnosticPath);
+
+            return TitleScreenBackgroundService.ColdStartDiagnosticFileName == "title-background-cold-start-diag.txt"
+                && TitleScreenBackgroundService.ColdStartDiagnosticPreviousFileName == "title-background-cold-start-diag.prev.txt"
+                && TitleScreenBackgroundService.ColdStartDiagnosticPreviousFileName2 == "title-background-cold-start-diag.prev2.txt"
+                && TitleScreenBackgroundService.ColdStartDiagnosticPreviousFileName3 == "title-background-cold-start-diag.prev3.txt"
+                && TitleScreenBackgroundService.ColdStartDiagnosticPreviousFileName4 == "title-background-cold-start-diag.prev4.txt"
+                && diagnosticText.Contains("ColdStartDiagnosticRotationFileNames.Length - 1; i > 0; i--", StringComparison.Ordinal);
+        });
     }
 }

@@ -50,7 +50,15 @@ internal readonly record struct TitleBackgroundColdStartDiagnosisInput(
     int UniqueResolvedActorCount,
     int ConfirmedWriteKeyCount,
     bool ActorEpochChangedAfterConfirmedWrite,
-    bool LoginObserved);
+    bool LoginObserved,
+    // Latest-or-terminal read-only actor visual-state evidence (H8 extension). Captured=false means
+    // the visual state was never successfully read for this run; classification must not treat that
+    // as "hidden".
+    bool LatestVisualCaptured = false,
+    bool LatestVisualVisible = false,
+    bool LatestVisualModelRenderDisabled = false,
+    bool LatestVisualScaleFinitePositive = false,
+    bool LatestVisualDrawOffsetFinite = false);
 
 internal static class TitleBackgroundColdStartDiagnosticLogic
 {
@@ -101,6 +109,12 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
             actualOwner,
             expectedOwner);
     }
+
+    // The recorder is local-dev-plugin-only (Implementation plan — dev-only always-on flight recorder).
+    // Production/release plugin behavior must stay unchanged, so this gate is checked before any other
+    // startup/fallback arm evaluation and short-circuits both without touching runtime/config state.
+    public static (bool Allowed, string Reason) EvaluateDevGate(bool isDevPlugin)
+        => isDevPlugin ? (true, "ok") : (false, "release-build");
 
     public static (ColdStartArmStatus Status, string Reason) EvaluateStartupArm(
         bool isLoggedIn,
@@ -252,7 +266,27 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
             return "draw-readiness";
         }
 
-        return input.PlacementWriteConfirmed ? "post-placement-visual-candidate" : "insufficient-evidence";
+        if (!input.PlacementWriteConfirmed)
+        {
+            return "insufficient-evidence";
+        }
+
+        // H8 extension: refine the generic visual candidate into a pointer-free technical label only
+        // when the typed visual-state read actually succeeded for this run.
+        if (input.LatestVisualCaptured && !input.LatestVisualVisible)
+        {
+            return input.LatestVisualModelRenderDisabled
+                ? "actor-model-render-disabled"
+                : "actor-visibility-hidden";
+        }
+
+        if (input.LatestVisualCaptured
+            && (!input.LatestVisualScaleFinitePositive || !input.LatestVisualDrawOffsetFinite))
+        {
+            return "actor-visual-transform-candidate";
+        }
+
+        return "post-placement-visual-candidate";
     }
 }
 
@@ -297,6 +331,22 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     public bool DrawReadyEverTrue { get; private set; }
     public int DrawReadyTransitionCount { get; private set; }
     private bool? _lastObservedDrawReady;
+
+    // H8 extension: pointer-free typed actor visual-state checkpoints. "FirstValid" is captured once,
+    // at the first resolver attempt whose visual read succeeded; "Latest" is overwritten every attempt
+    // and therefore also represents the terminal/last-observed state used for classification.
+    public bool FirstValidVisualCaptured { get; private set; }
+    public bool FirstValidVisualVisible { get; private set; }
+    public bool FirstValidVisualModelRenderDisabled { get; private set; }
+    public bool LatestVisualCaptured { get; private set; }
+    public bool LatestVisualVisible { get; private set; }
+    public bool LatestVisualModelRenderDisabled { get; private set; }
+    public bool LatestVisualDrawObjectPresent { get; private set; }
+    public bool LatestVisualScaleFinitePositive { get; private set; }
+    public bool LatestVisualDrawOffsetFinite { get; private set; }
+    public bool LatestVisualDrawOffsetNonZero { get; private set; }
+    public int VisualVisibilityTransitionCount { get; private set; }
+    private bool? _lastObservedVisualVisible;
 
     public int ActorIdentityEpoch { get; private set; }
     public int ActorRecreationCount { get; private set; }
@@ -438,6 +488,34 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
                 }
             }
         }
+
+        if (actor.VisualStateCaptured)
+        {
+            if (!FirstValidVisualCaptured)
+            {
+                FirstValidVisualCaptured = true;
+                FirstValidVisualVisible = actor.ActorVisible;
+                FirstValidVisualModelRenderDisabled = actor.ModelRenderDisabled;
+            }
+
+            LatestVisualCaptured = true;
+            LatestVisualVisible = actor.ActorVisible;
+            LatestVisualModelRenderDisabled = actor.ModelRenderDisabled;
+            LatestVisualDrawObjectPresent = actor.DrawObjectPresent;
+            LatestVisualScaleFinitePositive = actor.ScaleFinitePositive;
+            LatestVisualDrawOffsetFinite = actor.DrawOffsetFinite;
+            LatestVisualDrawOffsetNonZero = actor.DrawOffsetNonZero;
+
+            if (!_lastObservedVisualVisible.HasValue)
+            {
+                _lastObservedVisualVisible = actor.ActorVisible;
+            }
+            else if (_lastObservedVisualVisible.Value != actor.ActorVisible)
+            {
+                VisualVisibilityTransitionCount++;
+                _lastObservedVisualVisible = actor.ActorVisible;
+            }
+        }
     }
 
     public void RecordRuntimeEvidence(
@@ -560,6 +638,17 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             $"resolver.drawReadyTransitionCount={DrawReadyTransitionCount}",
             $"actor.identityEpoch={ActorIdentityEpoch}",
             $"actor.recreationCount={ActorRecreationCount}",
+            $"actor.visual.firstValidCaptured={B(FirstValidVisualCaptured)}",
+            $"actor.visual.firstValidVisible={B(FirstValidVisualVisible)}",
+            $"actor.visual.firstValidModelRenderDisabled={B(FirstValidVisualModelRenderDisabled)}",
+            $"actor.visual.latestCaptured={B(LatestVisualCaptured)}",
+            $"actor.visual.latestVisible={B(LatestVisualVisible)}",
+            $"actor.visual.latestModelRenderDisabled={B(LatestVisualModelRenderDisabled)}",
+            $"actor.visual.latestDrawObjectPresent={B(LatestVisualDrawObjectPresent)}",
+            $"actor.visual.latestScaleFinitePositive={B(LatestVisualScaleFinitePositive)}",
+            $"actor.visual.latestDrawOffsetFinite={B(LatestVisualDrawOffsetFinite)}",
+            $"actor.visual.latestDrawOffsetNonZero={B(LatestVisualDrawOffsetNonZero)}",
+            $"actor.visual.visibilityTransitionCount={VisualVisibilityTransitionCount}",
             $"staticAnchor.evaluated={B(StaticAnchorEvaluated)}",
             $"staticAnchor.authorized={B(StaticAnchorAuthorized)}",
             $"staticAnchor.reason={StaticAnchorReason}",
@@ -593,18 +682,41 @@ public sealed unsafe partial class TitleScreenBackgroundService
 {
     internal const string ColdStartDiagnosticFileName = "title-background-cold-start-diag.txt";
     internal const string ColdStartDiagnosticPreviousFileName = "title-background-cold-start-diag.prev.txt";
+    internal const string ColdStartDiagnosticPreviousFileName2 = "title-background-cold-start-diag.prev2.txt";
+    internal const string ColdStartDiagnosticPreviousFileName3 = "title-background-cold-start-diag.prev3.txt";
+    internal const string ColdStartDiagnosticPreviousFileName4 = "title-background-cold-start-diag.prev4.txt";
+
+    // Bounded rolling retention: current + up to 4 previous runs (5 total) so a rare failed run is not
+    // lost immediately by the next natural Character Select occurrence. Oldest slot is dropped on rotation.
+    private static readonly string[] ColdStartDiagnosticRotationFileNames =
+    [
+        ColdStartDiagnosticFileName,
+        ColdStartDiagnosticPreviousFileName,
+        ColdStartDiagnosticPreviousFileName2,
+        ColdStartDiagnosticPreviousFileName3,
+        ColdStartDiagnosticPreviousFileName4,
+    ];
+
     private readonly TitleBackgroundColdStartDiagnosticRuntimeState _coldStartDiagnostic = new();
 
     internal void StartColdStartDiagnostic(in TitleBackgroundColdStartOwnerSnapshot before)
     {
         _log.Information(
-            "[XMU BG] Title Background cold-start recorder loaded. coldStart.recorderSchema={Schema}",
-            TitleBackgroundColdStartDiagnosticLogic.RecorderSchema);
+            "[XMU BG] Title Background cold-start recorder loaded. coldStart.recorderSchema={Schema}, isDevPlugin={IsDevPlugin}",
+            TitleBackgroundColdStartDiagnosticLogic.RecorderSchema,
+            _isDevPlugin);
 
         _coldStartDiagnostic.RecordStartupSnapshot(before);
 
         if (_coldStartDiagnostic.Active || _coldStartDiagnostic.Completed)
         {
+            return;
+        }
+
+        var (devAllowed, devReason) = TitleBackgroundColdStartDiagnosticLogic.EvaluateDevGate(_isDevPlugin);
+        if (!devAllowed)
+        {
+            _coldStartDiagnostic.RecordStartupArmResult(ColdStartArmStatus.Skipped, devReason);
             return;
         }
 
@@ -638,6 +750,11 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     internal void TryFallbackArmColdStartDiagnostic()
     {
+        if (!_isDevPlugin)
+        {
+            return;
+        }
+
         if (_coldStartDiagnostic.Active || _coldStartDiagnostic.Completed)
         {
             return;
@@ -808,7 +925,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _coldStartDiagnostic.UniqueResolvedActorCount,
             _coldStartDiagnostic.ConfirmedWriteKeyCount,
             _coldStartDiagnostic.ActorEpochChangedAfterConfirmedWrite,
-            _coldStartDiagnostic.LoginObserved);
+            _coldStartDiagnostic.LoginObserved,
+            _coldStartDiagnostic.LatestVisualCaptured,
+            _coldStartDiagnostic.LatestVisualVisible,
+            _coldStartDiagnostic.LatestVisualModelRenderDisabled,
+            _coldStartDiagnostic.LatestVisualScaleFinitePositive,
+            _coldStartDiagnostic.LatestVisualDrawOffsetFinite);
         return TitleBackgroundColdStartDiagnosticLogic.Classify(input);
     }
 
@@ -831,21 +953,30 @@ public sealed unsafe partial class TitleScreenBackgroundService
         try
         {
             Directory.CreateDirectory(_configDirectory);
-            var currentPath = Path.Combine(_configDirectory, ColdStartDiagnosticFileName);
-            var previousPath = Path.Combine(_configDirectory, ColdStartDiagnosticPreviousFileName);
 
-            if (File.Exists(currentPath))
+            // Bounded rolling retention: shift each slot into the next-older one, oldest first, so a
+            // rare failed run survives a few more natural Character Select occurrences instead of being
+            // overwritten by the very next run.
+            for (var i = ColdStartDiagnosticRotationFileNames.Length - 1; i > 0; i--)
             {
+                var olderPath = Path.Combine(_configDirectory, ColdStartDiagnosticRotationFileNames[i - 1]);
+                if (!File.Exists(olderPath))
+                {
+                    continue;
+                }
+
+                var newerSlotPath = Path.Combine(_configDirectory, ColdStartDiagnosticRotationFileNames[i]);
                 try
                 {
-                    File.Copy(currentPath, previousPath, overwrite: true);
+                    File.Copy(olderPath, newerSlotPath, overwrite: true);
                 }
                 catch (Exception ex)
                 {
-                    _log.Debug(ex, "[XMU BG] Cold-start diagnostic previous report copy skipped.");
+                    _log.Debug(ex, "[XMU BG] Cold-start diagnostic rolling retention copy skipped.");
                 }
             }
 
+            var currentPath = Path.Combine(_configDirectory, ColdStartDiagnosticFileName);
             File.WriteAllText(currentPath, report + Environment.NewLine);
         }
         catch (Exception ex)

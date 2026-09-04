@@ -28,6 +28,9 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     private readonly string _configDirectory;
     private readonly Configuration _configuration;
     private readonly CharaSelectService? _charaSelectService;
+    // dev-plugin-only always-on cold-start recorder gate (Implementation plan — dev-only always-on
+    // Character Select flight recorder). Production/release plugin behavior must stay unchanged.
+    private readonly bool _isDevPlugin;
     private readonly TitleBackgroundAddressResolver _addressResolver = new();
     private readonly TitleBackgroundCameraCaptureService _cameraCaptureService;
     private readonly TitleBackgroundCharaSelectCameraAdapter _charaSelectCameraAdapter = new();
@@ -148,7 +151,8 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         IPluginLog log,
         string configDirectory,
         Configuration configuration,
-        CharaSelectService? charaSelectService = null)
+        CharaSelectService? charaSelectService = null,
+        bool isDevPlugin = false)
     {
         _gameInteropProvider = gameInteropProvider;
         _sigScanner = sigScanner;
@@ -160,6 +164,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         _configDirectory = configDirectory;
         _configuration = configuration;
         _charaSelectService = charaSelectService;
+        _isDevPlugin = isDevPlugin;
         // 選択キャラ変更イベント（既存 UpdateCharaSelectDisplayDetour を再利用）。次フレームの
         // MaintainTitleEditInformedCharaSelectPlacement で 1 回だけ再適用する。
         if (_charaSelectService != null)

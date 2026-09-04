@@ -300,7 +300,9 @@ public sealed unsafe partial class CharaSelectService
         bool selectedContentAvailable,
         bool mappingAvailable,
         bool identityConsistent)
-        => new(
+    {
+        var visual = TryReadActorVisualState(actor);
+        return new(
             actor,
             new CharaSelectActorIdentityKey(contentId, clientObjectIndex, objectIndex, entityId),
             normalizedIndex,
@@ -313,7 +315,15 @@ public sealed unsafe partial class CharaSelectService
             ClientObjectIndexValid: true,
             ObjectResolved: true,
             IdentityConsistent: identityConsistent,
-            DrawReady: TryReadDrawReady(actor));
+            DrawReady: TryReadDrawReady(actor),
+            VisualStateCaptured: visual.Captured,
+            ActorVisible: visual.Visible,
+            ModelRenderDisabled: visual.ModelRenderDisabled,
+            DrawObjectPresent: visual.DrawObjectPresent,
+            ScaleFinitePositive: visual.ScaleFinitePositive,
+            DrawOffsetFinite: visual.DrawOffsetFinite,
+            DrawOffsetNonZero: visual.DrawOffsetNonZero);
+    }
 
     // detour / poll から呼ぶ。pointer change は detour 内の pre/post 比較だけを受け取り、保存しない。
     private void NotifySelectedCharacterObserved(sbyte index, bool actorRecreated = false)
@@ -365,6 +375,46 @@ public sealed unsafe partial class CharaSelectService
         catch
         {
             return false;
+        }
+    }
+
+    // Read-only, typed, pointer-free actor visual-state facts (H8 cold-start recorder extension).
+    // RenderFlags==0 following the established Dalamud/FFXIVClientStructs convention that a nonzero
+    // RenderFlags means the object does not render; this reads existing native state and writes nothing.
+    private static (
+        bool Captured,
+        bool Visible,
+        bool ModelRenderDisabled,
+        bool DrawObjectPresent,
+        bool ScaleFinitePositive,
+        bool DrawOffsetFinite,
+        bool DrawOffsetNonZero) TryReadActorVisualState(nint actor)
+    {
+        if (actor == nint.Zero)
+        {
+            return (false, false, false, false, false, false, false);
+        }
+
+        try
+        {
+            var character = (Character*)actor;
+            var renderFlags = character->RenderFlags;
+            var scale = character->Scale;
+            var offset = character->DrawOffset;
+            var offsetFinite = float.IsFinite(offset.X) && float.IsFinite(offset.Y) && float.IsFinite(offset.Z);
+            var offsetNonZero = offsetFinite && (offset.X != 0f || offset.Y != 0f || offset.Z != 0f);
+            return (
+                true,
+                renderFlags == VisibilityFlags.None,
+                (renderFlags & VisibilityFlags.Model) != 0,
+                character->DrawObject != null,
+                float.IsFinite(scale) && scale > 0f,
+                offsetFinite,
+                offsetNonZero);
+        }
+        catch
+        {
+            return (false, false, false, false, false, false, false);
         }
     }
 }

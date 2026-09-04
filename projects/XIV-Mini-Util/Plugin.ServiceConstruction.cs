@@ -136,7 +136,8 @@ public sealed partial class Plugin : IDalamudPlugin
             pluginLog,
             pluginInterface.ConfigDirectory.FullName,
             _configuration,
-            _charaSelectService);
+            _charaSelectService,
+            isDevPlugin: pluginInterface.IsDev);
         _titleScreenBackgroundService.StartColdStartDiagnostic(titleBackgroundColdStartBefore);
         _materiaService = new MateriaExtractService(
             framework,

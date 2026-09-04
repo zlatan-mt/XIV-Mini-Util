@@ -45,7 +45,17 @@ internal readonly record struct CharaSelectResolvedActorContext(
     bool ClientObjectIndexValid,
     bool ObjectResolved,
     bool IdentityConsistent,
-    bool DrawReady)
+    bool DrawReady,
+    // Read-only, pointer-free actor visual-state facts (H8 cold-start recorder extension).
+    // VisualStateCaptured=false when the actor address was unavailable or the native read failed;
+    // callers must not infer "hidden" from an uncaptured state.
+    bool VisualStateCaptured = false,
+    bool ActorVisible = false,
+    bool ModelRenderDisabled = false,
+    bool DrawObjectPresent = false,
+    bool ScaleFinitePositive = false,
+    bool DrawOffsetFinite = false,
+    bool DrawOffsetNonZero = false)
 {
     public ulong ContentId => IdentityKey.ContentId;
     public short ClientObjectIndex => IdentityKey.ClientObjectIndex;
@@ -90,7 +100,9 @@ internal readonly record struct CharaSelectResolvedActorContext(
         => $"source={Source}; currentCharacterAvailable={CurrentCharacterAvailable}; entryAvailable={EntryAvailable}; "
            + $"selectedContentAvailable={SelectedContentAvailable}; mappingAvailable={MappingAvailable}; "
            + $"mappingHit={MappingHit}; clientObjectIndexValid={ClientObjectIndexValid}; "
-           + $"objectResolved={ObjectResolved}; identityConsistent={IdentityConsistent}; drawReady={DrawReady}";
+           + $"objectResolved={ObjectResolved}; identityConsistent={IdentityConsistent}; drawReady={DrawReady}; "
+           + $"visualStateCaptured={VisualStateCaptured}; actorVisible={ActorVisible}; "
+           + $"modelRenderDisabled={ModelRenderDisabled}; drawObjectPresent={DrawObjectPresent}";
 }
 
 internal static class CharaSelectSelectedCharacterIdentityLogic
