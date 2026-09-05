@@ -676,5 +676,158 @@ internal static partial class TestRunner
                 && !resolverText.Contains("ModelRenderDisabled", StringComparison.Ordinal)
                 && resolverText.Contains("RenderFlagsModelBitSet", StringComparison.Ordinal);
         });
+
+        Test(656, "cold-start resolver/visual observation is never hard-stopped by a fixed attempt count", () =>
+        {
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            var owner = new TitleBackgroundColdStartOwnerSnapshot(
+                TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+                OverrideEnabled: true,
+                V2Enabled: false,
+                PlacementEnabled: true,
+                PlacementCandidateId: TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+                PositionCaptured: false,
+                ActualOwner: "placement",
+                ExpectedOwner: "placement");
+            state.Arm(owner, owner, ColdStartArmMode.Startup);
+
+            var key = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var actor = new CharaSelectResolvedActorContext(
+                (nint)0x1000,
+                key,
+                NormalizedIndex: 0,
+                Source: CharaSelectIdentityResolveSource.SelectedCharacterIndex,
+                CurrentCharacterAvailable: true,
+                EntryAvailable: true,
+                SelectedContentAvailable: true,
+                MappingAvailable: true,
+                MappingHit: true,
+                ClientObjectIndexValid: true,
+                ObjectResolved: true,
+                IdentityConsistent: true,
+                DrawReady: true,
+                VisualStateCaptured: true,
+                VisibilityRaw: 0,
+                VisibilityHidden: false,
+                ReadyToDrawFlag: true,
+                RenderFlagsRaw: 0,
+                RenderFlagsModelBitSet: false,
+                DrawObjectPresent: true,
+                ScaleFinitePositive: true,
+                DrawOffsetFinite: true,
+                DrawOffsetNonZero: false);
+
+            // The old hard-stop kicked in at 120 attempts; prove observation still records well past it
+            // (a full 10-minute run at 60fps is ~36000 frames, so 300 is a representative sample).
+            const int attemptsPastOldBudget = 300;
+            for (var i = 0; i < attemptsPastOldBudget; i++)
+            {
+                state.RecordResolverAttempt(actor);
+            }
+
+            var root = FindRepositoryRoot();
+            var diagnosticPath = Path.Combine(
+                root,
+                "projects",
+                "XIV-Mini-Util",
+                "Services",
+                "TitleBackground",
+                "TitleScreenBackgroundService.ColdStartDiagnostic.cs");
+            var diagnosticText = File.ReadAllText(diagnosticPath);
+
+            return state.ResolverAttemptCount == attemptsPastOldBudget
+                && state.LatestVisualCaptured
+                // The fixed-count gate must no longer exist anywhere in the recorder source.
+                && !diagnosticText.Contains("ResolverAttemptBudget", StringComparison.Ordinal)
+                && !diagnosticText.Contains("CanAttemptResolver", StringComparison.Ordinal);
+        });
+
+        Test(657, "cold-start persistent ever-anomaly facts survive a later recovered/visible terminal sample", () =>
+        {
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            var owner = new TitleBackgroundColdStartOwnerSnapshot(
+                TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+                OverrideEnabled: true,
+                V2Enabled: false,
+                PlacementEnabled: true,
+                PlacementCandidateId: TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+                PositionCaptured: false,
+                ActualOwner: "placement",
+                ExpectedOwner: "placement");
+            state.Arm(owner, owner, ColdStartArmMode.Startup);
+
+            var key = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var visible = new CharaSelectResolvedActorContext(
+                (nint)0x1000,
+                key,
+                NormalizedIndex: 0,
+                Source: CharaSelectIdentityResolveSource.SelectedCharacterIndex,
+                CurrentCharacterAvailable: true,
+                EntryAvailable: true,
+                SelectedContentAvailable: true,
+                MappingAvailable: true,
+                MappingHit: true,
+                ClientObjectIndexValid: true,
+                ObjectResolved: true,
+                IdentityConsistent: true,
+                DrawReady: true,
+                VisualStateCaptured: true,
+                VisibilityRaw: 0,
+                VisibilityHidden: false,
+                ReadyToDrawFlag: true,
+                RenderFlagsRaw: 0,
+                RenderFlagsModelBitSet: false,
+                DrawObjectPresent: true,
+                ScaleFinitePositive: true,
+                DrawOffsetFinite: true,
+                DrawOffsetNonZero: false);
+
+            // Transient anomaly mid-run: hidden, no DrawObject, not ready-to-draw.
+            var transientAnomaly = visible with
+            {
+                VisibilityRaw = 1,
+                VisibilityHidden = true,
+                ReadyToDrawFlag = false,
+                DrawObjectPresent = false,
+            };
+
+            // Recovers before the terminal sample.
+            state.RecordResolverAttempt(visible);
+            state.RecordResolverAttempt(transientAnomaly);
+            state.RecordResolverAttempt(visible);
+
+            // The latest/terminal snapshot shows a fully recovered, unremarkable state...
+            return state.LatestVisualHidden == false
+                && state.LatestVisualDrawObjectPresent
+                && state.LatestVisualReadyToDrawFlag
+                // ...but the persistent ever-facts still remember the transient anomaly happened.
+                && state.VisibilityHiddenEverTrue
+                && state.DrawObjectEverAbsentWhileCaptured
+                && state.ReadyToDrawEverFalseWhileCaptured;
+        });
+
+        Test(658, "cold-start ever-anomaly facts are evidence only and are not fed into the terminal classifier", () =>
+        {
+            var root = FindRepositoryRoot();
+            var diagnosticPath = Path.Combine(
+                root,
+                "projects",
+                "XIV-Mini-Util",
+                "Services",
+                "TitleBackground",
+                "TitleScreenBackgroundService.ColdStartDiagnostic.cs");
+            var diagnosticText = File.ReadAllText(diagnosticPath);
+
+            var classifyBody = ExtractMethodBody(
+                diagnosticText,
+                "public static string Classify(in TitleBackgroundColdStartDiagnosisInput input)");
+
+            return diagnosticText.Contains("VisibilityHiddenEverTrue", StringComparison.Ordinal)
+                && diagnosticText.Contains("DrawObjectEverAbsentWhileCaptured", StringComparison.Ordinal)
+                && diagnosticText.Contains("ReadyToDrawEverFalseWhileCaptured", StringComparison.Ordinal)
+                && !classifyBody.Contains("VisibilityHiddenEverTrue", StringComparison.Ordinal)
+                && !classifyBody.Contains("DrawObjectEverAbsentWhileCaptured", StringComparison.Ordinal)
+                && !classifyBody.Contains("ReadyToDrawEverFalseWhileCaptured", StringComparison.Ordinal);
+        });
     }
 }

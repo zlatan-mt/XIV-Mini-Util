@@ -64,7 +64,6 @@ internal readonly record struct TitleBackgroundColdStartDiagnosisInput(
 internal static class TitleBackgroundColdStartDiagnosticLogic
 {
     public const int RecorderSchema = 2;
-    public const int ResolverAttemptBudget = 120;
     public static readonly TimeSpan MaxDuration = TimeSpan.FromMinutes(10);
 
     public static TitleBackgroundColdStartOwnerSnapshot CaptureOwnerSnapshot(
@@ -354,6 +353,13 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     private bool _visualHiddenObserved;
     private bool? _lastObservedVisualHidden;
 
+    // Persistent "ever" anomaly facts: once true, stay true for the run, so a transient anomaly that
+    // recovers before the terminal/latest sample is not lost. Evidence only — not used for
+    // classification (review 5119158365 MUST FIX).
+    public bool VisibilityHiddenEverTrue { get; private set; }
+    public bool DrawObjectEverAbsentWhileCaptured { get; private set; }
+    public bool ReadyToDrawEverFalseWhileCaptured { get; private set; }
+
     public int ActorIdentityEpoch { get; private set; }
     public int ActorRecreationCount { get; private set; }
     private CharaSelectActorIdentityKey _lastValidIdentityKey;
@@ -437,9 +443,6 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         LegacyOwnershipInactive |= legacyOwnershipInactive;
     }
 
-    public bool CanAttemptResolver
-        => ResolverAttemptCount < TitleBackgroundColdStartDiagnosticLogic.ResolverAttemptBudget;
-
     public void RecordResolverAttempt(in CharaSelectResolvedActorContext actor)
     {
         ResolverAttemptCount++;
@@ -512,6 +515,24 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             LatestVisualScaleFinitePositive = actor.ScaleFinitePositive;
             LatestVisualDrawOffsetFinite = actor.DrawOffsetFinite;
             LatestVisualDrawOffsetNonZero = actor.DrawOffsetNonZero;
+
+            // Persistent "ever" anomaly facts (evidence only, not a root-cause classification input):
+            // a transient anomaly that recovers before the terminal/latest sample must not be erased by
+            // it (review 5119158365 MUST FIX).
+            if (actor.VisibilityHidden == true)
+            {
+                VisibilityHiddenEverTrue = true;
+            }
+
+            if (!actor.DrawObjectPresent)
+            {
+                DrawObjectEverAbsentWhileCaptured = true;
+            }
+
+            if (!actor.ReadyToDrawFlag)
+            {
+                ReadyToDrawEverFalseWhileCaptured = true;
+            }
 
             if (!_visualHiddenObserved)
             {
@@ -661,6 +682,9 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             $"actor.visual.latestDrawOffsetFinite={B(LatestVisualDrawOffsetFinite)}",
             $"actor.visual.latestDrawOffsetNonZero={B(LatestVisualDrawOffsetNonZero)}",
             $"actor.visual.visibilityTransitionCount={VisualVisibilityTransitionCount}",
+            $"actor.visual.visibilityHiddenEverTrue={B(VisibilityHiddenEverTrue)}",
+            $"actor.visual.drawObjectEverAbsentWhileCaptured={B(DrawObjectEverAbsentWhileCaptured)}",
+            $"actor.visual.readyToDrawEverFalseWhileCaptured={B(ReadyToDrawEverFalseWhileCaptured)}",
             $"staticAnchor.evaluated={B(StaticAnchorEvaluated)}",
             $"staticAnchor.authorized={B(StaticAnchorAuthorized)}",
             $"staticAnchor.reason={StaticAnchorReason}",
@@ -899,12 +923,13 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 IsCharaSelectPlacementActive,
                 IsNewCharaSelectEngineActive);
 
-            if (_coldStartDiagnostic.CanAttemptResolver)
-            {
-                var actor = default(CharaSelectResolvedActorContext);
-                _charaSelectService?.TryResolveCurrentCharaSelectActor(out actor);
-                _coldStartDiagnostic.RecordResolverAttempt(actor);
-            }
+            // Observation must stay live for the entire active run (review 5119158365 MUST FIX): a
+            // disappearance/visibility transition/DrawObject loss/actor recreation occurring after an
+            // early fixed attempt count must not go unobserved. Bounded already by CharaSelect-only
+            // scope, MaxDuration, and the login/session-end/dispose stops above and below.
+            var actor = default(CharaSelectResolvedActorContext);
+            _charaSelectService?.TryResolveCurrentCharaSelectActor(out actor);
+            _coldStartDiagnostic.RecordResolverAttempt(actor);
 
             // Read only existing runtime evidence. Do not evaluate/arm an anchor or write a native value here.
             _coldStartDiagnostic.RecordRuntimeEvidence(
