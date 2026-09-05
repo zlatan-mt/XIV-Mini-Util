@@ -49,9 +49,22 @@ internal readonly record struct CharaSelectResolvedActorContext(
     // Read-only, pointer-free actor visual-state facts (H8 cold-start recorder extension).
     // VisualStateCaptured=false when the actor address was unavailable or the native read failed;
     // callers must not infer "hidden" from an uncaptured state.
+    //
+    // VisibilityRaw/VisibilityHidden use GameObject.Visibility, whose documented SetVisibility(byte)
+    // counterpart is "0 shows the object, 1 hides it" — the only visibility signal with confirmed
+    // semantics. VisibilityHidden is null for any raw value other than 0/1 (conservative: unknown, not
+    // assumed hidden or visible). RenderFlags is NOT used for visibility/model classification: current
+    // FFXIVClientStructs documents it only as "some bits hide, some show" without a confirmed direction
+    // for the Model bit, so RenderFlagsModelBitSet is kept as a raw neutral fact only (ChatGPT exact-HEAD
+    // review 5118977128 MUST FIX).
     bool VisualStateCaptured = false,
-    bool ActorVisible = false,
-    bool ModelRenderDisabled = false,
+    byte VisibilityRaw = 0,
+    bool? VisibilityHidden = null,
+    // TargetableStatus & ObjectTargetableFlags.ReadyToDraw, captured as an independent typed
+    // observation per the H8 plan (distinct from the existing DrawReady, which is IsReadyToDraw()).
+    bool ReadyToDrawFlag = false,
+    uint RenderFlagsRaw = 0,
+    bool RenderFlagsModelBitSet = false,
     bool DrawObjectPresent = false,
     bool ScaleFinitePositive = false,
     bool DrawOffsetFinite = false,
@@ -101,8 +114,9 @@ internal readonly record struct CharaSelectResolvedActorContext(
            + $"selectedContentAvailable={SelectedContentAvailable}; mappingAvailable={MappingAvailable}; "
            + $"mappingHit={MappingHit}; clientObjectIndexValid={ClientObjectIndexValid}; "
            + $"objectResolved={ObjectResolved}; identityConsistent={IdentityConsistent}; drawReady={DrawReady}; "
-           + $"visualStateCaptured={VisualStateCaptured}; actorVisible={ActorVisible}; "
-           + $"modelRenderDisabled={ModelRenderDisabled}; drawObjectPresent={DrawObjectPresent}";
+           + $"visualStateCaptured={VisualStateCaptured}; visibilityRaw={VisibilityRaw}; "
+           + $"visibilityHidden={(VisibilityHidden.HasValue ? VisibilityHidden.Value.ToString() : "none")}; "
+           + $"readyToDrawFlag={ReadyToDrawFlag}; drawObjectPresent={DrawObjectPresent}";
 }
 
 internal static class CharaSelectSelectedCharacterIdentityLogic

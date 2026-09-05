@@ -53,10 +53,11 @@ internal readonly record struct TitleBackgroundColdStartDiagnosisInput(
     bool LoginObserved,
     // Latest-or-terminal read-only actor visual-state evidence (H8 extension). Captured=false means
     // the visual state was never successfully read for this run; classification must not treat that
-    // as "hidden".
+    // as "hidden". LatestVisualHidden comes from the documented GameObject.Visibility byte only
+    // (true=hidden/raw==1, false=visible/raw==0, null=any other raw value / unknown) — RenderFlags is
+    // deliberately not used here (ChatGPT exact-HEAD review 5118977128 MUST FIX).
     bool LatestVisualCaptured = false,
-    bool LatestVisualVisible = false,
-    bool LatestVisualModelRenderDisabled = false,
+    bool? LatestVisualHidden = null,
     bool LatestVisualScaleFinitePositive = false,
     bool LatestVisualDrawOffsetFinite = false);
 
@@ -272,12 +273,12 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
         }
 
         // H8 extension: refine the generic visual candidate into a pointer-free technical label only
-        // when the typed visual-state read actually succeeded for this run.
-        if (input.LatestVisualCaptured && !input.LatestVisualVisible)
+        // when the typed visual-state read actually succeeded for this run. Only the documented
+        // GameObject.Visibility byte (LatestVisualHidden == true) is treated as "hidden" evidence — an
+        // unconfirmed/unknown reading (null) must not be overclassified (review 5118977128 MUST FIX).
+        if (input.LatestVisualCaptured && input.LatestVisualHidden == true)
         {
-            return input.LatestVisualModelRenderDisabled
-                ? "actor-model-render-disabled"
-                : "actor-visibility-hidden";
+            return "actor-visibility-hidden";
         }
 
         if (input.LatestVisualCaptured
@@ -335,18 +336,23 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     // H8 extension: pointer-free typed actor visual-state checkpoints. "FirstValid" is captured once,
     // at the first resolver attempt whose visual read succeeded; "Latest" is overwritten every attempt
     // and therefore also represents the terminal/last-observed state used for classification.
+    // Hidden/Visible come only from the documented GameObject.Visibility byte (null = unknown raw
+    // value); RenderFlags is kept only as a raw neutral fact (ModelBitSet), never a visibility verdict
+    // (ChatGPT exact-HEAD review 5118977128 MUST FIX).
     public bool FirstValidVisualCaptured { get; private set; }
-    public bool FirstValidVisualVisible { get; private set; }
-    public bool FirstValidVisualModelRenderDisabled { get; private set; }
+    public bool? FirstValidVisualHidden { get; private set; }
     public bool LatestVisualCaptured { get; private set; }
-    public bool LatestVisualVisible { get; private set; }
-    public bool LatestVisualModelRenderDisabled { get; private set; }
+    public byte LatestVisualVisibilityRaw { get; private set; }
+    public bool? LatestVisualHidden { get; private set; }
+    public bool LatestVisualReadyToDrawFlag { get; private set; }
+    public bool LatestVisualRenderFlagsModelBitSet { get; private set; }
     public bool LatestVisualDrawObjectPresent { get; private set; }
     public bool LatestVisualScaleFinitePositive { get; private set; }
     public bool LatestVisualDrawOffsetFinite { get; private set; }
     public bool LatestVisualDrawOffsetNonZero { get; private set; }
     public int VisualVisibilityTransitionCount { get; private set; }
-    private bool? _lastObservedVisualVisible;
+    private bool _visualHiddenObserved;
+    private bool? _lastObservedVisualHidden;
 
     public int ActorIdentityEpoch { get; private set; }
     public int ActorRecreationCount { get; private set; }
@@ -494,26 +500,28 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             if (!FirstValidVisualCaptured)
             {
                 FirstValidVisualCaptured = true;
-                FirstValidVisualVisible = actor.ActorVisible;
-                FirstValidVisualModelRenderDisabled = actor.ModelRenderDisabled;
+                FirstValidVisualHidden = actor.VisibilityHidden;
             }
 
             LatestVisualCaptured = true;
-            LatestVisualVisible = actor.ActorVisible;
-            LatestVisualModelRenderDisabled = actor.ModelRenderDisabled;
+            LatestVisualVisibilityRaw = actor.VisibilityRaw;
+            LatestVisualHidden = actor.VisibilityHidden;
+            LatestVisualReadyToDrawFlag = actor.ReadyToDrawFlag;
+            LatestVisualRenderFlagsModelBitSet = actor.RenderFlagsModelBitSet;
             LatestVisualDrawObjectPresent = actor.DrawObjectPresent;
             LatestVisualScaleFinitePositive = actor.ScaleFinitePositive;
             LatestVisualDrawOffsetFinite = actor.DrawOffsetFinite;
             LatestVisualDrawOffsetNonZero = actor.DrawOffsetNonZero;
 
-            if (!_lastObservedVisualVisible.HasValue)
+            if (!_visualHiddenObserved)
             {
-                _lastObservedVisualVisible = actor.ActorVisible;
+                _visualHiddenObserved = true;
+                _lastObservedVisualHidden = actor.VisibilityHidden;
             }
-            else if (_lastObservedVisualVisible.Value != actor.ActorVisible)
+            else if (_lastObservedVisualHidden != actor.VisibilityHidden)
             {
                 VisualVisibilityTransitionCount++;
-                _lastObservedVisualVisible = actor.ActorVisible;
+                _lastObservedVisualHidden = actor.VisibilityHidden;
             }
         }
     }
@@ -584,6 +592,7 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     {
         static string B(bool value) => value ? "True" : "False";
         static string N(string? value) => string.IsNullOrWhiteSpace(value) ? "none" : value;
+        static string TB(bool? value) => value.HasValue ? B(value.Value) : "none";
 
         var lines = new List<string>
         {
@@ -639,11 +648,14 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             $"actor.identityEpoch={ActorIdentityEpoch}",
             $"actor.recreationCount={ActorRecreationCount}",
             $"actor.visual.firstValidCaptured={B(FirstValidVisualCaptured)}",
-            $"actor.visual.firstValidVisible={B(FirstValidVisualVisible)}",
-            $"actor.visual.firstValidModelRenderDisabled={B(FirstValidVisualModelRenderDisabled)}",
+            $"actor.visual.firstValidHidden={TB(FirstValidVisualHidden)}",
             $"actor.visual.latestCaptured={B(LatestVisualCaptured)}",
-            $"actor.visual.latestVisible={B(LatestVisualVisible)}",
-            $"actor.visual.latestModelRenderDisabled={B(LatestVisualModelRenderDisabled)}",
+            $"actor.visual.latestVisibilityRaw={LatestVisualVisibilityRaw}",
+            $"actor.visual.latestHidden={TB(LatestVisualHidden)}",
+            $"actor.visual.latestReadyToDrawFlag={B(LatestVisualReadyToDrawFlag)}",
+            // Raw/neutral evidence only — the Model bit's direction is not documented strongly enough
+            // to be a "disabled" verdict (review 5118977128 MUST FIX). Do not use for classification.
+            $"actor.visual.latestRenderFlagsModelBitSet={B(LatestVisualRenderFlagsModelBitSet)}",
             $"actor.visual.latestDrawObjectPresent={B(LatestVisualDrawObjectPresent)}",
             $"actor.visual.latestScaleFinitePositive={B(LatestVisualScaleFinitePositive)}",
             $"actor.visual.latestDrawOffsetFinite={B(LatestVisualDrawOffsetFinite)}",
@@ -701,6 +713,15 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
     internal void StartColdStartDiagnostic(in TitleBackgroundColdStartOwnerSnapshot before)
     {
+        // Dev-plugin-only gate checked FIRST: a release/public plugin must show no cold-start recorder
+        // behavior at all — not even the presence-marker log line or the startup snapshot (review
+        // 5118977128 small cleanup).
+        var (devAllowed, _) = TitleBackgroundColdStartDiagnosticLogic.EvaluateDevGate(_isDevPlugin);
+        if (!devAllowed)
+        {
+            return;
+        }
+
         _log.Information(
             "[XMU BG] Title Background cold-start recorder loaded. coldStart.recorderSchema={Schema}, isDevPlugin={IsDevPlugin}",
             TitleBackgroundColdStartDiagnosticLogic.RecorderSchema,
@@ -710,13 +731,6 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
         if (_coldStartDiagnostic.Active || _coldStartDiagnostic.Completed)
         {
-            return;
-        }
-
-        var (devAllowed, devReason) = TitleBackgroundColdStartDiagnosticLogic.EvaluateDevGate(_isDevPlugin);
-        if (!devAllowed)
-        {
-            _coldStartDiagnostic.RecordStartupArmResult(ColdStartArmStatus.Skipped, devReason);
             return;
         }
 
@@ -927,8 +941,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _coldStartDiagnostic.ActorEpochChangedAfterConfirmedWrite,
             _coldStartDiagnostic.LoginObserved,
             _coldStartDiagnostic.LatestVisualCaptured,
-            _coldStartDiagnostic.LatestVisualVisible,
-            _coldStartDiagnostic.LatestVisualModelRenderDisabled,
+            _coldStartDiagnostic.LatestVisualHidden,
             _coldStartDiagnostic.LatestVisualScaleFinitePositive,
             _coldStartDiagnostic.LatestVisualDrawOffsetFinite);
         return TitleBackgroundColdStartDiagnosticLogic.Classify(input);

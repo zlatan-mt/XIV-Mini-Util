@@ -489,10 +489,14 @@ internal static partial class TestRunner
                 && serviceText.Contains("private readonly bool _isDevPlugin;", StringComparison.Ordinal)
                 && diagnosticText.Contains("TitleBackgroundColdStartDiagnosticLogic.EvaluateDevGate(_isDevPlugin)", StringComparison.Ordinal)
                 && diagnosticText.Contains("if (!_isDevPlugin)", StringComparison.Ordinal)
+                // review 5118977128 small cleanup: the dev gate must be checked before the recorder-loaded
+                // log / startup snapshot, so a release plugin shows literally no recorder behavior.
+                && diagnosticText.IndexOf("EvaluateDevGate(_isDevPlugin)", StringComparison.Ordinal)
+                    < diagnosticText.IndexOf("Title Background cold-start recorder loaded", StringComparison.Ordinal)
                 && constructionText.Contains("isDevPlugin: pluginInterface.IsDev", StringComparison.Ordinal);
         });
 
-        Test(651, "cold-start classification refines confirmed placement into pointer-free visual candidates only when captured", () =>
+        Test(651, "cold-start classification uses only the documented GameObject.Visibility signal, never RenderFlags, for hidden/model verdicts", () =>
         {
             var owner = new TitleBackgroundColdStartOwnerSnapshot(
                 TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
@@ -506,8 +510,7 @@ internal static partial class TestRunner
 
             TitleBackgroundColdStartDiagnosisInput BaseInput(
                 bool visualCaptured,
-                bool visualVisible,
-                bool modelRenderDisabled,
+                bool? visualHidden,
                 bool scaleFinitePositive,
                 bool drawOffsetFinite)
                 => new(
@@ -530,31 +533,47 @@ internal static partial class TestRunner
                     ActorEpochChangedAfterConfirmedWrite: false,
                     LoginObserved: true,
                     LatestVisualCaptured: visualCaptured,
-                    LatestVisualVisible: visualVisible,
-                    LatestVisualModelRenderDisabled: modelRenderDisabled,
+                    LatestVisualHidden: visualHidden,
                     LatestVisualScaleFinitePositive: scaleFinitePositive,
                     LatestVisualDrawOffsetFinite: drawOffsetFinite);
 
-            var hiddenGeneric = TitleBackgroundColdStartDiagnosticLogic.Classify(
-                BaseInput(visualCaptured: true, visualVisible: false, modelRenderDisabled: false, scaleFinitePositive: true, drawOffsetFinite: true));
-            var hiddenModel = TitleBackgroundColdStartDiagnosticLogic.Classify(
-                BaseInput(visualCaptured: true, visualVisible: false, modelRenderDisabled: true, scaleFinitePositive: true, drawOffsetFinite: true));
+            // Documented Visibility byte == 1 (hidden) is the only signal that may classify "hidden".
+            var hidden = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                BaseInput(visualCaptured: true, visualHidden: true, scaleFinitePositive: true, drawOffsetFinite: true));
+            // Visibility byte == 0 (visible) with a bad transform still yields the transform candidate.
             var transformCandidate = TitleBackgroundColdStartDiagnosticLogic.Classify(
-                BaseInput(visualCaptured: true, visualVisible: true, modelRenderDisabled: false, scaleFinitePositive: false, drawOffsetFinite: true));
+                BaseInput(visualCaptured: true, visualHidden: false, scaleFinitePositive: false, drawOffsetFinite: true));
+            // Visibility byte == 0 (visible) and a normal transform falls back to the generic label.
             var genericFallback = TitleBackgroundColdStartDiagnosticLogic.Classify(
-                BaseInput(visualCaptured: true, visualVisible: true, modelRenderDisabled: false, scaleFinitePositive: true, drawOffsetFinite: true));
+                BaseInput(visualCaptured: true, visualHidden: false, scaleFinitePositive: true, drawOffsetFinite: true));
+            // An unconfirmed/unknown raw Visibility value (neither 0 nor 1) must NOT be treated as hidden.
+            var unknownVisibility = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                BaseInput(visualCaptured: true, visualHidden: null, scaleFinitePositive: true, drawOffsetFinite: true));
             // Not captured must never be interpreted as hidden; it must fall back to the pre-existing label.
             var notCaptured = TitleBackgroundColdStartDiagnosticLogic.Classify(
-                BaseInput(visualCaptured: false, visualVisible: false, modelRenderDisabled: false, scaleFinitePositive: false, drawOffsetFinite: false));
+                BaseInput(visualCaptured: false, visualHidden: null, scaleFinitePositive: false, drawOffsetFinite: false));
 
-            return hiddenGeneric == "actor-visibility-hidden"
-                && hiddenModel == "actor-model-render-disabled"
+            // There must be no remaining "actor-model-render-disabled" classification anywhere: RenderFlags'
+            // Model-bit direction is not documented strongly enough (review 5118977128 MUST FIX).
+            var root = FindRepositoryRoot();
+            var diagnosticPath = Path.Combine(
+                root,
+                "projects",
+                "XIV-Mini-Util",
+                "Services",
+                "TitleBackground",
+                "TitleScreenBackgroundService.ColdStartDiagnostic.cs");
+            var diagnosticText = File.ReadAllText(diagnosticPath);
+
+            return hidden == "actor-visibility-hidden"
                 && transformCandidate == "actor-visual-transform-candidate"
                 && genericFallback == "post-placement-visual-candidate"
-                && notCaptured == "post-placement-visual-candidate";
+                && unknownVisibility == "post-placement-visual-candidate"
+                && notCaptured == "post-placement-visual-candidate"
+                && !diagnosticText.Contains("actor-model-render-disabled", StringComparison.Ordinal);
         });
 
-        Test(652, "cold-start runtime state captures first-valid and latest visual snapshots with bounded visibility transition count", () =>
+        Test(652, "cold-start runtime state captures first-valid and latest visual snapshots from the documented Visibility byte only", () =>
         {
             var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
             var owner = new TitleBackgroundColdStartOwnerSnapshot(
@@ -584,17 +603,20 @@ internal static partial class TestRunner
                 IdentityConsistent: true,
                 DrawReady: true,
                 VisualStateCaptured: true,
-                ActorVisible: true,
-                ModelRenderDisabled: false,
+                VisibilityRaw: 0,
+                VisibilityHidden: false,
+                ReadyToDrawFlag: true,
+                RenderFlagsRaw: 0,
+                RenderFlagsModelBitSet: false,
                 DrawObjectPresent: true,
                 ScaleFinitePositive: true,
                 DrawOffsetFinite: true,
                 DrawOffsetNonZero: false);
 
-            // First valid: visible.
+            // First valid: visible (Visibility byte 0).
             state.RecordResolverAttempt(baseActor);
-            // Second attempt: becomes hidden (transition 1).
-            var hidden = baseActor with { ActorVisible = false };
+            // Second attempt: hidden (Visibility byte 1) — transition 1.
+            var hidden = baseActor with { VisibilityRaw = 1, VisibilityHidden = true };
             state.RecordResolverAttempt(hidden);
             // Third attempt: visible again (transition 2), also the latest/terminal snapshot.
             state.RecordResolverAttempt(baseActor);
@@ -603,9 +625,10 @@ internal static partial class TestRunner
             state.RecordResolverAttempt(uncaptured);
 
             return state.FirstValidVisualCaptured
-                && state.FirstValidVisualVisible
+                && state.FirstValidVisualHidden == false
                 && state.LatestVisualCaptured
-                && state.LatestVisualVisible
+                && state.LatestVisualHidden == false
+                && state.LatestVisualReadyToDrawFlag
                 && state.VisualVisibilityTransitionCount == 2;
         });
 
@@ -627,6 +650,31 @@ internal static partial class TestRunner
                 && TitleScreenBackgroundService.ColdStartDiagnosticPreviousFileName3 == "title-background-cold-start-diag.prev3.txt"
                 && TitleScreenBackgroundService.ColdStartDiagnosticPreviousFileName4 == "title-background-cold-start-diag.prev4.txt"
                 && diagnosticText.Contains("ColdStartDiagnosticRotationFileNames.Length - 1; i > 0; i--", StringComparison.Ordinal);
+        });
+
+        Test(655, "cold-start visual-state read never derives visibility/model verdicts from RenderFlags", () =>
+        {
+            var root = FindRepositoryRoot();
+            var resolverPath = Path.Combine(
+                root,
+                "projects",
+                "XIV-Mini-Util",
+                "Services",
+                "CharaSelect",
+                "CharaSelectService.SelectedCharacterIdentity.cs");
+            var resolverText = File.ReadAllText(resolverPath);
+
+            // The only visibility-classifying read must be the documented GameObject.Visibility byte.
+            var visibilityHiddenSwitchIndex = resolverText.IndexOf(
+                "visibilityRaw switch", StringComparison.Ordinal);
+            var readyToDrawIndex = resolverText.IndexOf(
+                "ObjectTargetableFlags.ReadyToDraw", StringComparison.Ordinal);
+
+            return visibilityHiddenSwitchIndex >= 0
+                && readyToDrawIndex >= 0
+                && !resolverText.Contains("ActorVisible", StringComparison.Ordinal)
+                && !resolverText.Contains("ModelRenderDisabled", StringComparison.Ordinal)
+                && resolverText.Contains("RenderFlagsModelBitSet", StringComparison.Ordinal);
         });
     }
 }

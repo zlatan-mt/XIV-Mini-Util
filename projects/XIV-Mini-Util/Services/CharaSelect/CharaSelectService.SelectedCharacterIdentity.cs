@@ -317,8 +317,11 @@ public sealed unsafe partial class CharaSelectService
             IdentityConsistent: identityConsistent,
             DrawReady: TryReadDrawReady(actor),
             VisualStateCaptured: visual.Captured,
-            ActorVisible: visual.Visible,
-            ModelRenderDisabled: visual.ModelRenderDisabled,
+            VisibilityRaw: visual.VisibilityRaw,
+            VisibilityHidden: visual.VisibilityHidden,
+            ReadyToDrawFlag: visual.ReadyToDrawFlag,
+            RenderFlagsRaw: visual.RenderFlagsRaw,
+            RenderFlagsModelBitSet: visual.RenderFlagsModelBitSet,
             DrawObjectPresent: visual.DrawObjectPresent,
             ScaleFinitePositive: visual.ScaleFinitePositive,
             DrawOffsetFinite: visual.DrawOffsetFinite,
@@ -379,12 +382,26 @@ public sealed unsafe partial class CharaSelectService
     }
 
     // Read-only, typed, pointer-free actor visual-state facts (H8 cold-start recorder extension).
-    // RenderFlags==0 following the established Dalamud/FFXIVClientStructs convention that a nonzero
-    // RenderFlags means the object does not render; this reads existing native state and writes nothing.
+    //
+    // Visibility uses GameObject.Visibility, whose documented SetVisibility(byte) counterpart is
+    // "0 shows the object, 1 hides it" — the only visibility signal with confirmed semantics. Any raw
+    // value other than 0/1 stays unknown (VisibilityHidden=null) rather than being guessed.
+    //
+    // RenderFlags is captured only as raw/neutral evidence: current FFXIVClientStructs documents it as
+    // controlling rendering with "some bits hide, some show" and does not confirm a direction for the
+    // Model bit, so RenderFlagsModelBitSet is a raw fact only and must not be read as "model render
+    // disabled" (ChatGPT exact-HEAD review 5118977128 MUST FIX corrects an earlier overclassification).
+    //
+    // ReadyToDrawFlag (TargetableStatus & ObjectTargetableFlags.ReadyToDraw) is captured as an
+    // independent typed observation per the H8 plan, distinct from the existing DrawReady
+    // (Character.IsReadyToDraw()).
     private static (
         bool Captured,
-        bool Visible,
-        bool ModelRenderDisabled,
+        byte VisibilityRaw,
+        bool? VisibilityHidden,
+        bool ReadyToDrawFlag,
+        uint RenderFlagsRaw,
+        bool RenderFlagsModelBitSet,
         bool DrawObjectPresent,
         bool ScaleFinitePositive,
         bool DrawOffsetFinite,
@@ -392,12 +409,20 @@ public sealed unsafe partial class CharaSelectService
     {
         if (actor == nint.Zero)
         {
-            return (false, false, false, false, false, false, false);
+            return (false, 0, null, false, 0, false, false, false, false, false);
         }
 
         try
         {
             var character = (Character*)actor;
+            var visibilityRaw = character->Visibility;
+            bool? visibilityHidden = visibilityRaw switch
+            {
+                0 => false,
+                1 => true,
+                _ => null,
+            };
+            var targetableStatus = character->TargetableStatus;
             var renderFlags = character->RenderFlags;
             var scale = character->Scale;
             var offset = character->DrawOffset;
@@ -405,7 +430,10 @@ public sealed unsafe partial class CharaSelectService
             var offsetNonZero = offsetFinite && (offset.X != 0f || offset.Y != 0f || offset.Z != 0f);
             return (
                 true,
-                renderFlags == VisibilityFlags.None,
+                visibilityRaw,
+                visibilityHidden,
+                (targetableStatus & ObjectTargetableFlags.ReadyToDraw) != 0,
+                (uint)renderFlags,
                 (renderFlags & VisibilityFlags.Model) != 0,
                 character->DrawObject != null,
                 float.IsFinite(scale) && scale > 0f,
@@ -414,7 +442,7 @@ public sealed unsafe partial class CharaSelectService
         }
         catch
         {
-            return (false, false, false, false, false, false, false);
+            return (false, 0, null, false, 0, false, false, false, false, false);
         }
     }
 }
