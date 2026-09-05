@@ -300,7 +300,9 @@ public sealed unsafe partial class CharaSelectService
         bool selectedContentAvailable,
         bool mappingAvailable,
         bool identityConsistent)
-        => new(
+    {
+        var visual = TryReadActorVisualState(actor);
+        return new(
             actor,
             new CharaSelectActorIdentityKey(contentId, clientObjectIndex, objectIndex, entityId),
             normalizedIndex,
@@ -313,7 +315,18 @@ public sealed unsafe partial class CharaSelectService
             ClientObjectIndexValid: true,
             ObjectResolved: true,
             IdentityConsistent: identityConsistent,
-            DrawReady: TryReadDrawReady(actor));
+            DrawReady: TryReadDrawReady(actor),
+            VisualStateCaptured: visual.Captured,
+            VisibilityRaw: visual.VisibilityRaw,
+            VisibilityHidden: visual.VisibilityHidden,
+            ReadyToDrawFlag: visual.ReadyToDrawFlag,
+            RenderFlagsRaw: visual.RenderFlagsRaw,
+            RenderFlagsModelBitSet: visual.RenderFlagsModelBitSet,
+            DrawObjectPresent: visual.DrawObjectPresent,
+            ScaleFinitePositive: visual.ScaleFinitePositive,
+            DrawOffsetFinite: visual.DrawOffsetFinite,
+            DrawOffsetNonZero: visual.DrawOffsetNonZero);
+    }
 
     // detour / poll から呼ぶ。pointer change は detour 内の pre/post 比較だけを受け取り、保存しない。
     private void NotifySelectedCharacterObserved(sbyte index, bool actorRecreated = false)
@@ -365,6 +378,71 @@ public sealed unsafe partial class CharaSelectService
         catch
         {
             return false;
+        }
+    }
+
+    // Read-only, typed, pointer-free actor visual-state facts (H8 cold-start recorder extension).
+    //
+    // Visibility uses GameObject.Visibility, whose documented SetVisibility(byte) counterpart is
+    // "0 shows the object, 1 hides it" — the only visibility signal with confirmed semantics. Any raw
+    // value other than 0/1 stays unknown (VisibilityHidden=null) rather than being guessed.
+    //
+    // RenderFlags is captured only as raw/neutral evidence: current FFXIVClientStructs documents it as
+    // controlling rendering with "some bits hide, some show" and does not confirm a direction for the
+    // Model bit, so RenderFlagsModelBitSet is a raw fact only and must not be read as "model render
+    // disabled" (ChatGPT exact-HEAD review 5118977128 MUST FIX corrects an earlier overclassification).
+    //
+    // ReadyToDrawFlag (TargetableStatus & ObjectTargetableFlags.ReadyToDraw) is captured as an
+    // independent typed observation per the H8 plan, distinct from the existing DrawReady
+    // (Character.IsReadyToDraw()).
+    private static (
+        bool Captured,
+        byte VisibilityRaw,
+        bool? VisibilityHidden,
+        bool ReadyToDrawFlag,
+        uint RenderFlagsRaw,
+        bool RenderFlagsModelBitSet,
+        bool DrawObjectPresent,
+        bool ScaleFinitePositive,
+        bool DrawOffsetFinite,
+        bool DrawOffsetNonZero) TryReadActorVisualState(nint actor)
+    {
+        if (actor == nint.Zero)
+        {
+            return (false, 0, null, false, 0, false, false, false, false, false);
+        }
+
+        try
+        {
+            var character = (Character*)actor;
+            var visibilityRaw = character->Visibility;
+            bool? visibilityHidden = visibilityRaw switch
+            {
+                0 => false,
+                1 => true,
+                _ => null,
+            };
+            var targetableStatus = character->TargetableStatus;
+            var renderFlags = character->RenderFlags;
+            var scale = character->Scale;
+            var offset = character->DrawOffset;
+            var offsetFinite = float.IsFinite(offset.X) && float.IsFinite(offset.Y) && float.IsFinite(offset.Z);
+            var offsetNonZero = offsetFinite && (offset.X != 0f || offset.Y != 0f || offset.Z != 0f);
+            return (
+                true,
+                visibilityRaw,
+                visibilityHidden,
+                (targetableStatus & ObjectTargetableFlags.ReadyToDraw) != 0,
+                (uint)renderFlags,
+                (renderFlags & VisibilityFlags.Model) != 0,
+                character->DrawObject != null,
+                float.IsFinite(scale) && scale > 0f,
+                offsetFinite,
+                offsetNonZero);
+        }
+        catch
+        {
+            return (false, 0, null, false, 0, false, false, false, false, false);
         }
     }
 }

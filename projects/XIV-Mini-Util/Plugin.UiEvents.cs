@@ -11,6 +11,14 @@ public sealed partial class Plugin
 {
     private void CopyPendingTitleBackgroundAutomaticCheckReport()
     {
+        if (_titleScreenBackgroundService.TryConsumeColdStartDiagnosticClipboardText(out var coldStartText))
+        {
+            ImGui.SetClipboardText(coldStartText);
+            _chatGui.Print("[XIV Mini Util] Cold-start診断が完了しました。レポートをクリップボードへコピーしました。");
+            _pluginLog.Information("TitleBackground cold-start diagnostic copied to clipboard. chars={CharacterCount}", coldStartText.Length);
+            return;
+        }
+
         if (!_titleScreenBackgroundService.TryConsumeAutomaticCheckClipboardText(out var text))
         {
             return;
