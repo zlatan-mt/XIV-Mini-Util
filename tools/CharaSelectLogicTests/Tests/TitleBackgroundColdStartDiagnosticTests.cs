@@ -12,6 +12,109 @@ internal static partial class TestRunner
         void Test(int order, string name, Func<bool> assertion) =>
             tests.Add(new LogicTestCase(order, name, assertion));
 
+        static TitleBackgroundColdStartOwnerSnapshot PlacementOwner() => new(
+            TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+            OverrideEnabled: true,
+            V2Enabled: false,
+            PlacementEnabled: true,
+            PlacementCandidateId: TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId,
+            PositionCaptured: false,
+            ActualOwner: "placement",
+            ExpectedOwner: "placement");
+
+        static CharaSelectResolvedActorContext ValidActor(CharaSelectActorIdentityKey key) => new(
+            (nint)0x2000,
+            key,
+            NormalizedIndex: 0,
+            Source: CharaSelectIdentityResolveSource.CurrentCharacterMapping,
+            CurrentCharacterAvailable: true,
+            EntryAvailable: true,
+            SelectedContentAvailable: true,
+            MappingAvailable: true,
+            MappingHit: true,
+            ClientObjectIndexValid: true,
+            ObjectResolved: true,
+            IdentityConsistent: true,
+            DrawReady: true,
+            VisualStateCaptured: true,
+            VisibilityRaw: 0,
+            VisibilityHidden: false,
+            ReadyToDrawFlag: true,
+            RenderFlagsRaw: 0,
+            RenderFlagsModelBitSet: false,
+            DrawObjectPresent: true,
+            ScaleFinitePositive: true,
+            DrawOffsetFinite: true,
+            DrawOffsetNonZero: false);
+
+        // A same-tick correlation snapshot for a run where placement has applied+confirmed for
+        // `appliedKey` at `appliedGeneration`, the resolver currently sees `resolvedKey`, and the
+        // read-only transform read produced `driftMeters` (NaN = read failed / not computable).
+        static TitleBackgroundColdStartPlacementTickSnapshot Tick(
+            int sceneGeneration,
+            CharaSelectActorIdentityKey resolvedKey,
+            bool resolvedValid,
+            bool transformReadOk,
+            int applyCount,
+            bool writeReadbackConfirmed,
+            CharaSelectActorIdentityKey appliedKey,
+            int appliedGeneration,
+            float driftMeters,
+            string writeStatus = "confirmed",
+            bool posReadback = true,
+            bool rotReadback = true,
+            bool setterCompleted = true,
+            int writeAttemptCount = 0,
+            string trigger = "capture-complete") => new(
+            SceneGeneration: sceneGeneration,
+            ResolvedActorValid: resolvedValid,
+            ResolvedActorKey: resolvedKey,
+            TransformReadOk: transformReadOk,
+            PlacementApplyCount: applyCount,
+            PlacementLastWriteReadbackConfirmed: writeReadbackConfirmed,
+            PlacementLastWriteStatus: writeStatus,
+            PlacementLastWritePositionReadback: posReadback,
+            PlacementLastWriteRotationReadback: rotReadback,
+            PlacementLastWriteSetterCompleted: setterCompleted,
+            PlacementWriteAttemptCount: writeAttemptCount,
+            PlacementLastTrigger: trigger,
+            PlacementLastAppliedActorKey: appliedKey,
+            PlacementLastAppliedSceneGeneration: appliedGeneration,
+            RetentionDriftMeters: driftMeters);
+
+        static TitleBackgroundColdStartDiagnosisInput RetentionClassifyInput(
+            bool retentionComparable,
+            float retentionDriftMeters,
+            bool driftExceededEver = false,
+            int uniqueResolved = 1,
+            int confirmedWriteKeys = 1,
+            bool actorEpochChangedAfterWrite = false) => new(
+            PlacementOwner(),
+            PlacementOwner(),
+            CharaSelectObserved: true,
+            PlacementSceneGeneration: 1,
+            ActiveSceneGeneration: 1,
+            ResolverEverValid: true,
+            DrawReadyEverTrue: true,
+            StaticAnchorEvaluated: true,
+            StaticAnchorAuthorized: true,
+            StaticAnchorReason: "authorized",
+            CaptureCompleted: true,
+            CaptureTimedOut: false,
+            PlacementWriteAttemptCount: 3,
+            PlacementWriteConfirmed: true,
+            UniqueResolvedActorCount: uniqueResolved,
+            ConfirmedWriteKeyCount: confirmedWriteKeys,
+            ActorEpochChangedAfterConfirmedWrite: actorEpochChangedAfterWrite,
+            LoginObserved: true,
+            LatestVisualCaptured: true,
+            LatestVisualHidden: false,
+            LatestVisualScaleFinitePositive: true,
+            LatestVisualDrawOffsetFinite: true,
+            RetentionTerminalComparable: retentionComparable,
+            RetentionTerminalDriftMeters: retentionDriftMeters,
+            RetentionDriftExceededEpsilonEver: driftExceededEver);
+
         Test(640, "cold-start snapshot identifies stale FRU v2 owner without mutating config", () =>
         {
             var configuration = new Configuration();
@@ -250,7 +353,7 @@ internal static partial class TestRunner
                 automaticCheckRequested: true,
                 placementProofArmed: false);
 
-            return TitleBackgroundColdStartDiagnosticLogic.RecorderSchema == 2
+            return TitleBackgroundColdStartDiagnosticLogic.RecorderSchema == 3
                 && statusArmed == ColdStartArmStatus.Armed && reasonArmed == "ok"
                 && statusLogin == ColdStartArmStatus.Skipped && reasonLogin == "already-logged-in"
                 && statusDisabled == ColdStartArmStatus.Skipped && reasonDisabled == "override-disabled"
@@ -375,7 +478,7 @@ internal static partial class TestRunner
                 && state.ActorRecreationCount == 1;
         });
 
-        Test(648, "cold-start terminal report contains Phase A2 schema, arm result, counters and privacy-safe fields", () =>
+        Test(648, "cold-start terminal report contains schema, arm result, counters and privacy-safe fields", () =>
         {
             var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
             var owner = new TitleBackgroundColdStartOwnerSnapshot(
@@ -395,16 +498,23 @@ internal static partial class TestRunner
 
             var report = state.Complete("post-placement-visual-candidate");
 
-            return report.Contains("coldStart.recorderSchema=2", StringComparison.Ordinal)
+            return report.Contains("coldStart.recorderSchema=3", StringComparison.Ordinal)
                 && report.Contains("coldStart.armMode=Startup", StringComparison.Ordinal)
                 && report.Contains("coldStart.startupArmStatus=Armed", StringComparison.Ordinal)
                 && report.Contains("coldStart.startupArmReason=ok", StringComparison.Ordinal)
+                && report.Contains("coldStart.evidenceNote=", StringComparison.Ordinal)
                 && report.Contains("resolver.drawReadyAtFirstValid=", StringComparison.Ordinal)
                 && report.Contains("resolver.drawReadyEverTrue=", StringComparison.Ordinal)
                 && report.Contains("resolver.drawReadyTransitionCount=", StringComparison.Ordinal)
                 && report.Contains("actor.identityEpoch=", StringComparison.Ordinal)
                 && report.Contains("actor.recreationCount=", StringComparison.Ordinal)
                 && report.Contains("placement.actorEpochChangedAfterConfirmedWrite=", StringComparison.Ordinal)
+                && report.Contains("placement.writeConfirmedSemantics=cumulative-any-attempt", StringComparison.Ordinal)
+                && report.Contains("retention.terminalDriftMeters=none", StringComparison.Ordinal)
+                && report.Contains("retention.epsilonMeters=", StringComparison.Ordinal)
+                && report.Contains("checkpoints.count=", StringComparison.Ordinal)
+                && report.Contains("login.placementLoginStopInterpretation=", StringComparison.Ordinal)
+                && !report.Contains("login.placementLoginStopped=", StringComparison.Ordinal)
                 && !report.Contains("0x", StringComparison.Ordinal)
                 && TitleScreenBackgroundService.ColdStartDiagnosticPreviousFileName == "title-background-cold-start-diag.prev.txt";
         });
@@ -828,6 +938,353 @@ internal static partial class TestRunner
                 && !classifyBody.Contains("VisibilityHiddenEverTrue", StringComparison.Ordinal)
                 && !classifyBody.Contains("DrawObjectEverAbsentWhileCaptured", StringComparison.Ordinal)
                 && !classifyBody.Contains("ReadyToDrawEverFalseWhileCaptured", StringComparison.Ordinal);
+        });
+
+        Test(659, "cold-start retention does not false-positive on an ordinary character switch or scene switch", () =>
+        {
+            var applied = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var switched = new CharaSelectActorIdentityKey(200, 1, 1, 20);
+
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+            state.RecordResolverAttempt(ValidActor(switched));
+
+            // Different resolved actor than the last confirmed apply -> not comparable, no drift.
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: switched, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: applied, appliedGeneration: 1,
+                driftMeters: 4.2f));
+
+            // Same actor but a different (newer) scene generation than the applied one -> not comparable.
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 2, resolvedKey: applied, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: applied, appliedGeneration: 1,
+                driftMeters: 4.2f));
+
+            var classified = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                RetentionClassifyInput(state.RetentionTerminalComparable, state.RetentionTerminalDriftMeters));
+
+            return state.RetentionNotComparableCount == 2
+                && !state.RetentionTerminalComparable
+                && float.IsNaN(state.RetentionTerminalDriftMeters)
+                && float.IsNaN(state.RetentionLastValidDriftMeters)
+                && state.RetentionComparableSampleCountTotal == 0
+                && classified != "placement-retention-drift";
+        });
+
+        Test(660, "cold-start retention records a same-actor post-apply displacement that later recovers as evidence, not a terminal drift", () =>
+        {
+            var key = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+            state.RecordResolverAttempt(ValidActor(key));
+
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: key, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: key, appliedGeneration: 1,
+                driftMeters: 0.2f));
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: key, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: key, appliedGeneration: 1,
+                driftMeters: 0.001f));
+
+            var checkpoints = string.Join("\n", state.Checkpoints);
+            var classified = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                RetentionClassifyInput(state.RetentionTerminalComparable, state.RetentionTerminalDriftMeters, state.RetentionDriftExceededEpsilonEverTrue));
+
+            return state.RetentionTerminalComparable
+                && state.RetentionTerminalDriftMeters <= TitleBackgroundColdStartDiagnosticLogic.RetentionDriftEpsilonMeters
+                && state.RetentionDriftExceededEpsilonEverTrue
+                && state.RetentionMaxDriftMeters >= 0.19f
+                && state.RetentionComparableSampleCountTotal == 2
+                && checkpoints.Contains("retention-drift-exceeded", StringComparison.Ordinal)
+                && checkpoints.Contains("retention-drift-recovered", StringComparison.Ordinal)
+                && classified != "placement-retention-drift";
+        });
+
+        Test(661, "cold-start classifier reports placement-retention-drift only for a comparable terminal sample past epsilon", () =>
+        {
+            var sustained = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                RetentionClassifyInput(retentionComparable: true, retentionDriftMeters: 0.5f));
+            var recovered = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                RetentionClassifyInput(retentionComparable: true, retentionDriftMeters: 0.001f, driftExceededEver: true));
+            var notComparable = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                RetentionClassifyInput(retentionComparable: false, retentionDriftMeters: float.NaN, driftExceededEver: true));
+
+            return sustained == "placement-retention-drift"
+                && recovered == "post-placement-visual-candidate"
+                && notComparable == "post-placement-visual-candidate";
+        });
+
+        Test(662, "cold-start retention never converts a failed read or an unconfirmed placement into 0 / retained", () =>
+        {
+            var key = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+            state.RecordResolverAttempt(ValidActor(key));
+
+            // Transform read failed this tick.
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: key, resolvedValid: true, transformReadOk: false,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: key, appliedGeneration: 1,
+                driftMeters: float.NaN));
+            // A placement write attempt exists but was never readback-confirmed.
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: key, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: false, appliedKey: key, appliedGeneration: 1,
+                driftMeters: 0.3f));
+
+            var report = state.Complete("post-placement-visual-candidate");
+
+            return state.RetentionNotComparableCount == 2
+                && state.RetentionComparableSampleCountTotal == 0
+                && float.IsNaN(state.RetentionLastValidDriftMeters)
+                && float.IsNaN(state.RetentionMaxDriftMeters)
+                && !state.RetentionDriftExceededEpsilonEverTrue
+                && report.Contains("retention.lastValidDriftMeters=none", StringComparison.Ordinal)
+                && report.Contains("retention.maxDriftMeters=none", StringComparison.Ordinal)
+                && report.Contains("retention.notComparableCount=2", StringComparison.Ordinal);
+        });
+
+        Test(663, "cold-start retention closes the interval and re-baselines when the confirmed placement target changes", () =>
+        {
+            var key = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+            state.RecordResolverAttempt(ValidActor(key));
+
+            // Interval 1: one comparable sample well past epsilon.
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: key, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: key, appliedGeneration: 1,
+                driftMeters: 0.3f));
+
+            // Placement re-applies (apply count 1 -> 2): interval 1 closes, a fresh baseline starts.
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: key, resolvedValid: true, transformReadOk: true,
+                applyCount: 2, writeReadbackConfirmed: true, appliedKey: key, appliedGeneration: 1,
+                driftMeters: 0.002f));
+
+            return state.RetentionClosedIntervalCount == 1
+                && state.RetentionIntervalComparableSampleCount == 1
+                && state.RetentionTerminalDriftMeters <= TitleBackgroundColdStartDiagnosticLogic.RetentionDriftEpsilonMeters
+                && state.RetentionComparableSampleCountTotal == 2;
+        });
+
+        Test(664, "cold-start checkpoint history is bounded with an explicit dropped count and keeps latest state", () =>
+        {
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+
+            const int distinctKeys = 30;
+            for (var i = 0; i < distinctKeys; i++)
+            {
+                var key = new CharaSelectActorIdentityKey((ulong)(100 + i), (short)i, (ushort)i, (uint)(10 + i));
+                state.RecordResolverAttempt(ValidActor(key));
+                state.RecordPlacementCorrelation(Tick(
+                    sceneGeneration: 1, resolvedKey: key, resolvedValid: true, transformReadOk: true,
+                    applyCount: 0, writeReadbackConfirmed: false, appliedKey: default, appliedGeneration: 0,
+                    driftMeters: float.NaN));
+            }
+
+            var report = state.Complete("post-placement-visual-candidate");
+
+            // 1 identity-first + 29 identity-changed = 30 checkpoint events, cap 24.
+            return state.Checkpoints.Count == 24
+                && state.CheckpointDroppedCount == 6
+                && state.ActorIdentityEpoch == distinctKeys
+                && report.Contains("checkpoints.count=24", StringComparison.Ordinal)
+                && report.Contains("checkpoints.dropped=6", StringComparison.Ordinal)
+                && report.Contains("checkpoints.note=event-order-within-a-single-frame-is-unknown", StringComparison.Ordinal);
+        });
+
+        Test(665, "cold-start per-attempt write observations track latest status distinctly from cumulative confirmation and are bounded", () =>
+        {
+            var key = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+            state.RecordResolverAttempt(ValidActor(key));
+
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: key, resolvedValid: true, transformReadOk: true,
+                applyCount: 0, writeReadbackConfirmed: false, appliedKey: default, appliedGeneration: 0,
+                driftMeters: float.NaN, writeStatus: "confirmed", posReadback: true, rotReadback: true,
+                writeAttemptCount: 1));
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: key, resolvedValid: true, transformReadOk: true,
+                applyCount: 0, writeReadbackConfirmed: false, appliedKey: default, appliedGeneration: 0,
+                driftMeters: float.NaN, writeStatus: "position-readback-mismatch", posReadback: false, rotReadback: false,
+                writeAttemptCount: 2));
+            // Counter jumps 2 -> 5: two attempts happened between recorder ticks.
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: key, resolvedValid: true, transformReadOk: true,
+                applyCount: 0, writeReadbackConfirmed: false, appliedKey: default, appliedGeneration: 0,
+                driftMeters: float.NaN, writeStatus: "confirmed", posReadback: true, rotReadback: true,
+                writeAttemptCount: 5));
+
+            var observations = string.Join("\n", state.WriteObservations);
+
+            return state.WriteObservations.Count == 3
+                && observations.Contains("idx=2;status=position-readback-mismatch;posReadback=False", StringComparison.Ordinal)
+                && observations.Contains("idx=5;status=confirmed", StringComparison.Ordinal)
+                && observations.Contains("priorUnobservedAttempts=2", StringComparison.Ordinal)
+                && state.LatestWriteStatus == "confirmed"
+                && state.LatestWritePositionReadback;
+        });
+
+        Test(666, "cold-start fresh runtime state renders empty/none retention + checkpoint fields", () =>
+        {
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+            state.RecordScene("custom:fru-clear-stage", 1238, 0, 1, 1, "placement", false, true, false);
+            var report = state.Complete("post-placement-visual-candidate");
+
+            return report.Contains("retention.terminalComparable=False", StringComparison.Ordinal)
+                && report.Contains("retention.terminalDriftMeters=none", StringComparison.Ordinal)
+                && report.Contains("retention.comparableSampleCount=0", StringComparison.Ordinal)
+                && report.Contains("retention.notComparableCount=0", StringComparison.Ordinal)
+                && report.Contains("retention.closedIntervalCount=0", StringComparison.Ordinal)
+                && report.Contains("checkpoints.count=0", StringComparison.Ordinal)
+                && report.Contains("checkpoints.dropped=0", StringComparison.Ordinal)
+                && report.Contains("placement.writeAttemptObservations.count=0", StringComparison.Ordinal);
+        });
+
+        Test(667, "cold-start login-stop is a split representation, never a bare stopped claim", () =>
+        {
+            var nonProof = TitleBackgroundColdStartDiagnosticLogic.LoginStopInterpretation(
+                logoutTransitionObserved: false, loginStopLatch: false);
+            var proofSet = TitleBackgroundColdStartDiagnosticLogic.LoginStopInterpretation(
+                logoutTransitionObserved: true, loginStopLatch: true);
+            var proofUnset = TitleBackgroundColdStartDiagnosticLogic.LoginStopInterpretation(
+                logoutTransitionObserved: true, loginStopLatch: false);
+
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+            state.RecordLoginEvidence(
+                sceneOverrideActive: false,
+                v2PostLoginWritesStopped: true,
+                placementLoginStopLatch: false,
+                placementLogoutTransitionObserved: false,
+                placementWriteAttemptCountAtLoginFrame: 0);
+            var report = state.Complete("post-placement-visual-candidate");
+
+            return nonProof == "latch-not-applicable-requires-proof-run-logout-observation"
+                && proofSet == "latch-set"
+                && proofUnset == "latch-expected-but-unset"
+                && report.Contains("login.placementLoginStopLatch=False", StringComparison.Ordinal)
+                && report.Contains("login.placementLogoutTransitionObserved=False", StringComparison.Ordinal)
+                && report.Contains("login.placementLoginStopInterpretation=latch-not-applicable-requires-proof-run-logout-observation", StringComparison.Ordinal)
+                && report.Contains("login.placementWriteObservationEndsAtLoginFrame=True", StringComparison.Ordinal)
+                && report.Contains("login.placementPostLoginWriteGate=stop-on-logged-in-gate-early-return", StringComparison.Ordinal)
+                && report.Contains("login.placementWriteAttemptDeltaAtLoginFrame=0", StringComparison.Ordinal)
+                && !report.Contains("login.placementLoginStopped=", StringComparison.Ordinal);
+        });
+
+        Test(668, "cold-start identity checkpoints use run-local anonymous slots (A->B->A) and never emit raw ids", () =>
+        {
+            var a = new CharaSelectActorIdentityKey(111, 0, 0, 10);
+            var b = new CharaSelectActorIdentityKey(222, 1, 1, 20);
+
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+
+            foreach (var key in new[] { a, b, a })
+            {
+                state.RecordResolverAttempt(ValidActor(key));
+                state.RecordPlacementCorrelation(Tick(
+                    sceneGeneration: 1, resolvedKey: key, resolvedValid: true, transformReadOk: true,
+                    applyCount: 0, writeReadbackConfirmed: false, appliedKey: default, appliedGeneration: 0,
+                    driftMeters: float.NaN));
+            }
+
+            var report = state.Complete("post-placement-visual-candidate");
+            var checkpoints = string.Join("\n", state.Checkpoints);
+
+            return state.ActorIdentityEpoch == 3
+                && state.ActorRecreationCount == 2
+                && checkpoints.Contains("identity-first;epoch=1;anonSlot=0", StringComparison.Ordinal)
+                && checkpoints.Contains("anonSlot=1;returnedToSlot=False", StringComparison.Ordinal)
+                && checkpoints.Contains("anonSlot=0;returnedToSlot=True", StringComparison.Ordinal)
+                && checkpoints.Contains("changed=[content=", StringComparison.Ordinal)
+                && !report.Contains("0x", StringComparison.Ordinal)
+                && !report.Contains("111", StringComparison.Ordinal)
+                && !report.Contains("222", StringComparison.Ordinal);
+        });
+
+        Test(669, "cold-start classifier separates a bare post-write identity-epoch change (evidence) from an unmatched resolved identity (H7)", () =>
+        {
+            // Sample-log shape: epoch changed after a confirmed write, but every resolved identity
+            // did get its own confirmed write (unique == confirmedKeys). NOT actor-recreation.
+            var bareEpochChange = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                RetentionClassifyInput(
+                    retentionComparable: false,
+                    retentionDriftMeters: float.NaN,
+                    uniqueResolved: 2,
+                    confirmedWriteKeys: 2,
+                    actorEpochChangedAfterWrite: true));
+
+            // A resolved identity that never received its own confirmed write -> H7.
+            var unmatchedIdentity = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                RetentionClassifyInput(
+                    retentionComparable: false,
+                    retentionDriftMeters: float.NaN,
+                    uniqueResolved: 3,
+                    confirmedWriteKeys: 2,
+                    actorEpochChangedAfterWrite: true));
+
+            return bareEpochChange == "post-placement-visual-candidate"
+                && unmatchedIdentity == "actor-recreation";
+        });
+
+        Test(670, "cold-start retention drift compares the same Character.Position field the placement write path writes and reads back", () =>
+        {
+            var root = FindRepositoryRoot();
+            var probePath = Path.Combine(
+                root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleBackgroundCharacterSourceProbe.cs");
+            var diagnosticPath = Path.Combine(
+                root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.ColdStartDiagnostic.cs");
+            var probeText = File.ReadAllText(probePath);
+            var diagnosticText = File.ReadAllText(diagnosticPath);
+
+            // Pure helper behaviour.
+            var euclid = TitleBackgroundColdStartDiagnosticLogic.ComputeRetentionDrift(
+                new System.Numerics.Vector3(0f, 0f, 0f), new System.Numerics.Vector3(3f, 0f, 4f));
+            var nan = TitleBackgroundColdStartDiagnosticLogic.ComputeRetentionDrift(
+                new System.Numerics.Vector3(float.NaN, 0f, 0f), System.Numerics.Vector3.Zero);
+
+            return Math.Abs(euclid - 5f) < 0.0001f
+                && float.IsNaN(nan)
+                // Write path: GameObject.SetPosition, readback from Character.Position.
+                && probeText.Contains("character->SetPosition(position.X, position.Y, position.Z)", StringComparison.Ordinal)
+                && probeText.Contains("readBackPosition = new Vector3(", StringComparison.Ordinal)
+                // Read path used by the retention observation: the same Character.Position field.
+                && probeText.Contains("position = new Vector3(character->Position.X, character->Position.Y, character->Position.Z)", StringComparison.Ordinal)
+                && diagnosticText.Contains("TryReadCharaSelectCharacterTransform reads the same Character.Position field", StringComparison.Ordinal)
+                && diagnosticText.Contains("_charaSelectPlacement.LastAppliedPosition", StringComparison.Ordinal)
+                && TitleBackgroundColdStartDiagnosticLogic.RetentionDriftEpsilonMeters
+                    == TitleBackgroundCharaSelectPlacementLogic.CapturePositionEpsilon;
+        });
+
+        Test(671, "cold-start does no post-login actor/camera re-read: the retention transform read is pre-login CharaSelect only", () =>
+        {
+            var root = FindRepositoryRoot();
+            var diagnosticPath = Path.Combine(
+                root, "projects", "XIV-Mini-Util", "Services", "TitleBackground", "TitleScreenBackgroundService.ColdStartDiagnostic.cs");
+            var diagnosticText = File.ReadAllText(diagnosticPath);
+
+            var updateBody = ExtractMethodBody(diagnosticText, "private void OnColdStartDiagnosticFrameworkUpdate(IFramework _)");
+            var loginBranchStart = updateBody.IndexOf("if (_clientState.IsLoggedIn)", StringComparison.Ordinal);
+            var charaSelectGuard = updateBody.IndexOf("currentMap != GameLobbyType.CharaSelect", StringComparison.Ordinal);
+            var transformRead = updateBody.IndexOf("TryReadCharaSelectCharacterTransform(", StringComparison.Ordinal);
+            var loginEvidence = updateBody.IndexOf("RecordLoginEvidence(", StringComparison.Ordinal);
+
+            // Exactly one transform read in the whole recorder, and it sits inside the pre-login
+            // Character-Select branch (after the logged-in early return and after the lobby guard).
+            return CountOccurrences(diagnosticText, "TryReadCharaSelectCharacterTransform(") == 1
+                && loginBranchStart >= 0 && charaSelectGuard >= 0 && transformRead >= 0 && loginEvidence >= 0
+                && loginEvidence < charaSelectGuard
+                && charaSelectGuard < transformRead
+                && !diagnosticText.Contains("SceneCamera", StringComparison.Ordinal);
         });
     }
 }

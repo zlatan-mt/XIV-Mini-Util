@@ -37,7 +37,7 @@ This evidence does not authorize an H1 owner migration fix, draw/camera fix, or 
 Capture the first eligible pre-login FRU Character Select lifecycle during normal use without settings changes, button presses, preset re-selection, probe operations, or an intentional reproduction attempt.
 
 ### Required behavior
-1. Emit one privacy-safe recorder-presence marker at plugin/service startup regardless of arm eligibility (for example `coldStart.recorderSchema=2`). This must not mutate runtime/config state.
+1. Emit one privacy-safe recorder-presence marker at plugin/service startup regardless of arm eligibility (currently `coldStart.recorderSchema=3`). This must not mutate runtime/config state.
 2. Preserve the startup owner/config snapshot even if the diagnostic does not arm immediately.
 3. Record compact startup arm result / skip or block reason.
 4. If startup arm was missed, permit a passive first-scene fallback arm when the first eligible pre-login FRU Character Select is reached, but only if OneClick/probe/config-mutation state would not make evidence ambiguous.
@@ -59,12 +59,26 @@ Retain existing startup/scene/static-anchor/placement/V2 evidence and add only:
 - whether confirmed placement occurred before/after identity epoch change;
 - login/session-end cleanup state.
 
+Recorder schema 3 adds (all pointer-free / privacy-safe):
+- per-attempt placement-write observations (`placement.writeAttempt=…`, bounded 8) distinct from the cumulative `placement.writeConfirmed` OR, plus `placement.latestWrite*`;
+- same-tick placement-retention drift as scalar distances only (`retention.*`): terminal comparability, last-valid / max drift, comparable vs not-comparable sample counts, per-interval stats, closed-interval count, `retention.epsilonMeters` = the placement write path's own readback epsilon;
+- bounded event checkpoints (`coldStart.checkpoint[i]=…`, cap 24 + `checkpoints.dropped`) for identity change (with run-local anonymous actor slots and component-change booleans), placement apply/write attempts, and drift exceed/recover;
+- split login-stop representation (`login.placementLoginStopLatch`, `login.placementLogoutTransitionObserved`, `login.placementLoginStopInterpretation`, a bounded `login.placementWriteAttemptDeltaAtLoginFrame` with an explicit observation-end marker).
+
 Prefer transition/counter evidence to per-frame logging. Any history/ring storage must be small and bounded.
 
 ### Classification
-Allowed technical-stage labels include `owner-migration-gap`, `scene-generation`, `actor-resolver`, `draw-readiness`, `static-anchor-authorization`, `capture`, `placement-write`, `actor-recreation`, `post-placement-visual-candidate`, `insufficient-evidence`.
+Allowed technical-stage labels include `owner-migration-gap`, `scene-generation`, `actor-resolver`, `draw-readiness`, `static-anchor-authorization`, `capture`, `placement-write`, `placement-retention-drift`, `actor-recreation`, `actor-visibility-hidden`, `actor-visual-transform-candidate`, `post-placement-visual-candidate`, `insufficient-evidence`.
 
 Do not overclaim visual root cause from diagnostic state alone. The user-visible missing-character observation is external evidence for that run.
+
+Evidence vs label (recorder schema 3): the label is a pipeline-stage observation, not a measured
+on-screen visual root cause. `actor-recreation` requires an actually unmatched resolved identity
+(`uniqueResolvedActorCount > confirmedWriteKeyCount`); a bare post-write identity-epoch change
+(`actorEpochChangedAfterConfirmedWrite`) is reported as evidence only and never classified.
+`placement-retention-drift` requires a comparable terminal pre-login sample (same resolved actor +
+same scene generation as the last confirmed apply) whose position drift exceeds the placement write
+path's own readback epsilon; not-comparable / recovered-before-terminal drift is evidence only.
 
 ## Phase B — evidence only
 Do not implement Phase B as part of recorder hardening unless evidence establishes the failing stage.

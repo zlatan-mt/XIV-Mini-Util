@@ -28,6 +28,16 @@ internal readonly record struct CharaSelectActorIdentityKey(
     uint EntityId)
 {
     public bool Valid => ContentId != 0 && ClientObjectIndex >= 0;
+
+    // Component-level change flags between this key and another — booleans only, never the values.
+    // Lets a consumer describe an identity transition (e.g. the cold-start recorder) without ever
+    // handling or emitting the raw id fields itself.
+    public (bool ContentIdChanged, bool ClientObjectIndexChanged, bool ObjectIndexChanged, bool EntityIdChanged)
+        DiffComponents(CharaSelectActorIdentityKey other)
+        => (ContentId != other.ContentId,
+            ClientObjectIndex != other.ClientObjectIndex,
+            ObjectIndex != other.ObjectIndex,
+            EntityId != other.EntityId);
 }
 
 // CharacterAddress はこの context を得た frame / bounded operation 内だけで使用する。

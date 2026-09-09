@@ -2,6 +2,7 @@
 // Description: FRU cold-start の first Character Select を production state のまま受動観測する。
 // Reason: OneClick / preset再選択で owner state を正規化すると再現条件を消すため、startup snapshot と
 //         first CharaSelect lifecycle を mutation なしで取得し、1回の実機runから原因を分類する。
+using System.Numerics;
 using Dalamud.Plugin.Services;
 using XivMiniUtil.Services.CharaSelect;
 
@@ -59,12 +60,78 @@ internal readonly record struct TitleBackgroundColdStartDiagnosisInput(
     bool LatestVisualCaptured = false,
     bool? LatestVisualHidden = null,
     bool LatestVisualScaleFinitePositive = false,
-    bool LatestVisualDrawOffsetFinite = false);
+    bool LatestVisualDrawOffsetFinite = false,
+    // Placement retention (schema 3). RetentionTerminalComparable is true only when the last
+    // pre-login sample had the same resolved actor identity + same scene generation as the last
+    // confirmed placement apply. RetentionTerminalDriftMeters is then the scalar distance between
+    // the actor's current Character.Position and the last confirmed applied position (never a
+    // coordinate); it is NaN when the terminal sample was not comparable. A NaN / not-comparable
+    // value must never be read as "retained" (fix 3/4). RetentionDriftExceededEpsilonEver is
+    // evidence only and is deliberately NOT a classification input (mirrors the ever-anomaly rule,
+    // review 5119158365).
+    bool RetentionTerminalComparable = false,
+    float RetentionTerminalDriftMeters = float.NaN,
+    bool RetentionDriftExceededEpsilonEver = false);
+
+// Same-tick (A+B) correlation inputs for the placement-retention observation. Built once per
+// observed pre-login Character Select framework tick from the placement runtime state plus a single
+// in-frame Character.Position read. Carries no pointers; the identity keys are used only for
+// run-local anonymous slot mapping and component-change booleans and are never emitted.
+internal readonly record struct TitleBackgroundColdStartPlacementTickSnapshot(
+    int SceneGeneration,
+    bool ResolvedActorValid,
+    CharaSelectActorIdentityKey ResolvedActorKey,
+    bool TransformReadOk,
+    int PlacementApplyCount,
+    bool PlacementLastWriteReadbackConfirmed,
+    string PlacementLastWriteStatus,
+    bool PlacementLastWritePositionReadback,
+    bool PlacementLastWriteRotationReadback,
+    bool PlacementLastWriteSetterCompleted,
+    int PlacementWriteAttemptCount,
+    string PlacementLastTrigger,
+    CharaSelectActorIdentityKey PlacementLastAppliedActorKey,
+    int PlacementLastAppliedSceneGeneration,
+    float RetentionDriftMeters);
 
 internal static class TitleBackgroundColdStartDiagnosticLogic
 {
-    public const int RecorderSchema = 2;
+    // Schema 3: adds per-attempt placement-write observations, same-tick placement-retention drift
+    // (scalar only), bounded event checkpoints, and a split login-stop representation.
+    public const int RecorderSchema = 3;
     public static readonly TimeSpan MaxDuration = TimeSpan.FromMinutes(10);
+
+    // Retention drift is compared with the SAME tolerance the placement write path itself uses to
+    // confirm a position readback (TitleBackgroundCharaSelectPlacementLogic.CapturePositionEpsilon;
+    // world units, yalms ≈ metres). "Retained" therefore means "still within the write path's own
+    // confirmation epsilon" — no independently invented threshold (fix 4).
+    public const float RetentionDriftEpsilonMeters =
+        TitleBackgroundCharaSelectPlacementLogic.CapturePositionEpsilon;
+
+    // Pure: scalar distance between the actor's current Character.Position and the last confirmed
+    // applied position. Returns NaN for any non-finite input so callers never treat a bad read as 0.
+    public static float ComputeRetentionDrift(Vector3 currentPosition, Vector3 appliedPosition)
+    {
+        if (!IsFiniteVector(currentPosition) || !IsFiniteVector(appliedPosition))
+        {
+            return float.NaN;
+        }
+
+        return Vector3.Distance(currentPosition, appliedPosition);
+    }
+
+    private static bool IsFiniteVector(Vector3 value)
+        => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+
+    // Split login-stop representation (fix 6). The proof-run LoginStopped latch is only meaningful
+    // once a proof run has observed a logout -> Character Select transition; a passive cold-start run
+    // never sets that precondition, so the latch is "not applicable", not "failed to stop".
+    public static string LoginStopInterpretation(bool logoutTransitionObserved, bool loginStopLatch)
+        => !logoutTransitionObserved
+            ? "latch-not-applicable-requires-proof-run-logout-observation"
+            : loginStopLatch
+                ? "latch-set"
+                : "latch-expected-but-unset";
 
     public static TitleBackgroundColdStartOwnerSnapshot CaptureOwnerSnapshot(
         Configuration configuration,
@@ -254,11 +321,19 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
             return "placement-write";
         }
 
+        // Placement wrote and read back within epsilon, but by the last comparable pre-login sample
+        // the actor's own Character.Position had drifted beyond that same epsilon from the last
+        // confirmed applied position (same resolved actor + same scene generation). This is a
+        // distinct stage between H6 (write/readback) and H8 (external visual): the value did not
+        // stick. Not-comparable / NaN terminal samples never reach here (fix 3/4). Terminal only —
+        // a mid-run drift that recovered is carried as RetentionDriftExceededEpsilonEver evidence,
+        // not a classification (mirrors the ever-anomaly rule).
         if (input.PlacementWriteConfirmed
-            && (input.ActorEpochChangedAfterConfirmedWrite
-                || (input.UniqueResolvedActorCount > input.ConfirmedWriteKeyCount && input.UniqueResolvedActorCount > 1)))
+            && input.RetentionTerminalComparable
+            && !float.IsNaN(input.RetentionTerminalDriftMeters)
+            && input.RetentionTerminalDriftMeters > RetentionDriftEpsilonMeters)
         {
-            return "actor-recreation";
+            return "placement-retention-drift";
         }
 
         if (!input.DrawReadyEverTrue)
@@ -278,6 +353,19 @@ internal static class TitleBackgroundColdStartDiagnosticLogic
         if (input.LatestVisualCaptured && input.LatestVisualHidden == true)
         {
             return "actor-visibility-hidden";
+        }
+
+        // H7 (write/readback succeeds, then a resolved identity never receives its own confirmed
+        // write). Evidence and label are separated (fix 1): a bare post-write identity-epoch change
+        // is NOT sufficient — ActorEpochChangedAfterConfirmedWrite alone stays reported evidence but
+        // is not classified, because the placement path re-applies on identity change and the sample
+        // log showed every resolved identity did get a confirmed write. Only an unmatched resolved
+        // identity (uniqueResolved > confirmedWriteKeys) is H7.
+        if (input.PlacementWriteConfirmed
+            && input.UniqueResolvedActorCount > input.ConfirmedWriteKeyCount
+            && input.UniqueResolvedActorCount > 1)
+        {
+            return "actor-recreation";
         }
 
         if (input.LatestVisualCaptured
@@ -381,6 +469,67 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     public int ConfirmedWriteKeyCount { get; private set; }
     public bool ActorEpochChangedAfterConfirmedWrite { get; private set; }
 
+    // ---- schema 3: bounded event checkpoints (fix 5) ----
+    // Cap + explicit dropped count. The latest valid state is always separately available in the
+    // dedicated retention.* / actor.* / placement.latest* fields, so overflow never loses it.
+    private const int MaxCheckpoints = 24;
+    private const int MaxWriteObservations = 8;
+    private const int MaxAnonActorSlots = 8;
+    private readonly List<string> _checkpoints = [];
+    private readonly List<string> _writeObservations = [];
+    private readonly Dictionary<CharaSelectActorIdentityKey, int> _anonActorSlots = [];
+    public int CheckpointDroppedCount { get; private set; }
+    public int WriteObservationDroppedCount { get; private set; }
+    public IReadOnlyList<string> Checkpoints => _checkpoints;
+    public IReadOnlyList<string> WriteObservations => _writeObservations;
+
+    private int _observationOrdinal;
+    public int LastObservationOrdinal { get; private set; }
+    public int LastObservationSceneGeneration { get; private set; }
+    public int LastObservationActorEpoch { get; private set; }
+    public int LastObservationPlacementApplyCount { get; private set; }
+
+    // Pending identity-transition facts stashed by RecordResolverAttempt, flushed to a checkpoint by
+    // the next RecordPlacementCorrelation so the checkpoint carries the shared run-local ordinal.
+    private bool _pendingIdentityFirst;
+    private bool _pendingIdentityChange;
+    private CharaSelectActorIdentityKey _pendingIdentityKey;
+    private (bool Content, bool ClientIndex, bool ObjectIndex, bool Entity) _pendingIdentityChangedFields;
+
+    private int _lastSeenWriteAttemptCount;
+    private int _lastSeenApplyCount;
+    // Latest per-attempt write result, kept distinct from the cumulative PlacementWriteConfirmed OR
+    // (fix 2): a cumulative True must not be read as "every attempt succeeded".
+    public string LatestWriteStatus { get; private set; } = "not-attempted";
+    public bool LatestWritePositionReadback { get; private set; }
+    public bool LatestWriteRotationReadback { get; private set; }
+
+    // ---- schema 3: same-tick placement retention (fix 3/4). Scalars only, never coordinates. ----
+    private int _retentionBaselineApplyCount = -1;
+    private CharaSelectActorIdentityKey _retentionBaselineActorKey;
+    private int _retentionBaselineSceneGeneration;
+    private bool _retentionIntervalHasSample;
+    private bool _retentionIntervalDriftExceeded;
+    private float _retentionIntervalLastValidDrift = float.NaN;
+    private float _retentionIntervalMaxDrift = float.NaN;
+    private int _retentionIntervalComparableCount;
+    public int RetentionClosedIntervalCount { get; private set; }
+    public int RetentionComparableSampleCountTotal { get; private set; }
+    public int RetentionNotComparableCount { get; private set; }
+    public float RetentionLastValidDriftMeters { get; private set; } = float.NaN;
+    public float RetentionMaxDriftMeters { get; private set; } = float.NaN;
+    public bool RetentionDriftExceededEpsilonEverTrue { get; private set; }
+    public bool RetentionTerminalComparable { get; private set; }
+    public float RetentionTerminalDriftMeters { get; private set; } = float.NaN;
+    public float RetentionIntervalLastValidDriftMeters => _retentionIntervalLastValidDrift;
+    public float RetentionIntervalMaxDriftMeters => _retentionIntervalMaxDrift;
+    public int RetentionIntervalComparableSampleCount => _retentionIntervalComparableCount;
+
+    // ---- schema 3: split login-stop representation (fix 6) ----
+    public bool PlacementLoginStopLatch { get; private set; }
+    public bool PlacementLogoutTransitionObserved { get; private set; }
+    public int PlacementWriteAttemptDeltaAtLoginFrame { get; private set; }
+
     public int V2FramingAttemptCount { get; private set; }
     public int V2FramingAppliedCount { get; private set; }
     public string V2LastFramingStatus { get; private set; } = "not-run";
@@ -389,7 +538,6 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     public bool LoginObserved { get; private set; }
     public bool PostLoginSceneOverrideActive { get; private set; }
     public bool V2PostLoginWritesStopped { get; private set; }
-    public bool PlacementLoginStopped { get; private set; }
 
     public string Diagnosis { get; private set; } = "not-completed";
     public string PendingClipboardText { get; set; } = string.Empty;
@@ -484,9 +632,17 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             {
                 _lastValidIdentityKey = actor.IdentityKey;
                 ActorIdentityEpoch = 1;
+                _pendingIdentityFirst = true;
+                _pendingIdentityKey = actor.IdentityKey;
             }
             else if (_lastValidIdentityKey != actor.IdentityKey)
             {
+                // Component-level change flags only — never the values (fix 1/5). The diff is done
+                // inside the key type so this recorder never touches a raw id field.
+                _pendingIdentityChangedFields = _lastValidIdentityKey.DiffComponents(actor.IdentityKey);
+                _pendingIdentityChange = true;
+                _pendingIdentityKey = actor.IdentityKey;
+
                 _lastValidIdentityKey = actor.IdentityKey;
                 ActorIdentityEpoch++;
                 ActorRecreationCount++;
@@ -588,15 +744,207 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         V2WindowClosed |= v2.WindowClosed;
     }
 
+    // Same-tick (A+B) correlation: run-local ordinal, anonymous actor slot, per-attempt write
+    // observation, and placement-retention drift — all from one framework tick so the recorder-side
+    // identity epoch and the placement state are correlated at capture rather than reconciled from
+    // separate aggregates afterwards (fix 3/5). Never stores pointers or coordinates.
+    public void RecordPlacementCorrelation(in TitleBackgroundColdStartPlacementTickSnapshot snap)
+    {
+        _observationOrdinal++;
+        LastObservationOrdinal = _observationOrdinal;
+        LastObservationSceneGeneration = snap.SceneGeneration;
+        LastObservationActorEpoch = ActorIdentityEpoch;
+        LastObservationPlacementApplyCount = snap.PlacementApplyCount;
+
+        if (_pendingIdentityFirst)
+        {
+            var firstSlot = ResolveAnonActorSlot(_pendingIdentityKey, out _);
+            AppendCheckpoint(
+                $"ord={_observationOrdinal};gen={snap.SceneGeneration};identity-first;epoch={ActorIdentityEpoch}"
+                + $";anonSlot={FormatSlot(firstSlot)}");
+            _pendingIdentityFirst = false;
+        }
+
+        if (_pendingIdentityChange)
+        {
+            var slot = ResolveAnonActorSlot(_pendingIdentityKey, out var returned);
+            var f = _pendingIdentityChangedFields;
+            AppendCheckpoint(
+                $"ord={_observationOrdinal};gen={snap.SceneGeneration};identity-changed;epoch={ActorIdentityEpoch}"
+                + $";changed=[content={Bool(f.Content)},clientIdx={Bool(f.ClientIndex)},objIdx={Bool(f.ObjectIndex)},entity={Bool(f.Entity)}]"
+                + $";anonSlot={FormatSlot(slot)};returnedToSlot={Bool(returned)}");
+            _pendingIdentityChange = false;
+        }
+
+        // Per-attempt placement write observation (fix 2): one entry per real attempt-count
+        // increment. The placement state's Last* fields are set in the same call that increments the
+        // counter, so this observes rather than fabricates; the cumulative PlacementWriteConfirmed OR
+        // is kept separate. A counter jump > 1 records priorUnobservedAttempts rather than inventing
+        // the skipped results.
+        if (snap.PlacementWriteAttemptCount > _lastSeenWriteAttemptCount)
+        {
+            var priorUnobserved = snap.PlacementWriteAttemptCount - _lastSeenWriteAttemptCount - 1;
+            AppendWriteObservation(
+                $"ord={_observationOrdinal};idx={snap.PlacementWriteAttemptCount};status={NoneIfEmpty(snap.PlacementLastWriteStatus)}"
+                + $";posReadback={Bool(snap.PlacementLastWritePositionReadback)};rotReadback={Bool(snap.PlacementLastWriteRotationReadback)}"
+                + $";setterCompleted={Bool(snap.PlacementLastWriteSetterCompleted)}"
+                + (priorUnobserved > 0 ? $";priorUnobservedAttempts={priorUnobserved}" : string.Empty));
+            AppendCheckpoint(
+                $"ord={_observationOrdinal};gen={snap.SceneGeneration};placement-write-attempt;idx={snap.PlacementWriteAttemptCount}"
+                + $";status={NoneIfEmpty(snap.PlacementLastWriteStatus)}");
+            _lastSeenWriteAttemptCount = snap.PlacementWriteAttemptCount;
+        }
+
+        LatestWriteStatus = NoneIfEmpty(snap.PlacementLastWriteStatus);
+        LatestWritePositionReadback = snap.PlacementLastWritePositionReadback;
+        LatestWriteRotationReadback = snap.PlacementLastWriteRotationReadback;
+
+        if (snap.PlacementApplyCount > _lastSeenApplyCount)
+        {
+            AppendCheckpoint(
+                $"ord={_observationOrdinal};gen={snap.SceneGeneration};placement-applied;applyCount={snap.PlacementApplyCount}"
+                + $";confirmed={Bool(snap.PlacementLastWriteReadbackConfirmed)};trigger={NoneIfEmpty(snap.PlacementLastTrigger)}");
+            _lastSeenApplyCount = snap.PlacementApplyCount;
+        }
+
+        // Retention interval management: close the interval whenever the last confirmed applied
+        // target changes (apply count / actor identity / scene generation) so a fresh placement is
+        // never compared against a stale baseline; the new interval is excluded from comparison
+        // until its own confirmed apply lands (fix 3).
+        var baselineChanged = snap.PlacementApplyCount != _retentionBaselineApplyCount
+            || snap.PlacementLastAppliedActorKey != _retentionBaselineActorKey
+            || snap.PlacementLastAppliedSceneGeneration != _retentionBaselineSceneGeneration;
+        if (baselineChanged)
+        {
+            if (_retentionIntervalHasSample)
+            {
+                RetentionClosedIntervalCount++;
+            }
+
+            _retentionBaselineApplyCount = snap.PlacementApplyCount;
+            _retentionBaselineActorKey = snap.PlacementLastAppliedActorKey;
+            _retentionBaselineSceneGeneration = snap.PlacementLastAppliedSceneGeneration;
+            _retentionIntervalHasSample = false;
+            _retentionIntervalDriftExceeded = false;
+            _retentionIntervalLastValidDrift = float.NaN;
+            _retentionIntervalMaxDrift = float.NaN;
+            _retentionIntervalComparableCount = 0;
+        }
+
+        var comparable = snap.ResolvedActorValid
+            && snap.TransformReadOk
+            && snap.PlacementApplyCount > 0
+            && snap.PlacementLastWriteReadbackConfirmed
+            && snap.ResolvedActorKey == snap.PlacementLastAppliedActorKey
+            && snap.SceneGeneration > 0
+            && snap.SceneGeneration == snap.PlacementLastAppliedSceneGeneration
+            && !float.IsNaN(snap.RetentionDriftMeters);
+
+        RetentionTerminalComparable = comparable;
+
+        if (!comparable)
+        {
+            RetentionNotComparableCount++;
+            RetentionTerminalDriftMeters = float.NaN;
+            // Read failure / unconfirmed placement / identity mismatch is never converted to 0 or to
+            // a "retained" result (fix 3): the drift aggregates are left untouched.
+            return;
+        }
+
+        var drift = snap.RetentionDriftMeters;
+        _retentionIntervalHasSample = true;
+        _retentionIntervalComparableCount++;
+        _retentionIntervalLastValidDrift = drift;
+        _retentionIntervalMaxDrift = float.IsNaN(_retentionIntervalMaxDrift)
+            ? drift
+            : Math.Max(_retentionIntervalMaxDrift, drift);
+        RetentionComparableSampleCountTotal++;
+        RetentionLastValidDriftMeters = drift;
+        RetentionMaxDriftMeters = float.IsNaN(RetentionMaxDriftMeters)
+            ? drift
+            : Math.Max(RetentionMaxDriftMeters, drift);
+        RetentionTerminalDriftMeters = drift;
+
+        var exceeds = drift > TitleBackgroundColdStartDiagnosticLogic.RetentionDriftEpsilonMeters;
+        if (exceeds && !_retentionIntervalDriftExceeded)
+        {
+            _retentionIntervalDriftExceeded = true;
+            RetentionDriftExceededEpsilonEverTrue = true;
+            AppendCheckpoint(
+                $"ord={_observationOrdinal};gen={snap.SceneGeneration};retention-drift-exceeded"
+                + $";driftMeters={Distance(drift)};epsilonMeters={Distance(TitleBackgroundColdStartDiagnosticLogic.RetentionDriftEpsilonMeters)}");
+        }
+        else if (!exceeds && _retentionIntervalDriftExceeded)
+        {
+            _retentionIntervalDriftExceeded = false;
+            AppendCheckpoint(
+                $"ord={_observationOrdinal};gen={snap.SceneGeneration};retention-drift-recovered;driftMeters={Distance(drift)}");
+        }
+    }
+
+    private int ResolveAnonActorSlot(CharaSelectActorIdentityKey key, out bool returned)
+    {
+        if (_anonActorSlots.TryGetValue(key, out var existing))
+        {
+            returned = true;
+            return existing;
+        }
+
+        returned = false;
+        if (_anonActorSlots.Count >= MaxAnonActorSlots)
+        {
+            return -1;
+        }
+
+        var slot = _anonActorSlots.Count;
+        _anonActorSlots[key] = slot;
+        return slot;
+    }
+
+    private void AppendCheckpoint(string line)
+    {
+        if (_checkpoints.Count >= MaxCheckpoints)
+        {
+            CheckpointDroppedCount++;
+            return;
+        }
+
+        _checkpoints.Add(line);
+    }
+
+    private void AppendWriteObservation(string line)
+    {
+        if (_writeObservations.Count >= MaxWriteObservations)
+        {
+            WriteObservationDroppedCount++;
+            return;
+        }
+
+        _writeObservations.Add(line);
+    }
+
+    private static string FormatSlot(int slot) => slot < 0 ? "overflow" : slot.ToString();
+    private static string Bool(bool value) => value ? "True" : "False";
+    private static string NoneIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? "none" : value;
+    private static string Distance(float value) => float.IsNaN(value) ? "none" : value.ToString("0.####");
+
     public void RecordLoginEvidence(
         bool sceneOverrideActive,
         bool v2PostLoginWritesStopped,
-        bool placementLoginStopped)
+        bool placementLoginStopLatch,
+        bool placementLogoutTransitionObserved,
+        int placementWriteAttemptCountAtLoginFrame)
     {
         LoginObserved = true;
         PostLoginSceneOverrideActive = sceneOverrideActive;
         V2PostLoginWritesStopped = v2PostLoginWritesStopped;
-        PlacementLoginStopped = placementLoginStopped;
+        PlacementLoginStopLatch = placementLoginStopLatch;
+        PlacementLogoutTransitionObserved = placementLogoutTransitionObserved;
+        // Single bounded sample at the existing finish point. Says only whether a NEW placement write
+        // attempt was recorded up to the login frame; observation ends here and this value is NOT
+        // evidence about any later frame (fix 6). No post-login native re-read is done.
+        PlacementWriteAttemptDeltaAtLoginFrame =
+            Math.Max(0, placementWriteAttemptCountAtLoginFrame - _lastSeenWriteAttemptCount);
     }
 
     public string Complete(string diagnosis)
@@ -614,12 +962,17 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         static string B(bool value) => value ? "True" : "False";
         static string N(string? value) => string.IsNullOrWhiteSpace(value) ? "none" : value;
         static string TB(bool? value) => value.HasValue ? B(value.Value) : "none";
+        static string FD(float value) => float.IsNaN(value) ? "none" : value.ToString("0.####");
 
         var lines = new List<string>
         {
             "[XIV Mini Util] Title Background cold-start diagnostic",
             $"coldStart.recorderSchema={TitleBackgroundColdStartDiagnosticLogic.RecorderSchema}",
             $"coldStart.diagnosis={Diagnosis}",
+            // The diagnosis is a pipeline-stage observation, not a measured on-screen visual root
+            // cause; the recorder does not directly measure whether the character is visible on
+            // screen, and per-frame event order within a single tick is unknown (fix 1/5/7).
+            "coldStart.evidenceNote=stage-observation-only;on-screen-visibility-not-directly-measured;intra-frame-event-order-unknown",
             $"coldStart.completed={B(Completed)}",
             $"coldStart.armMode={ArmMode}",
             $"coldStart.startupArmStatus={StartupArmStatus}",
@@ -693,14 +1046,45 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             $"placement.captureStableSamples={CaptureStableSamples}",
             $"placement.applyCount={PlacementApplyCount}",
             $"placement.writeAttemptCount={PlacementWriteAttemptCount}",
+            // Cumulative OR across the run: True means "at least one confirmed attempt was observed",
+            // NOT "every attempt succeeded" (fix 2). Per-attempt results are in placement.writeAttempt
+            // below; the latest single result is placement.latestWrite*.
             $"placement.writeConfirmed={B(PlacementWriteConfirmed)}",
+            "placement.writeConfirmedSemantics=cumulative-any-attempt",
             $"placement.positionReadbackConfirmed={B(PositionReadbackConfirmed)}",
             $"placement.rotationReadbackConfirmed={B(RotationReadbackConfirmed)}",
             $"placement.writeStatus={PlacementWriteStatus}",
+            $"placement.latestWriteStatus={N(LatestWriteStatus)}",
+            $"placement.latestWritePositionReadback={B(LatestWritePositionReadback)}",
+            $"placement.latestWriteRotationReadback={B(LatestWriteRotationReadback)}",
+            $"placement.writeAttemptObservations.count={_writeObservations.Count}",
+            $"placement.writeAttemptObservations.dropped={WriteObservationDroppedCount}",
             $"placement.lastReason={PlacementLastReason}",
             $"placement.uniqueResolvedActorCount={UniqueResolvedActorCount}",
             $"placement.confirmedWriteKeyCount={ConfirmedWriteKeyCount}",
             $"placement.actorEpochChangedAfterConfirmedWrite={B(ActorEpochChangedAfterConfirmedWrite)}",
+            // Same-tick placement retention (fix 3/4). Scalar distances only, never coordinates.
+            // epsilon = the placement write path's own position-readback tolerance. terminalDrift is
+            // "none" unless the last pre-login sample was comparable (same resolved actor + same
+            // scene generation + a confirmed apply exists). A small terminal drift means only
+            // "matched on the last valid observation" — it does not prove whole-interval retention
+            // and does not identify any overwriting source.
+            $"retention.epsilonMeters={FD(TitleBackgroundColdStartDiagnosticLogic.RetentionDriftEpsilonMeters)}",
+            $"retention.terminalComparable={B(RetentionTerminalComparable)}",
+            $"retention.terminalDriftMeters={FD(RetentionTerminalDriftMeters)}",
+            $"retention.lastValidDriftMeters={FD(RetentionLastValidDriftMeters)}",
+            $"retention.maxDriftMeters={FD(RetentionMaxDriftMeters)}",
+            $"retention.comparableSampleCount={RetentionComparableSampleCountTotal}",
+            $"retention.notComparableCount={RetentionNotComparableCount}",
+            $"retention.closedIntervalCount={RetentionClosedIntervalCount}",
+            $"retention.currentIntervalComparableSampleCount={RetentionIntervalComparableSampleCount}",
+            $"retention.currentIntervalLastValidDriftMeters={FD(RetentionIntervalLastValidDriftMeters)}",
+            $"retention.currentIntervalMaxDriftMeters={FD(RetentionIntervalMaxDriftMeters)}",
+            $"retention.driftExceededEpsilonEverTrue={B(RetentionDriftExceededEpsilonEverTrue)}",
+            $"retention.lastObservationOrdinal={LastObservationOrdinal}",
+            $"retention.lastObservationSceneGeneration={LastObservationSceneGeneration}",
+            $"retention.lastObservationActorEpoch={LastObservationActorEpoch}",
+            $"retention.lastObservationPlacementApplyCount={LastObservationPlacementApplyCount}",
             $"v2.framingAttemptCount={V2FramingAttemptCount}",
             $"v2.framingAppliedCount={V2FramingAppliedCount}",
             $"v2.lastFramingStatus={V2LastFramingStatus}",
@@ -708,8 +1092,37 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             $"login.observed={B(LoginObserved)}",
             $"login.sceneOverrideActiveAfterLogin={B(PostLoginSceneOverrideActive)}",
             $"login.v2PostLoginWritesStopped={B(V2PostLoginWritesStopped)}",
-            $"login.placementLoginStopped={B(PlacementLoginStopped)}",
+            // Split representation (fix 6): the raw proof-run latch, the raw logout-transition
+            // observation it depends on, and an interpretation — never a bare "stopped" claim. The
+            // latch only becomes applicable on a proof run that observed a logout->CharaSelect
+            // transition; a non-proof cold-start run leaves it not-applicable by design.
+            $"login.placementLoginStopLatch={B(PlacementLoginStopLatch)}",
+            $"login.placementLogoutTransitionObserved={B(PlacementLogoutTransitionObserved)}",
+            $"login.placementLoginStopInterpretation={TitleBackgroundColdStartDiagnosticLogic.LoginStopInterpretation(PlacementLogoutTransitionObserved, PlacementLoginStopLatch)}",
+            $"login.placementWriteAttemptDeltaAtLoginFrame={PlacementWriteAttemptDeltaAtLoginFrame}",
+            "login.placementWriteObservationEndsAtLoginFrame=True",
+            // Static code-gate fact, not a runtime measurement: the placement gate returns
+            // Stop/"logged-in" and MaintainTitleEditInformedCharaSelectPlacement early-returns before
+            // any native setter once IsLoggedIn is true.
+            "login.placementPostLoginWriteGate=stop-on-logged-in-gate-early-return",
         };
+
+        // Bounded variable-length sections (fix 5). Kept after the fixed block; report consumers read
+        // key=value lines, order is not contractual. The latest valid state is always in the fixed
+        // retention.* / actor.* / placement.latest* lines above, so checkpoint overflow never loses it.
+        foreach (var observation in _writeObservations)
+        {
+            lines.Add($"placement.writeAttempt={observation}");
+        }
+
+        lines.Add($"checkpoints.count={_checkpoints.Count}");
+        lines.Add($"checkpoints.dropped={CheckpointDroppedCount}");
+        lines.Add("checkpoints.note=event-order-within-a-single-frame-is-unknown");
+        for (var i = 0; i < _checkpoints.Count; i++)
+        {
+            lines.Add($"coldStart.checkpoint[{i}]={_checkpoints[i]}");
+        }
+
         return string.Join(Environment.NewLine, lines);
     }
 }
@@ -898,10 +1311,16 @@ public sealed unsafe partial class TitleScreenBackgroundService
 
             if (_clientState.IsLoggedIn)
             {
+                // Terminal path: record only from already-tracked runtime state (fix 7). No actor or
+                // camera re-read here — the last retention/visual values stay the last safe pre-login
+                // sample. The login-stop latch and its logout-transition precondition are recorded
+                // raw and interpreted in the report (fix 6).
                 _coldStartDiagnostic.RecordLoginEvidence(
                     _activeSceneOverride,
                     _v2.PostLoginWritesStopped,
-                    _charaSelectPlacement.LoginStopped);
+                    _charaSelectPlacement.LoginStopped,
+                    _charaSelectPlacement.LogoutTransitionObserved,
+                    _charaSelectPlacement.PlacementWriteAttemptCount);
                 FinishColdStartDiagnostic(ClassifyColdStartDiagnostic());
                 return;
             }
@@ -936,6 +1355,43 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 _charaSelectPlacement,
                 _charaSelectStaticAnchor.Snapshot,
                 _v2);
+
+            // Same-tick A+B correlation (fix 3). Reuse the actor context resolved above (pointer
+            // valid only this frame) for one read-only Character.Position read, and pair it with the
+            // placement runtime state so retention drift and the recorder identity epoch are
+            // correlated at capture. Coordinate check: the placement write path writes
+            // Character.Position via GameObject.SetPosition and confirms by reading Character.Position
+            // back; TryReadCharaSelectCharacterTransform reads the same Character.Position field, so
+            // the drift compares like-for-like against LastAppliedPosition (which stores exactly the
+            // vector passed to SetPosition).
+            var retentionDrift = float.NaN;
+            var transformReadOk = false;
+            if (actor.Valid
+                && TitleBackgroundCharacterSourceProbe.TryReadCharaSelectCharacterTransform(
+                    actor, out var actorPosition, out var actorRotationUnused)
+                && float.IsFinite(actorRotationUnused))
+            {
+                transformReadOk = true;
+                retentionDrift = TitleBackgroundColdStartDiagnosticLogic.ComputeRetentionDrift(
+                    actorPosition, _charaSelectPlacement.LastAppliedPosition);
+            }
+
+            _coldStartDiagnostic.RecordPlacementCorrelation(new TitleBackgroundColdStartPlacementTickSnapshot(
+                SceneGeneration: _activeCharaSelectSceneGeneration,
+                ResolvedActorValid: actor.Valid,
+                ResolvedActorKey: actor.IdentityKey,
+                TransformReadOk: transformReadOk,
+                PlacementApplyCount: _charaSelectPlacement.PlacementApplyCount,
+                PlacementLastWriteReadbackConfirmed: _charaSelectPlacement.LastWriteReadbackConfirmed,
+                PlacementLastWriteStatus: _charaSelectPlacement.LastWriteStatus,
+                PlacementLastWritePositionReadback: _charaSelectPlacement.LastWritePositionReadbackConfirmed,
+                PlacementLastWriteRotationReadback: _charaSelectPlacement.LastWriteRotationReadbackConfirmed,
+                PlacementLastWriteSetterCompleted: _charaSelectPlacement.LastWriteSetterCallCompleted,
+                PlacementWriteAttemptCount: _charaSelectPlacement.PlacementWriteAttemptCount,
+                PlacementLastTrigger: _charaSelectPlacement.LastPlacementTrigger,
+                PlacementLastAppliedActorKey: _charaSelectPlacement.LastAppliedActorKey,
+                PlacementLastAppliedSceneGeneration: _charaSelectPlacement.LastAppliedSceneGeneration,
+                RetentionDriftMeters: retentionDrift));
         }
         catch (Exception ex)
         {
@@ -968,7 +1424,10 @@ public sealed unsafe partial class TitleScreenBackgroundService
             _coldStartDiagnostic.LatestVisualCaptured,
             _coldStartDiagnostic.LatestVisualHidden,
             _coldStartDiagnostic.LatestVisualScaleFinitePositive,
-            _coldStartDiagnostic.LatestVisualDrawOffsetFinite);
+            _coldStartDiagnostic.LatestVisualDrawOffsetFinite,
+            _coldStartDiagnostic.RetentionTerminalComparable,
+            _coldStartDiagnostic.RetentionTerminalDriftMeters,
+            _coldStartDiagnostic.RetentionDriftExceededEpsilonEverTrue);
         return TitleBackgroundColdStartDiagnosticLogic.Classify(input);
     }
 

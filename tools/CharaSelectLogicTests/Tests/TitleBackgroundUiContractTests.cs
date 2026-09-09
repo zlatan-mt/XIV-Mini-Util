@@ -283,25 +283,34 @@ Test(399, "one-click status surfaces only user-facing strings, no internal names
 Test(404, "repository contract keeps one-click verification and minimal visible ui", () =>
 {
     var root = FindRepositoryRoot();
-    var agentsPath = Path.Combine(root, "AGENTS.md");
     var gitignore = File.ReadAllText(Path.Combine(root, ".gitignore"));
-    var agents = File.ReadAllText(agentsPath);
-    var settingsPath = Path.Combine(
-        root,
-        "projects",
-        "XIV-Mini-Util",
-        "Windows",
-        "Components",
-        "SettingsTab.cs");
-    var settings = File.ReadAllText(settingsPath);
+    var agents = File.ReadAllText(Path.Combine(root, "AGENTS.md"));
+    var guide = File.ReadAllText(Path.Combine(root, "docs", "agent-guides", "title-background.md"));
+    var settings = File.ReadAllText(Path.Combine(
+        root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.cs"));
 
-    return !gitignore
+    // AGENTS.md stays tracked (never git-ignored) and routes Title Background / Character Select
+    // work to the feature guide, which is the canonical owner of the domain contract.
+    var agentsRoutesToGuide = !gitignore
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
             .Any(line => string.Equals(line.Trim(), "AGENTS.md", StringComparison.Ordinal))
-        && agents.Contains("原則として1回の操作または1回の対象フロー", StringComparison.Ordinal)
-        && !File.Exists(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackgroundDiagnostics.cs"))
+        && agents.Contains("docs/agent-guides/title-background.md", StringComparison.Ordinal);
+
+    // The feature guide carries the concrete minimal-visible-UI limits and the one-click
+    // verification flow. These lines are the canonical contract text (the equivalent prose in
+    // AGENTS.md is a routing echo, not the source of truth).
+    var guideKeepsContract =
+        guide.Contains("操作部品は最大 4 個", StringComparison.Ordinal)
+        && guide.Contains("状態行は最大 6 行", StringComparison.Ordinal)
+        && guide.Contains("1クリック → ログアウト → ログイン → 自動コピーされたレポートを貼る", StringComparison.Ordinal);
+
+    // The real normal-screen UI has no developer-diagnostics escape hatch.
+    var uiHasNoDiagnosticsEscapeHatch =
+        !File.Exists(Path.Combine(root, "projects", "XIV-Mini-Util", "Windows", "Components", "SettingsTab.TitleBackgroundDiagnostics.cs"))
         && !settings.Contains("Title背景 診断（開発者）", StringComparison.Ordinal)
         && !settings.Contains("DrawTitleBackgroundDiagnostics", StringComparison.Ordinal);
+
+    return agentsRoutesToGuide && guideKeepsContract && uiHasNoDiagnosticsEscapeHatch;
 });
 
 Test(405, "title background OFF clears the V2 production flag without adding a normal-screen control", () =>
