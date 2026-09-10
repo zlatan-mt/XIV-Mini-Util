@@ -1286,5 +1286,158 @@ internal static partial class TestRunner
                 && charaSelectGuard < transformRead
                 && !diagnosticText.Contains("SceneCamera", StringComparison.Ordinal);
         });
+
+        Test(672, "cold-start retention closes the interval when the observed actor leaves it (A->B->A, no re-placement) and emits no false recovery", () =>
+        {
+            var a = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var b = new CharaSelectActorIdentityKey(200, 1, 1, 20);
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+
+            // Confirmed placement to A @ gen1, then an over-epsilon drift sample for A.
+            state.RecordResolverAttempt(ValidActor(a));
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: a, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: a, appliedGeneration: 1,
+                driftMeters: 0.5f));
+
+            // Observed actor becomes B with NO new placement (still last-applied to A, applyCount 1).
+            state.RecordResolverAttempt(ValidActor(b));
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: b, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: a, appliedGeneration: 1,
+                driftMeters: float.NaN));
+
+            // Back to A, still NO new placement, drift ~0.
+            state.RecordResolverAttempt(ValidActor(a));
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: a, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: a, appliedGeneration: 1,
+                driftMeters: 0.0f));
+
+            var checkpoints = string.Join("\n", state.Checkpoints);
+            var classified = TitleBackgroundColdStartDiagnosticLogic.Classify(
+                RetentionClassifyInput(state.RetentionTerminalComparable, state.RetentionTerminalDriftMeters, state.RetentionDriftExceededEpsilonEverTrue));
+
+            return state.RetentionClosedIntervalCount == 1
+                && checkpoints.Contains("retention-interval-closed;reason=observed-target-left", StringComparison.Ordinal)
+                && !checkpoints.Contains("retention-drift-recovered", StringComparison.Ordinal)
+                && state.RetentionAwaitingNewConfirmedPlacement
+                && !state.RetentionTerminalComparable
+                && float.IsNaN(state.RetentionTerminalDriftMeters)
+                && state.LastClosedIntervalReason == "observed-target-left"
+                && state.RetentionClosedIntervalsMaxDriftMeters >= 0.49f
+                && state.RetentionIntervalComparableSampleCount == 0
+                && classified != "placement-retention-drift";
+        });
+
+        Test(673, "cold-start retention closes the interval on an observed scene-generation change with no re-placement", () =>
+        {
+            var a = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+            state.RecordResolverAttempt(ValidActor(a));
+
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: a, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: a, appliedGeneration: 1,
+                driftMeters: 0.5f));
+            // Scene generation advances to 2, actor still A, no new placement (appliedGeneration 1).
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 2, resolvedKey: a, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: a, appliedGeneration: 1,
+                driftMeters: float.NaN));
+
+            return state.RetentionClosedIntervalCount == 1
+                && string.Join("\n", state.Checkpoints).Contains("retention-interval-closed;reason=observed-target-left", StringComparison.Ordinal)
+                && state.LastClosedIntervalReason == "observed-target-left"
+                && state.RetentionAwaitingNewConfirmedPlacement
+                && !state.RetentionTerminalComparable;
+        });
+
+        Test(674, "cold-start retention starts a fresh interval on a confirmed re-placement to the changed target; stats do not carry over", () =>
+        {
+            var a = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var b = new CharaSelectActorIdentityKey(200, 1, 1, 20);
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+            state.RecordResolverAttempt(ValidActor(a));
+
+            // Interval 1: one comparable sample for A.
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: a, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: a, appliedGeneration: 1,
+                driftMeters: 0.3f));
+
+            // Actor -> B AND placement re-applies to B (applyCount 1 -> 2, last-applied B).
+            state.RecordResolverAttempt(ValidActor(b));
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: b, resolvedValid: true, transformReadOk: true,
+                applyCount: 2, writeReadbackConfirmed: true, appliedKey: b, appliedGeneration: 1,
+                driftMeters: 0.002f));
+
+            var checkpoints = string.Join("\n", state.Checkpoints);
+            return state.RetentionClosedIntervalCount == 1
+                && state.LastClosedIntervalReason == "placement-target-changed"
+                && !state.RetentionAwaitingNewConfirmedPlacement
+                && state.RetentionIntervalComparableSampleCount == 1
+                && state.RetentionTerminalComparable
+                && state.RetentionTerminalDriftMeters <= TitleBackgroundColdStartDiagnosticLogic.RetentionDriftEpsilonMeters
+                && !checkpoints.Contains("retention-drift-recovered", StringComparison.Ordinal);
+        });
+
+        Test(675, "cold-start retention keeps a same-actor same-scene exceed->recover inside one interval", () =>
+        {
+            var a = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+            state.RecordResolverAttempt(ValidActor(a));
+
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: a, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: a, appliedGeneration: 1,
+                driftMeters: 0.3f));
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: a, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: a, appliedGeneration: 1,
+                driftMeters: 0.001f));
+
+            var cp = string.Join("\n", state.Checkpoints);
+            return state.RetentionClosedIntervalCount == 0
+                && !state.RetentionAwaitingNewConfirmedPlacement
+                && cp.Contains("retention-drift-exceeded", StringComparison.Ordinal)
+                && cp.Contains("retention-drift-recovered", StringComparison.Ordinal)
+                && !cp.Contains("retention-interval-closed", StringComparison.Ordinal)
+                && state.RetentionIntervalComparableSampleCount == 2;
+        });
+
+        Test(676, "cold-start retention: a read failure alone (actor not validly resolved) does not close the interval or set awaiting", () =>
+        {
+            var a = new CharaSelectActorIdentityKey(100, 0, 0, 10);
+            var state = new TitleBackgroundColdStartDiagnosticRuntimeState();
+            state.Arm(PlacementOwner(), PlacementOwner(), ColdStartArmMode.Startup);
+            state.RecordResolverAttempt(ValidActor(a));
+
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: a, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: a, appliedGeneration: 1,
+                driftMeters: 0.3f));
+            // Transform read fails this tick: not a validly resolved actor, so NOT a target change.
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: a, resolvedValid: false, transformReadOk: false,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: a, appliedGeneration: 1,
+                driftMeters: float.NaN));
+            // Recovers to a valid read for the same target within the same interval.
+            state.RecordPlacementCorrelation(Tick(
+                sceneGeneration: 1, resolvedKey: a, resolvedValid: true, transformReadOk: true,
+                applyCount: 1, writeReadbackConfirmed: true, appliedKey: a, appliedGeneration: 1,
+                driftMeters: 0.28f));
+
+            return state.RetentionClosedIntervalCount == 0
+                && !state.RetentionAwaitingNewConfirmedPlacement
+                && state.RetentionIntervalComparableSampleCount == 2
+                && state.RetentionNotComparableCount == 1
+                && !string.Join("\n", state.Checkpoints).Contains("retention-interval-closed", StringComparison.Ordinal);
+        });
     }
 }

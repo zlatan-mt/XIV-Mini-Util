@@ -513,6 +513,11 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     private float _retentionIntervalLastValidDrift = float.NaN;
     private float _retentionIntervalMaxDrift = float.NaN;
     private int _retentionIntervalComparableCount;
+    // Set when the currently observed actor/scene leaves the open interval's target without a new
+    // confirmed placement (P2 review). Returning to the same key does NOT reuse the stale baseline:
+    // comparison stays suppressed until a fresh confirmed placement event (baselineChanged) clears it.
+    private bool _retentionAwaitingNewConfirmedPlacement;
+    private float _retentionClosedIntervalsMaxDrift = float.NaN;
     public int RetentionClosedIntervalCount { get; private set; }
     public int RetentionComparableSampleCountTotal { get; private set; }
     public int RetentionNotComparableCount { get; private set; }
@@ -524,6 +529,14 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     public float RetentionIntervalLastValidDriftMeters => _retentionIntervalLastValidDrift;
     public float RetentionIntervalMaxDriftMeters => _retentionIntervalMaxDrift;
     public int RetentionIntervalComparableSampleCount => _retentionIntervalComparableCount;
+    public bool RetentionAwaitingNewConfirmedPlacement => _retentionAwaitingNewConfirmedPlacement;
+    public float RetentionClosedIntervalsMaxDriftMeters => _retentionClosedIntervalsMaxDrift;
+    // Stats of the most recently closed interval, kept separate from the current interval and from
+    // the run-wide aggregates so a stale over-epsilon spike is never mixed into a later interval.
+    public string LastClosedIntervalReason { get; private set; } = "none";
+    public float LastClosedIntervalMaxDriftMeters { get; private set; } = float.NaN;
+    public float LastClosedIntervalLastValidDriftMeters { get; private set; } = float.NaN;
+    public int LastClosedIntervalComparableSampleCount { get; private set; }
 
     // ---- schema 3: split login-stop representation (fix 6) ----
     public bool PlacementLoginStopLatch { get; private set; }
@@ -807,34 +820,41 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             _lastSeenApplyCount = snap.PlacementApplyCount;
         }
 
-        // Retention interval management: close the interval whenever the last confirmed applied
-        // target changes (apply count / actor identity / scene generation) so a fresh placement is
-        // never compared against a stale baseline; the new interval is excluded from comparison
-        // until its own confirmed apply lands (fix 3).
+        // Retention interval management (fix 3 + P2 review):
+        //  1. A new confirmed placement (apply count / last-applied actor / last-applied scene
+        //     generation changed) closes the interval and re-baselines; it also clears any
+        //     "awaiting new confirmed placement" suppression because a fresh confirmed target exists.
+        //  2. Otherwise, if the interval has samples and the CURRENTLY OBSERVED (validly resolved)
+        //     actor or scene generation has left the interval's baseline target, close the interval
+        //     now and suppress comparison until a new confirmed placement — an A->B->A actor bounce
+        //     (or a scene change) with no re-placement must not keep the old interval alive and must
+        //     not emit a drift-recovered event against a stale over-epsilon spike. A read failure
+        //     alone (actor not validly resolved) is NOT treated as a target change.
         var baselineChanged = snap.PlacementApplyCount != _retentionBaselineApplyCount
             || snap.PlacementLastAppliedActorKey != _retentionBaselineActorKey
             || snap.PlacementLastAppliedSceneGeneration != _retentionBaselineSceneGeneration;
         if (baselineChanged)
         {
-            if (_retentionIntervalHasSample)
-            {
-                RetentionClosedIntervalCount++;
-            }
-
+            CloseRetentionInterval(snap.SceneGeneration, "placement-target-changed");
             _retentionBaselineApplyCount = snap.PlacementApplyCount;
             _retentionBaselineActorKey = snap.PlacementLastAppliedActorKey;
             _retentionBaselineSceneGeneration = snap.PlacementLastAppliedSceneGeneration;
-            _retentionIntervalHasSample = false;
-            _retentionIntervalDriftExceeded = false;
-            _retentionIntervalLastValidDrift = float.NaN;
-            _retentionIntervalMaxDrift = float.NaN;
-            _retentionIntervalComparableCount = 0;
+            _retentionAwaitingNewConfirmedPlacement = false;
+        }
+        else if (_retentionIntervalHasSample
+            && snap.ResolvedActorValid
+            && (snap.ResolvedActorKey != _retentionBaselineActorKey
+                || snap.SceneGeneration != _retentionBaselineSceneGeneration))
+        {
+            CloseRetentionInterval(snap.SceneGeneration, "observed-target-left");
+            _retentionAwaitingNewConfirmedPlacement = true;
         }
 
         var comparable = snap.ResolvedActorValid
             && snap.TransformReadOk
             && snap.PlacementApplyCount > 0
             && snap.PlacementLastWriteReadbackConfirmed
+            && !_retentionAwaitingNewConfirmedPlacement
             && snap.ResolvedActorKey == snap.PlacementLastAppliedActorKey
             && snap.SceneGeneration > 0
             && snap.SceneGeneration == snap.PlacementLastAppliedSceneGeneration
@@ -880,6 +900,37 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             AppendCheckpoint(
                 $"ord={_observationOrdinal};gen={snap.SceneGeneration};retention-drift-recovered;driftMeters={Distance(drift)}");
         }
+    }
+
+    // Close the current retention interval. Only an interval that actually recorded a comparable
+    // sample is counted / checkpointed; its max / last-valid / sample-count / reason are frozen into
+    // the "last closed interval" fields (kept separate from the current interval and the run-wide
+    // aggregates) and one bounded checkpoint is emitted. Per-interval accumulators are reset; the
+    // baseline key itself is set by the caller.
+    private void CloseRetentionInterval(int sceneGeneration, string reason)
+    {
+        if (_retentionIntervalHasSample)
+        {
+            RetentionClosedIntervalCount++;
+            _retentionClosedIntervalsMaxDrift = float.IsNaN(_retentionClosedIntervalsMaxDrift)
+                ? _retentionIntervalMaxDrift
+                : Math.Max(_retentionClosedIntervalsMaxDrift, _retentionIntervalMaxDrift);
+            LastClosedIntervalReason = reason;
+            LastClosedIntervalMaxDriftMeters = _retentionIntervalMaxDrift;
+            LastClosedIntervalLastValidDriftMeters = _retentionIntervalLastValidDrift;
+            LastClosedIntervalComparableSampleCount = _retentionIntervalComparableCount;
+            AppendCheckpoint(
+                $"ord={_observationOrdinal};gen={sceneGeneration};retention-interval-closed;reason={reason}"
+                + $";maxDriftMeters={Distance(_retentionIntervalMaxDrift)}"
+                + $";lastValidDriftMeters={Distance(_retentionIntervalLastValidDrift)}"
+                + $";comparableSamples={_retentionIntervalComparableCount}");
+        }
+
+        _retentionIntervalHasSample = false;
+        _retentionIntervalDriftExceeded = false;
+        _retentionIntervalLastValidDrift = float.NaN;
+        _retentionIntervalMaxDrift = float.NaN;
+        _retentionIntervalComparableCount = 0;
     }
 
     private int ResolveAnonActorSlot(CharaSelectActorIdentityKey key, out bool returned)
@@ -1077,9 +1128,18 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             $"retention.comparableSampleCount={RetentionComparableSampleCountTotal}",
             $"retention.notComparableCount={RetentionNotComparableCount}",
             $"retention.closedIntervalCount={RetentionClosedIntervalCount}",
+            $"retention.awaitingNewConfirmedPlacement={B(RetentionAwaitingNewConfirmedPlacement)}",
             $"retention.currentIntervalComparableSampleCount={RetentionIntervalComparableSampleCount}",
             $"retention.currentIntervalLastValidDriftMeters={FD(RetentionIntervalLastValidDriftMeters)}",
             $"retention.currentIntervalMaxDriftMeters={FD(RetentionIntervalMaxDriftMeters)}",
+            // Closed intervals are kept separate from the current interval and the run-wide
+            // aggregates so a stale over-epsilon spike from one target is not read as belonging to a
+            // later one (P2 review).
+            $"retention.closedIntervalsMaxDriftMeters={FD(RetentionClosedIntervalsMaxDriftMeters)}",
+            $"retention.lastClosedIntervalReason={N(LastClosedIntervalReason)}",
+            $"retention.lastClosedIntervalMaxDriftMeters={FD(LastClosedIntervalMaxDriftMeters)}",
+            $"retention.lastClosedIntervalLastValidDriftMeters={FD(LastClosedIntervalLastValidDriftMeters)}",
+            $"retention.lastClosedIntervalComparableSampleCount={LastClosedIntervalComparableSampleCount}",
             $"retention.driftExceededEpsilonEverTrue={B(RetentionDriftExceededEpsilonEverTrue)}",
             $"retention.lastObservationOrdinal={LastObservationOrdinal}",
             $"retention.lastObservationSceneGeneration={LastObservationSceneGeneration}",
