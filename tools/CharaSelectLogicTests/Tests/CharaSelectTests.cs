@@ -556,5 +556,127 @@ Test(424, "run bulk diagnostic uses summary entrypoint", () =>
         && !body.Contains("includeDetailedPhase2Diagnostics: true", StringComparison.Ordinal);
 });
 
+Test(425, "delayed voice applies only when freshly-resolved identity matches schedule and current entry", () =>
+{
+    return CharaSelectDelayedReplayGate.ShouldApplyDelayedVoice(
+        resolvedValid: true,
+        resolvedContentId: 1,
+        resolvedCharacterAddress: 0x1000,
+        scheduledContentId: 1,
+        scheduledCharacterAddress: 0x1000,
+        currentEntryAvailable: true,
+        currentEntryContentId: 1,
+        currentEntryVoiceId: 42);
+});
+
+Test(426, "delayed voice does not apply when resolver is unresolved (stale-reference guard)", () =>
+{
+    // これが _currentEntry 同士の比較だけでは検出できなかったケース: schedule 値と
+    // _currentEntry が両方とも同じ古い参照を指していても、書込み直前の再解決が invalid
+    // （native actor が今は解決できない/差し替わっている）なら書かない。
+    return !CharaSelectDelayedReplayGate.ShouldApplyDelayedVoice(
+        resolvedValid: false,
+        resolvedContentId: 1,
+        resolvedCharacterAddress: 0x1000,
+        scheduledContentId: 1,
+        scheduledCharacterAddress: 0x1000,
+        currentEntryAvailable: true,
+        currentEntryContentId: 1,
+        currentEntryVoiceId: 42);
+});
+
+Test(427, "delayed voice does not apply when resolved character address differs from schedule", () =>
+{
+    return !CharaSelectDelayedReplayGate.ShouldApplyDelayedVoice(
+        resolvedValid: true,
+        resolvedContentId: 1,
+        resolvedCharacterAddress: 0x2000,
+        scheduledContentId: 1,
+        scheduledCharacterAddress: 0x1000,
+        currentEntryAvailable: true,
+        currentEntryContentId: 1,
+        currentEntryVoiceId: 42);
+});
+
+Test(428, "delayed voice does not apply when resolved content id differs from current entry", () =>
+{
+    return !CharaSelectDelayedReplayGate.ShouldApplyDelayedVoice(
+        resolvedValid: true,
+        resolvedContentId: 1,
+        resolvedCharacterAddress: 0x1000,
+        scheduledContentId: 1,
+        scheduledCharacterAddress: 0x1000,
+        currentEntryAvailable: true,
+        currentEntryContentId: 2,
+        currentEntryVoiceId: 42);
+});
+
+Test(429, "delayed voice does not apply when current entry is unavailable or voice id is zero", () =>
+{
+    return !CharaSelectDelayedReplayGate.ShouldApplyDelayedVoice(
+            resolvedValid: true,
+            resolvedContentId: 1,
+            resolvedCharacterAddress: 0x1000,
+            scheduledContentId: 1,
+            scheduledCharacterAddress: 0x1000,
+            currentEntryAvailable: false,
+            currentEntryContentId: 1,
+            currentEntryVoiceId: 42)
+        && !CharaSelectDelayedReplayGate.ShouldApplyDelayedVoice(
+            resolvedValid: true,
+            resolvedContentId: 1,
+            resolvedCharacterAddress: 0x1000,
+            scheduledContentId: 1,
+            scheduledCharacterAddress: 0x1000,
+            currentEntryAvailable: true,
+            currentEntryContentId: 1,
+            currentEntryVoiceId: 0);
+});
+
+Test(430, "delayed emote plays only when freshly-resolved identity and selected emote match schedule", () =>
+{
+    return CharaSelectDelayedReplayGate.ShouldPlayDelayedEmote(
+        resolvedValid: true,
+        resolvedContentId: 1,
+        resolvedCharacterAddress: 0x1000,
+        scheduledContentId: 1,
+        scheduledCharacterAddress: 0x1000,
+        currentEntryAvailable: true,
+        currentEntryContentId: 1,
+        hasCurrentSelectedEmoteId: true,
+        currentSelectedEmoteId: 48,
+        scheduledEmoteId: 48);
+});
+
+Test(431, "delayed emote does not play when resolver is unresolved (stale-reference guard)", () =>
+{
+    return !CharaSelectDelayedReplayGate.ShouldPlayDelayedEmote(
+        resolvedValid: false,
+        resolvedContentId: 1,
+        resolvedCharacterAddress: 0x1000,
+        scheduledContentId: 1,
+        scheduledCharacterAddress: 0x1000,
+        currentEntryAvailable: true,
+        currentEntryContentId: 1,
+        hasCurrentSelectedEmoteId: true,
+        currentSelectedEmoteId: 48,
+        scheduledEmoteId: 48);
+});
+
+Test(432, "delayed emote does not play when selected emote no longer matches the scheduled one", () =>
+{
+    return !CharaSelectDelayedReplayGate.ShouldPlayDelayedEmote(
+        resolvedValid: true,
+        resolvedContentId: 1,
+        resolvedCharacterAddress: 0x1000,
+        scheduledContentId: 1,
+        scheduledCharacterAddress: 0x1000,
+        currentEntryAvailable: true,
+        currentEntryContentId: 1,
+        hasCurrentSelectedEmoteId: true,
+        currentSelectedEmoteId: 49,
+        scheduledEmoteId: 48);
+});
+
     }
 }
