@@ -294,13 +294,30 @@ public sealed unsafe partial class CharaSelectService
             return;
         }
 
-        var entry = _currentEntry;
         _delayedReplayFrames--;
         if (_delayedReplayFrames is 45 or 30 or 15)
         {
-            if (entry?.VoiceId is > 0 && entry.Character != null)
+            // _currentEntry は OnFrameworkUpdate の 10 フレーム毎の poll（UpdateCurrentEntry）でしか
+            // 更新されず、ProcessDelayedReplay はその poll より先に呼ばれる。つまり _currentEntry.Character
+            // は「schedule 時点からの経過フレーム内に native 側で actor が再生成されていても、次の poll
+            // まで古いままの参照」になりうる。schedule 時の値と _currentEntry の値を比較するだけでは
+            // 両方とも同じ古い参照であれば一致してしまい検出できないため、書込み直前に canonical resolver
+            // （TryResolveCurrentCharaSelectActor）で今の native 状態を解決し直し、その結果と照合する。
+            var voiceResolved = TryResolveCurrentCharaSelectActor(out var voiceContext);
+            var voiceEntry = _currentEntry;
+            if (CharaSelectDelayedReplayGate.ShouldApplyDelayedVoice(
+                    voiceResolved && voiceContext.Valid,
+                    voiceContext.ContentId,
+                    voiceContext.CharacterAddress,
+                    _delayedReplayContentId,
+                    _delayedReplayCharacterAddress,
+                    voiceEntry != null,
+                    voiceEntry?.ContentId ?? 0,
+                    voiceEntry?.VoiceId ?? 0))
             {
-                CharaSelectCharacterApplier.ApplyVoice(entry.Character, entry.VoiceId);
+                CharaSelectCharacterApplier.ApplyVoice(
+                    (Character*)voiceContext.CharacterAddress,
+                    voiceEntry!.VoiceId);
             }
         }
 
@@ -309,10 +326,23 @@ public sealed unsafe partial class CharaSelectService
             return;
         }
 
-        if (entry == null
-            || entry.ContentId != _delayedReplayContentId
-            || (nint)entry.Character != _delayedReplayCharacterAddress
-            || CurrentSelectedEmoteId != _delayedReplayEmoteId)
+        // 同じ理由で、最終確認も _currentEntry の値同士の比較だけに留めず、この時点の native 状態を
+        // 解決し直してから予約値と照合する（PlayEmote 自体は既存どおり _currentEntry 経由で書く。
+        // ここでの再解決は「今 native 側が指す actor が予約時点と同一か」の確認のみに使う）。
+        var finalResolved = TryResolveCurrentCharaSelectActor(out var finalContext);
+        var finalEntry = _currentEntry;
+        var currentSelectedEmoteId = CurrentSelectedEmoteId;
+        if (!CharaSelectDelayedReplayGate.ShouldPlayDelayedEmote(
+                finalResolved && finalContext.Valid,
+                finalContext.ContentId,
+                finalContext.CharacterAddress,
+                _delayedReplayContentId,
+                _delayedReplayCharacterAddress,
+                finalEntry != null,
+                finalEntry?.ContentId ?? 0,
+                currentSelectedEmoteId.HasValue,
+                currentSelectedEmoteId ?? 0,
+                _delayedReplayEmoteId))
         {
             return;
         }

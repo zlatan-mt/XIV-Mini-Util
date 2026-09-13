@@ -17,6 +17,7 @@ public sealed partial class Plugin
 
         _mainWindow.Dispose();
         _shopSearchResultWindow.Dispose();
+        // TitleScreenBackgroundService.Dispose() releases its own cold-start diagnostic subscription.
         _titleScreenBackgroundService.Dispose();
         _charaSelectService.Dispose();
         _dutyReadyNotificationService.Dispose();
