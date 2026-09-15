@@ -8784,5 +8784,124 @@ Test(580, "switching away from FRU does not leave the placement owner active for
         && !configuration.TitleBackgroundCharaSelectPlacementPositionCaptured;
 });
 
+Test(581, "FRU focus catches up with a placed draw object while preserving native height and surrounding camera memory", () =>
+{
+    var state = new TitleBackgroundFruFocusState();
+    state.Arm(1, 1, default);
+    var camera = new FFXIVClientStructs.FFXIV.Client.Game.Camera();
+    camera.CameraBase.SceneCamera.Position = new(0, 2, 5);
+    camera.CameraBase.SceneCamera.LookAtVector = new(0, 1.6f, 0);
+    var expected = camera;
+    expected.CameraBase.SceneCamera.LookAtVector.X = 100;
+    expected.CameraBase.SceneCamera.LookAtVector.Z = 100;
+    var changed = state.TrySynchronize(ref camera.CameraBase.SceneCamera.LookAtVector,
+        new Vector3(100, 0, 100), new Vector3(100, 0, 100));
+    return changed && !state.Pending && state.Status == "applied"
+        && System.Runtime.InteropServices.MemoryMarshal.AsBytes(
+            System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref camera, 1)).SequenceEqual(
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(
+                System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref expected, 1)));
+});
+
+Test(582, "FRU focus does not reassert after success or move an already aligned focus", () =>
+{
+    var state = new TitleBackgroundFruFocusState();
+    state.Arm(1, 1, default);
+    var focus = new FFXIVClientStructs.FFXIV.Common.Math.Vector3(100, 2, 100);
+    var placed = new Vector3(100, 0, 100);
+    if (state.TrySynchronize(ref focus, placed, placed) || state.Status != "already-aligned")
+        return false;
+    focus.X = 101; // A later native/user adjustment must not be fought every frame.
+    return !state.TrySynchronize(ref focus, placed, placed) && focus.X == 101 && state.Attempts == 1;
+});
+
+Test(583, "FRU focus waits for actual draw propagation and bounds missing or nonfinite data", () =>
+{
+    var state = new TitleBackgroundFruFocusState();
+    state.Arm(1, 1, default);
+    var focus = new FFXIVClientStructs.FFXIV.Common.Math.Vector3(0, 2, 0);
+    var placed = new Vector3(100, 0, 100);
+    foreach (var draw in new Vector3?[] { null, Vector3.Zero, new(float.NaN, 0, 100) })
+        if (state.TrySynchronize(ref focus, draw, placed) || focus.X != 0 || focus.Z != 0)
+            return false;
+    if (!state.TrySynchronize(ref focus, placed, placed) || state.Attempts != 4)
+        return false;
+    state.Arm(1, 2, default);
+    focus.Y = float.NaN;
+    for (var i = 0; i < TitleBackgroundFruFocusState.AttemptBudget + 5; i++)
+        if (state.TrySynchronize(ref focus, placed, placed))
+            return false;
+    return !state.Pending && state.Status == "retry-exhausted"
+        && state.Attempts == TitleBackgroundFruFocusState.AttemptBudget;
+});
+
+Test(584, "FRU focus requires current confirmed placement identity and all prelogin gates", () =>
+{
+    var key = new CharaSelectActorIdentityKey(1, 0, 0, 10);
+    var actor = new CharaSelectResolvedActorContext((nint)0x2000, key, 0,
+        CharaSelectIdentityResolveSource.CurrentCharacterMapping,
+        true, true, true, true, true, true, true, true, true);
+    var fru = TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId;
+    var context = new TitleBackgroundResolvedActorContext(actor, true, true, true, false, true, 1, 1, true, fru, true);
+    var placement = new TitleBackgroundCharaSelectPlacementRuntimeState();
+    placement.RecordPlacementApplied(1, key, fru, new(100, 0, 100), 0, 1);
+    var state = new TitleBackgroundFruFocusState();
+    state.Arm(1, 1, key);
+    if (state.IsEligible(context, placement, false)) // no write confirmation yet
+        return false;
+    placement.RecordPlacementWriteAttempt(1, key, fru, true, true, true, "confirmed");
+    if (!state.IsEligible(context, placement, false) || state.IsEligible(context, placement, true))
+        return false;
+    var blocked = new[]
+    {
+        context with { PreLogin = false }, context with { PlacementPathActive = false },
+        context with { ServiceReady = false }, context with { HookProbeMode = true },
+        context with { CharaSelectSessionActive = false }, context with { IsCharaSelectMap = false },
+        context with { ActiveSceneGeneration = 2 }, context with { RuntimeSceneGeneration = 2 },
+        context with { CandidateMatches = false }, context with { CandidateId = "custom:n4f4" },
+        context with { Actor = actor with { MappingHit = false } },
+        context with { Actor = actor with { IdentityKey = key with { EntityId = 11 } } },
+    };
+    if (blocked.Any(c => state.IsEligible(c, placement, false)))
+        return false;
+    placement.RecordPlacementApplied(1, key, fru, new(100, 0, 100), 0, 2);
+    if (state.IsEligible(context, placement, false))
+        return false;
+    state.Arm(1, 2, key);
+    if (!state.IsEligible(context, placement, false))
+        return false;
+    placement.MarkLoginStopped();
+    return !state.IsEligible(context, placement, false);
+});
+
+Test(585, "FRU focus report freezes values at completion without native reads", () =>
+{
+    var recorder = new TitleBackgroundColdStartDiagnosticRuntimeState();
+    recorder.Arm(default, default, ColdStartArmMode.Startup);
+    var state = new TitleBackgroundFruFocusState();
+    state.Arm(1, 1, default);
+    var focus = new FFXIVClientStructs.FFXIV.Common.Math.Vector3(0, 1.6f, 0);
+    state.TrySynchronize(ref focus, new Vector3(100, 0, 100), new Vector3(100, 0, 100));
+    recorder.RecordFruFocusEvidence(state);
+    var report = recorder.Complete("post-placement-visual-candidate");
+    state.Arm(2, 2, default);
+    recorder.RecordFruFocusEvidence(state);
+    return report.Contains("focus.fru.status=applied", StringComparison.Ordinal)
+        && report.Contains("focus.fru.before=(0,1.6,0)", StringComparison.Ordinal)
+        && report.Contains("focus.fru.after=(100,1.6,100)", StringComparison.Ordinal)
+        && recorder.Complete("post-placement-visual-candidate") == report;
+});
+
+Test(586, "placement reset cancels pending FRU focus before scene counters can be reused", () =>
+{
+    var placement = new TitleBackgroundCharaSelectPlacementRuntimeState();
+    placement.FruFocus.Arm(1, 1, new CharaSelectActorIdentityKey(1, 0, 0, 10));
+    placement.Reset();
+    var focus = new FFXIVClientStructs.FFXIV.Common.Math.Vector3(0, 1.6f, 0);
+    return !placement.FruFocus.Pending
+        && !placement.FruFocus.TrySynchronize(ref focus, new Vector3(100, 0, 100), new Vector3(100, 0, 100))
+        && focus.X == 0 && focus.Z == 0;
+});
+
     }
 }

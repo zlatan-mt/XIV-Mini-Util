@@ -5,7 +5,7 @@
 //              (選択キャラ変更) のときだけ native GameObject.SetPosition + actor SetRotation で配置する。
 // Reason: identity 責務は CharaSelectService へ一本化（PR #7 根本修正 点1〜点4）。TitleBackground は
 //         独自 resolver を持たない。新規 native hook は追加しない（既存 detour を再利用）。
-//         camera には一切書かない（FixOn passthrough が配置キャラを追従する）。
+//         FRU は配置後の描画位置へ水平焦点だけを既存 curve hook で同期する（許可済み限定例外）。
 //         Position==(0,0,0) は正常値として許可する（点5）。
 using ClientVector3 = System.Numerics.Vector3;
 using XivMiniUtil.Services.CharaSelect;
@@ -352,6 +352,12 @@ public sealed unsafe partial class TitleScreenBackgroundService
                 model.Rotation,
                 frame,
                 trigger: trigger.ToString());
+            if (placementCandidateId == TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId
+                && !IsSavedViewSuppressedByAutomaticRun() && !proofArmed)
+            {
+                FruFocus.Arm(_activeCharaSelectSceneGeneration, _charaSelectPlacement.PlacementApplyCount, actor.IdentityKey);
+                _coldStartDiagnostic.RecordFruFocusEvidence(FruFocus);
+            }
             RecordTransitionEvent(
                 "charaselect placement applied",
                 $"gen={_activeCharaSelectSceneGeneration}; count={_charaSelectPlacement.PlacementApplyCount}; trigger={trigger}");

@@ -554,6 +554,24 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
 
     public string Diagnosis { get; private set; } = "not-completed";
     public string PendingClipboardText { get; set; } = string.Empty;
+    private string _fruFocusEvidence = "focus.fru.status=not-observed";
+
+    public void RecordFruFocusEvidence(TitleBackgroundFruFocusState focus)
+    {
+        if (!Active)
+            return;
+
+        static string V(Vector3? value) => value.HasValue
+            ? FormattableString.Invariant($"({value.Value.X:0.####},{value.Value.Y:0.####},{value.Value.Z:0.####})")
+            : "none";
+        _fruFocusEvidence = $"focus.fru.status={focus.Status}\n"
+            + $"focus.fru.sceneGeneration={focus.SceneGeneration}\n"
+            + $"focus.fru.placementApplyCount={focus.PlacementApplyCount}\n"
+            + $"focus.fru.attempts={focus.Attempts}\n"
+            + $"focus.fru.drawPosition={V(focus.DrawPosition)}\n"
+            + $"focus.fru.before={V(focus.FocusBefore)}\n"
+            + $"focus.fru.after={V(focus.FocusAfter)}";
+    }
 
     public void RecordStartupSnapshot(in TitleBackgroundColdStartOwnerSnapshot startupBefore)
     {
@@ -1028,6 +1046,7 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             $"coldStart.armMode={ArmMode}",
             $"coldStart.startupArmStatus={StartupArmStatus}",
             $"coldStart.startupArmReason={StartupArmReason}",
+            _fruFocusEvidence,
             $"startup.before.candidate={N(Before.CandidateId)}",
             $"startup.before.overrideEnabled={B(Before.OverrideEnabled)}",
             $"startup.before.v2Enabled={B(Before.V2Enabled)}",

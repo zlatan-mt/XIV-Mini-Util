@@ -438,10 +438,10 @@ public sealed unsafe partial class CharaSelectService : IDisposable
             return;
         }
 
-        _disposed = true;
         SelectedCharacterChanged = null;
         StopRecordingEmote();
         ResetEmoteMode();
+        _disposed = true;
         ClearReplayState();
         TryUnloadPrefetchLayout();
         _currentEntry = null;

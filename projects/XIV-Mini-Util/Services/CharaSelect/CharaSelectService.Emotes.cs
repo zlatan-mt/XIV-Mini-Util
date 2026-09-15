@@ -177,7 +177,8 @@ public sealed unsafe partial class CharaSelectService
     private bool PlayEmote(uint emoteId)
     {
         var entry = _currentEntry;
-        if (!_configuration.CharaSelectEmoteEnabled || entry == null || entry.Character == null)
+        if (!_configuration.CharaSelectEmoteEnabled
+            || !TryResolveCurrentEntryActor(entry, out var actor))
         {
             return false;
         }
@@ -188,8 +189,8 @@ public sealed unsafe partial class CharaSelectService
             return false;
         }
 
-        var character = entry.Character;
-        if (entry.VoiceId != 0)
+        var character = (Character*)actor.CharacterAddress;
+        if (entry!.VoiceId != 0)
         {
             CharaSelectCharacterApplier.ApplyVoice(character, entry.VoiceId);
         }
@@ -233,14 +234,25 @@ public sealed unsafe partial class CharaSelectService
     private void ResetEmoteMode()
     {
         var entry = _currentEntry;
-        if (entry == null || entry.Character == null)
+        if (!TryResolveCurrentEntryActor(entry, out var actor))
         {
             return;
         }
 
-        var character = entry.Character;
+        var character = (Character*)actor.CharacterAddress;
         character->SetMode(CharacterModes.Normal, 0);
         character->Timeline.TimelineSequencer.PlayTimeline(IdleTimelineId, null);
+    }
+
+    private bool TryResolveCurrentEntryActor(
+        CharaSelectCharacterState? entry,
+        out CharaSelectResolvedActorContext actor)
+    {
+        actor = default;
+        // Cleanup can run after display Original has removed the cached actor.
+        return entry != null
+            && TryResolveCurrentCharaSelectActor(out actor)
+            && actor.MatchesEntry(entry.ContentId, (nint)entry.Character);
     }
 
     private void CleanupCharaSelect()
@@ -327,8 +339,8 @@ public sealed unsafe partial class CharaSelectService
         }
 
         // 同じ理由で、最終確認も _currentEntry の値同士の比較だけに留めず、この時点の native 状態を
-        // 解決し直してから予約値と照合する（PlayEmote 自体は既存どおり _currentEntry 経由で書く。
-        // ここでの再解決は「今 native 側が指す actor が予約時点と同一か」の確認のみに使う）。
+        // 解決し直してから予約値と照合する。PlayEmote 側でも cached entry と現在 actor を照合し、
+        // 実際の書込みには再解決した actor を使う。
         var finalResolved = TryResolveCurrentCharaSelectActor(out var finalContext);
         var finalEntry = _currentEntry;
         var currentSelectedEmoteId = CurrentSelectedEmoteId;

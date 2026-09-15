@@ -67,6 +67,7 @@ internal readonly record struct TitleBackgroundCharaSelectPlacementProofSnapshot
 
 internal sealed class TitleBackgroundCharaSelectPlacementRuntimeState
 {
+    public TitleBackgroundFruFocusState FruFocus { get; } = new();
     private readonly record struct ConfirmedWriteKey(
         int SceneGeneration,
         string CandidateId,
@@ -581,6 +582,7 @@ internal sealed class TitleBackgroundCharaSelectPlacementRuntimeState
 
     public void Reset()
     {
+        FruFocus.Stop();
         SceneGeneration = 0;
         LastAppliedSceneGeneration = 0;
         LastAppliedActorKey = default;

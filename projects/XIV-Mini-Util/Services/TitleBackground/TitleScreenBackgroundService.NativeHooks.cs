@@ -685,6 +685,7 @@ public sealed unsafe partial class TitleScreenBackgroundService
         try
         {
             _hookLifecycle.SetCameraCurveMidPointHook?.Original(self, value);
+            TrySynchronizeFruFocusAfterCurveOriginal(self);
             TryApplyPhase2GSetCameraCurveMidPointOverride(self, frame, out phase2GStatus, out phase2GError);
             TryMaintainSavedViewPoseAfterCurveOriginal(frame, out poseMaintainStatus, out poseMaintainError);
         }

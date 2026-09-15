@@ -50,6 +50,7 @@
 
 - 安全ゲート、run-scoped 判定、pre-login snapshot、非永続 probe、`PersistentApplyEnabled` は緩めない。
 - world 座標を FixOn／カメラ焦点へ流さない。実機確認前に ground-verified へ昇格させない。
+  - 2026-09-15 のユーザー承認による限定例外: FRU の配置成功後、同一 scene・同一実キャラの描画位置へ焦点 X/Z だけを一度同期する。既存 SetCameraCurveMidPoint の Original 後を使い、描画位置が配置先へ反映されたことを確認する。焦点 Y・カメラ位置・保存設定は変更せず、ログイン後・自動確認 run 中・対象不一致では適用しない。DLL交換・ゲーム操作の承認は含まない。
 
 ## テストで固定する
 
