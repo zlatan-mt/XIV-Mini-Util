@@ -8976,5 +8976,79 @@ Test(591, "login wait evidence freezes without native reads and resets for the n
         && next.Contains("loginWait.backdropSuppressedDraws=0", StringComparison.Ordinal);
 });
 
+Test(592, "login confirmation is recognized before the queue hook and transitions to queue safely", () =>
+{
+    var prompt = TitleBackgroundLoginConfirmationPrompt.Create(new Lumina.Text.ReadOnly.ReadOnlySeString(
+        Convert.FromHexString("E3808C022903EA0203E3808DE381A7E383ADE382B0E382A4E383B3E38197E381BEE38199E3808202100103E38288E3828DE38197E38184E381A7E38199E3818BEFBC9F")));
+    if (prompt == null)
+        return false;
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ConfirmationPrompts.Add(prompt);
+    if (!state.TryObserveConfirmation(42, "SelectYesno", "「Test Character」でログインします。\nよろしいですか？")
+        || state.Kind != TitleBackgroundLoginDialogKind.Confirmation
+        || !state.CanSuppress(42, true, 1, 0, [42]))
+        return false;
+    state.MarkSuppressed();
+    state.ForgetDialog(42);
+    if (state.SuppressionObserved || state.CanSuppress(42, true, 1, 0, [42]))
+        return false;
+    state.ObserveDialog(43);
+    return state.Kind == TitleBackgroundLoginDialogKind.Queue
+        && state.CanSuppress(43, true, 1, 0, [43])
+        && !state.CanSuppress(42, true, 1, 0, [42]);
+});
+
+Test(593, "login confirmation matching rejects unrelated modal prompts and empty names", () =>
+{
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ConfirmationPrompts.Add(new("Log in with ", "?"));
+    return !state.TryObserveConfirmation(42, "SelectOk", "Log in with Test Character?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Delete Test Character?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Log in with ?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Log in with  ?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Log in with Test\nCharacter?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Prefix Log in with Test Character?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Log in with Test Character? Suffix")
+        && !state.TryObserveConfirmation(65536, "SelectYesno", "Log in with Test Character?")
+        && state.DialogAddonId == 0
+        && state.TryObserveConfirmation(42, "SelectYesno", "Log in with Test Character?");
+});
+
+Test(594, "localized login template supports linebreak and style payloads but fails closed on unknown macros", () =>
+{
+    var plain = Encoding.UTF8.GetBytes("Log in with ");
+    byte[] name = [2, 0x29, 3, 0xea, 2, 3];
+    byte[] linebreak = [2, 0x10, 1, 3];
+    byte[] color = [2, 0x48, 4, 0xf2, 1, 0xfa, 3];
+    var template = TitleBackgroundLoginConfirmationPrompt.Create(new Lumina.Text.ReadOnly.ReadOnlySeString(
+        plain.Concat(name).Concat(linebreak).Concat(color).Concat(Encoding.UTF8.GetBytes("Visit.")).ToArray()));
+    return template != null && template.Matches("Log in with Test Character\r\nVisit.")
+        && !template.Matches("Log in with Test Character\nOther.")
+        && TitleBackgroundLoginConfirmationPrompt.Create(new Lumina.Text.ReadOnly.ReadOnlySeString(plain)) == null
+        && TitleBackgroundLoginConfirmationPrompt.Create(new Lumina.Text.ReadOnly.ReadOnlySeString(
+            plain.Concat(name).Concat(name).ToArray())) == null
+        && TitleBackgroundLoginConfirmationPrompt.Create(new Lumina.Text.ReadOnly.ReadOnlySeString(
+            plain.Concat(name).Concat(new byte[] { 2, 0x20, 2, 2, 3 }).ToArray())) == null;
+});
+
+Test(595, "login confirmation evidence remains distinct from queue and resets on a new run", () =>
+{
+    var recorder = new TitleBackgroundColdStartDiagnosticRuntimeState();
+    recorder.Arm(default, default, ColdStartArmMode.Startup);
+    recorder.RecordLoginWaitBackdrop(true, TitleBackgroundLoginDialogKind.Confirmation);
+    recorder.RecordLoginWaitBackdrop(false, TitleBackgroundLoginDialogKind.Queue);
+    var report = recorder.Complete("test");
+    recorder.RecordLoginWaitBackdrop(true, TitleBackgroundLoginDialogKind.Confirmation);
+    if (!report.Contains("loginConfirm.dialogObserved=True", StringComparison.Ordinal)
+        || !report.Contains("loginConfirm.backdropSuppressedDraws=1", StringComparison.Ordinal)
+        || !report.Contains("loginWait.backdropSuppressedDraws=0", StringComparison.Ordinal)
+        || recorder.Complete("test") != report)
+        return false;
+    recorder.Arm(default, default, ColdStartArmMode.Startup);
+    var next = recorder.Complete("test");
+    return next.Contains("loginConfirm.dialogObserved=False", StringComparison.Ordinal)
+        && next.Contains("loginConfirm.backdropSuppressedDraws=0", StringComparison.Ordinal);
+});
+
     }
 }

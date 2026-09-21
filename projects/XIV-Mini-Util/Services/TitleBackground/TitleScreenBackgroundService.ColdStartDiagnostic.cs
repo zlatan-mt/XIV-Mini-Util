@@ -557,11 +557,20 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     private string _fruFocusEvidence = "focus.fru.status=not-observed";
     private bool _loginWaitObserved;
     private long _loginWaitSuppressedDraws;
+    private bool _loginConfirmationObserved;
+    private long _loginConfirmationSuppressedDraws;
 
-    public void RecordLoginWaitBackdrop(bool suppressed)
+    public void RecordLoginWaitBackdrop(bool suppressed, TitleBackgroundLoginDialogKind kind = TitleBackgroundLoginDialogKind.Queue)
     {
         if (!Active)
             return;
+        if (kind == TitleBackgroundLoginDialogKind.Confirmation)
+        {
+            _loginConfirmationObserved = true;
+            if (suppressed)
+                _loginConfirmationSuppressedDraws++;
+            return;
+        }
         _loginWaitObserved = true;
         if (suppressed)
             _loginWaitSuppressedDraws++;
@@ -610,6 +619,8 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         PendingClipboardText = string.Empty;
         _loginWaitObserved = false;
         _loginWaitSuppressedDraws = 0;
+        _loginConfirmationObserved = false;
+        _loginConfirmationSuppressedDraws = 0;
     }
 
     public void RecordScene(
@@ -1062,6 +1073,8 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             _fruFocusEvidence,
             $"loginWait.dialogObserved={B(_loginWaitObserved)}",
             $"loginWait.backdropSuppressedDraws={_loginWaitSuppressedDraws}",
+            $"loginConfirm.dialogObserved={B(_loginConfirmationObserved)}",
+            $"loginConfirm.backdropSuppressedDraws={_loginConfirmationSuppressedDraws}",
             "loginWait.evidenceNote=draw-skip-only;visual-result-not-measured",
             $"startup.before.candidate={N(Before.CandidateId)}",
             $"startup.before.overrideEnabled={B(Before.OverrideEnabled)}",
