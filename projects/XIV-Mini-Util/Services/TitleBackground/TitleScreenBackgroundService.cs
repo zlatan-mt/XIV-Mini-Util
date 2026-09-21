@@ -144,6 +144,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
     public TitleScreenBackgroundService(
         IGameInteropProvider gameInteropProvider,
         ISigScanner sigScanner,
+        IAddonLifecycle addonLifecycle,
         IFramework framework,
         IClientState clientState,
         IObjectTable objectTable,
@@ -179,6 +180,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         RecordTransitionEvent("plugin initialized", "constructor");
         InitializeHooks();
         ApplyFromConfiguration();
+        InitializeLoginWaitBackdrop(addonLifecycle);
     }
 
     public void SetEnabled(bool enabled)
@@ -612,6 +614,7 @@ public sealed unsafe partial class TitleScreenBackgroundService : IDisposable
         }
 
         _hookLifecycle.Disposed = true;
+        DisposeLoginWaitBackdrop();
         _framework.Update -= OnFrameworkUpdate;
         // The cold-start diagnostic subscribes its own Framework.Update handler, so the service that owns
         // that subscription must release it here rather than relying on an external Plugin-level stop call.

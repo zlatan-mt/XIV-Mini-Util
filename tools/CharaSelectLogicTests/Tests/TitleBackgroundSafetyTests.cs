@@ -8903,5 +8903,78 @@ Test(586, "placement reset cancels pending FRU focus before scene counters can b
         && focus.X == 0 && focus.Z == 0;
 });
 
+Test(587, "login wait backdrop requires the exact observed dialog as its sole owner", () =>
+{
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ObserveDialog(42);
+    return state.CanSuppress(42, true, 1, 0, [0, 42, 0, 0])
+        && !state.CanSuppress(43, true, 1, 0, [42])
+        && !state.CanSuppress(42, false, 1, 0, [42])
+        && !state.CanSuppress(42, true, 1, 0, [43])
+        && !state.CanSuppress(42, true, 1, 0, [0, 0, 0, 0]);
+});
+
+Test(588, "login wait backdrop preserves overlapping dialog and system filters", () =>
+{
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ObserveDialog(42);
+    return !state.CanSuppress(42, true, 2, 0, [42, 43])
+        && !state.CanSuppress(42, true, 1, 0, [42, 43])
+        && !state.CanSuppress(42, true, 1, 1, [42])
+        && !state.CanSuppress(42, true, 0, 0, [42])
+        && !state.CanSuppress(42, true, -1, 0, [42])
+        && !state.CanSuppress(42, true, 1, -1, [42])
+        && !state.CanSuppress(42, true, 1, 0, [42, 42]);
+});
+
+Test(589, "login wait dialog finalization prevents addon ID reuse from hiding another modal", () =>
+{
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ObserveDialog(42);
+    state.ForgetDialog(43);
+    if (!state.CanSuppress(42, true, 1, 0, [42]))
+        return false;
+    state.ForgetDialog(42);
+    return !state.CanSuppress(42, true, 1, 0, [42]);
+});
+
+Test(590, "login wait backdrop forgets old dialogs and rejects invalid addon IDs", () =>
+{
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ObserveDialog(42);
+    state.ObserveDialog(43);
+    if (state.CanSuppress(42, true, 1, 0, [42]) || !state.CanSuppress(43, true, 1, 0, [43]))
+        return false;
+    state.Reset();
+    if (state.CanSuppress(43, true, 1, 0, [43]))
+        return false;
+    foreach (var id in new uint[] { 0, 65536, uint.MaxValue })
+    {
+        state.ObserveDialog(id);
+        if (state.DialogAddonId != 0 || state.CanSuppress(id, true, 1, 0, [id]))
+            return false;
+    }
+    return true;
+});
+
+Test(591, "login wait evidence freezes without native reads and resets for the next run", () =>
+{
+    var recorder = new TitleBackgroundColdStartDiagnosticRuntimeState();
+    recorder.RecordLoginWaitBackdrop(true);
+    recorder.Arm(default, default, ColdStartArmMode.Startup);
+    recorder.RecordLoginWaitBackdrop(false);
+    recorder.RecordLoginWaitBackdrop(true);
+    var report = recorder.Complete("test");
+    recorder.RecordLoginWaitBackdrop(true);
+    if (!report.Contains("loginWait.dialogObserved=True", StringComparison.Ordinal)
+        || !report.Contains("loginWait.backdropSuppressedDraws=1", StringComparison.Ordinal)
+        || recorder.Complete("test") != report)
+        return false;
+    recorder.Arm(default, default, ColdStartArmMode.Startup);
+    var next = recorder.Complete("test");
+    return next.Contains("loginWait.dialogObserved=False", StringComparison.Ordinal)
+        && next.Contains("loginWait.backdropSuppressedDraws=0", StringComparison.Ordinal);
+});
+
     }
 }

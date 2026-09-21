@@ -555,6 +555,17 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
     public string Diagnosis { get; private set; } = "not-completed";
     public string PendingClipboardText { get; set; } = string.Empty;
     private string _fruFocusEvidence = "focus.fru.status=not-observed";
+    private bool _loginWaitObserved;
+    private long _loginWaitSuppressedDraws;
+
+    public void RecordLoginWaitBackdrop(bool suppressed)
+    {
+        if (!Active)
+            return;
+        _loginWaitObserved = true;
+        if (suppressed)
+            _loginWaitSuppressedDraws++;
+    }
 
     public void RecordFruFocusEvidence(TitleBackgroundFruFocusState focus)
     {
@@ -597,6 +608,8 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         Completed = false;
         Diagnosis = "collecting";
         PendingClipboardText = string.Empty;
+        _loginWaitObserved = false;
+        _loginWaitSuppressedDraws = 0;
     }
 
     public void RecordScene(
@@ -1047,6 +1060,9 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             $"coldStart.startupArmStatus={StartupArmStatus}",
             $"coldStart.startupArmReason={StartupArmReason}",
             _fruFocusEvidence,
+            $"loginWait.dialogObserved={B(_loginWaitObserved)}",
+            $"loginWait.backdropSuppressedDraws={_loginWaitSuppressedDraws}",
+            "loginWait.evidenceNote=draw-skip-only;visual-result-not-measured",
             $"startup.before.candidate={N(Before.CandidateId)}",
             $"startup.before.overrideEnabled={B(Before.OverrideEnabled)}",
             $"startup.before.v2Enabled={B(Before.V2Enabled)}",

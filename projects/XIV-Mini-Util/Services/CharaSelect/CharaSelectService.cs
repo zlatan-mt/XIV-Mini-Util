@@ -66,6 +66,7 @@ public sealed unsafe partial class CharaSelectService : IDisposable
     private int _dataCenterNamePollFrame;
     private int _lastLoginPosition;
     private int _lastOverrideLoginPosition;
+    private Action<uint>? _loginWaitDialogObserver;
     private CharaSelectSceneLastObservation _lastSceneObservation = CharaSelectSceneLastObservation.Empty;
     private CharaSelectStageProbeSnapshot _lastStageProbe = CharaSelectStageProbeSnapshot.Empty;
     private TitleBackgroundCharacterCompositionBridgeSnapshot _lastTitleBackgroundBridgeSnapshot = TitleBackgroundCharacterCompositionBridgeSnapshot.Empty;
@@ -153,12 +154,19 @@ public sealed unsafe partial class CharaSelectService : IDisposable
         ApplyOverrideTerritoryPrefetch();
     }
 
+    internal void SetLoginWaitDialogObserver(Action<uint>? observer)
+    {
+        _loginWaitDialogObserver = observer;
+        ApplyLoginWaitHookState();
+    }
+
     private void ApplyLoginWaitHookState()
     {
         try
         {
             var enabled = _configuration.CharaSelectPreloadTerritoryEnabled
-                || _configuration.CharaSelectOverrideTerritoryEnabled;
+                || _configuration.CharaSelectOverrideTerritoryEnabled
+                || _loginWaitDialogObserver != null;
             if (enabled)
             {
                 _openLoginWaitDialogHook?.Enable();

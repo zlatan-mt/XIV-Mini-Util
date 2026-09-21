@@ -325,6 +325,16 @@ public sealed unsafe partial class CharaSelectService
 
         try
         {
+            if (!_clientState.IsLoggedIn && agent != null && !agent->IsLoggedIn)
+                _loginWaitDialogObserver?.Invoke(agent->DialogAddonId);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Failed to observe CharaSelect login wait dialog.");
+        }
+
+        try
+        {
             if (_configuration.CharaSelectPreloadTerritoryEnabled)
             {
                 PreloadLoginTerritory();

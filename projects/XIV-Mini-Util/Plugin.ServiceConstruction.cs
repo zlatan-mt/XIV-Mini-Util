@@ -129,6 +129,7 @@ public sealed partial class Plugin : IDalamudPlugin
         _titleScreenBackgroundService = new TitleScreenBackgroundService(
             gameInteropProvider,
             sigScanner,
+            addonLifecycle,
             framework,
             clientState,
             objectTable,
