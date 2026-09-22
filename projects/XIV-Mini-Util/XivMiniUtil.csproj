@@ -13,21 +13,21 @@
     <DalamudPluginInternalName>XivMiniUtil</DalamudPluginInternalName>
     <DalamudPluginName>XIV Mini Util</DalamudPluginName>
     <DalamudPluginAuthor>zlatan-mt</DalamudPluginAuthor>
-    <DalamudPluginDescription>マテリア精製とアイテム分解を支援するミニユーティリティ。Dalamud API 15 Testing 対応。</DalamudPluginDescription>
+    <DalamudPluginDescription>キャラ選択画面の背景変更、マテリア操作・分解、販売場所・価格検索、日課と潜水艦の管理を支援します。</DalamudPluginDescription>
     <Name>XIV Mini Util</Name>
     <Author>zlatan-mt</Author>
-    <Description>マテリア精製とアイテム分解をワンクリックで進めるためのミニユーティリティです。対象アイテムの自動選択、確認ダイアログ操作、ジョブ条件チェック、高レベル警告を提供します。</Description>
-    <Punchline>Materia精製と分解を手早く支援します。</Punchline>
+    <Description>キャラ選択画面の背景変更、マテリア操作・分解、販売場所・価格検索、日課と潜水艦の管理を支援します。</Description>
+    <Punchline>キャラ選択の背景変更と日々の操作を支援します。</Punchline>
     <InternalName>XivMiniUtil</InternalName>
     <AssemblyName>XivMiniUtil</AssemblyName>
-    <AssemblyVersion>0.4.3.0</AssemblyVersion>
-    <Version>0.4.3</Version>
+    <AssemblyVersion>0.4.4.0</AssemblyVersion>
+    <Version>0.4.4</Version>
     <PackageProjectUrl>https://github.com/zlatan-mt/XIV-Mini-Util</PackageProjectUrl>
     <RepositoryUrl>https://github.com/zlatan-mt/XIV-Mini-Util</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <ApplicableVersion>any</ApplicableVersion>
     <DalamudApiLevel>15</DalamudApiLevel>
-    <Tags>utility;materia;desynth;automation</Tags>
+    <Tags>utility;materia;desynth;shop;character-select</Tags>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(OS)' != 'Windows_NT'">
