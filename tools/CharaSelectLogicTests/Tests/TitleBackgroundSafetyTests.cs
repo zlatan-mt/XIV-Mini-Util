@@ -8784,5 +8784,271 @@ Test(580, "switching away from FRU does not leave the placement owner active for
         && !configuration.TitleBackgroundCharaSelectPlacementPositionCaptured;
 });
 
+Test(581, "FRU focus catches up with a placed draw object while preserving native height and surrounding camera memory", () =>
+{
+    var state = new TitleBackgroundFruFocusState();
+    state.Arm(1, 1, default);
+    var camera = new FFXIVClientStructs.FFXIV.Client.Game.Camera();
+    camera.CameraBase.SceneCamera.Position = new(0, 2, 5);
+    camera.CameraBase.SceneCamera.LookAtVector = new(0, 1.6f, 0);
+    var expected = camera;
+    expected.CameraBase.SceneCamera.LookAtVector.X = 100;
+    expected.CameraBase.SceneCamera.LookAtVector.Z = 100;
+    var changed = state.TrySynchronize(ref camera.CameraBase.SceneCamera.LookAtVector,
+        new Vector3(100, 0, 100), new Vector3(100, 0, 100));
+    return changed && !state.Pending && state.Status == "applied"
+        && System.Runtime.InteropServices.MemoryMarshal.AsBytes(
+            System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref camera, 1)).SequenceEqual(
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(
+                System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref expected, 1)));
+});
+
+Test(582, "FRU focus does not reassert after success or move an already aligned focus", () =>
+{
+    var state = new TitleBackgroundFruFocusState();
+    state.Arm(1, 1, default);
+    var focus = new FFXIVClientStructs.FFXIV.Common.Math.Vector3(100, 2, 100);
+    var placed = new Vector3(100, 0, 100);
+    if (state.TrySynchronize(ref focus, placed, placed) || state.Status != "already-aligned")
+        return false;
+    focus.X = 101; // A later native/user adjustment must not be fought every frame.
+    return !state.TrySynchronize(ref focus, placed, placed) && focus.X == 101 && state.Attempts == 1;
+});
+
+Test(583, "FRU focus waits for actual draw propagation and bounds missing or nonfinite data", () =>
+{
+    var state = new TitleBackgroundFruFocusState();
+    state.Arm(1, 1, default);
+    var focus = new FFXIVClientStructs.FFXIV.Common.Math.Vector3(0, 2, 0);
+    var placed = new Vector3(100, 0, 100);
+    foreach (var draw in new Vector3?[] { null, Vector3.Zero, new(float.NaN, 0, 100) })
+        if (state.TrySynchronize(ref focus, draw, placed) || focus.X != 0 || focus.Z != 0)
+            return false;
+    if (!state.TrySynchronize(ref focus, placed, placed) || state.Attempts != 4)
+        return false;
+    state.Arm(1, 2, default);
+    focus.Y = float.NaN;
+    for (var i = 0; i < TitleBackgroundFruFocusState.AttemptBudget + 5; i++)
+        if (state.TrySynchronize(ref focus, placed, placed))
+            return false;
+    return !state.Pending && state.Status == "retry-exhausted"
+        && state.Attempts == TitleBackgroundFruFocusState.AttemptBudget;
+});
+
+Test(584, "FRU focus requires current confirmed placement identity and all prelogin gates", () =>
+{
+    var key = new CharaSelectActorIdentityKey(1, 0, 0, 10);
+    var actor = new CharaSelectResolvedActorContext((nint)0x2000, key, 0,
+        CharaSelectIdentityResolveSource.CurrentCharacterMapping,
+        true, true, true, true, true, true, true, true, true);
+    var fru = TitleBackgroundCharacterSelectOverrideCandidateRegistry.FruCandidateId;
+    var context = new TitleBackgroundResolvedActorContext(actor, true, true, true, false, true, 1, 1, true, fru, true);
+    var placement = new TitleBackgroundCharaSelectPlacementRuntimeState();
+    placement.RecordPlacementApplied(1, key, fru, new(100, 0, 100), 0, 1);
+    var state = new TitleBackgroundFruFocusState();
+    state.Arm(1, 1, key);
+    if (state.IsEligible(context, placement, false)) // no write confirmation yet
+        return false;
+    placement.RecordPlacementWriteAttempt(1, key, fru, true, true, true, "confirmed");
+    if (!state.IsEligible(context, placement, false) || state.IsEligible(context, placement, true))
+        return false;
+    var blocked = new[]
+    {
+        context with { PreLogin = false }, context with { PlacementPathActive = false },
+        context with { ServiceReady = false }, context with { HookProbeMode = true },
+        context with { CharaSelectSessionActive = false }, context with { IsCharaSelectMap = false },
+        context with { ActiveSceneGeneration = 2 }, context with { RuntimeSceneGeneration = 2 },
+        context with { CandidateMatches = false }, context with { CandidateId = "custom:n4f4" },
+        context with { Actor = actor with { MappingHit = false } },
+        context with { Actor = actor with { IdentityKey = key with { EntityId = 11 } } },
+    };
+    if (blocked.Any(c => state.IsEligible(c, placement, false)))
+        return false;
+    placement.RecordPlacementApplied(1, key, fru, new(100, 0, 100), 0, 2);
+    if (state.IsEligible(context, placement, false))
+        return false;
+    state.Arm(1, 2, key);
+    if (!state.IsEligible(context, placement, false))
+        return false;
+    placement.MarkLoginStopped();
+    return !state.IsEligible(context, placement, false);
+});
+
+Test(585, "FRU focus report freezes values at completion without native reads", () =>
+{
+    var recorder = new TitleBackgroundColdStartDiagnosticRuntimeState();
+    recorder.Arm(default, default, ColdStartArmMode.Startup);
+    var state = new TitleBackgroundFruFocusState();
+    state.Arm(1, 1, default);
+    var focus = new FFXIVClientStructs.FFXIV.Common.Math.Vector3(0, 1.6f, 0);
+    state.TrySynchronize(ref focus, new Vector3(100, 0, 100), new Vector3(100, 0, 100));
+    recorder.RecordFruFocusEvidence(state);
+    var report = recorder.Complete("post-placement-visual-candidate");
+    state.Arm(2, 2, default);
+    recorder.RecordFruFocusEvidence(state);
+    return report.Contains("focus.fru.status=applied", StringComparison.Ordinal)
+        && report.Contains("focus.fru.before=(0,1.6,0)", StringComparison.Ordinal)
+        && report.Contains("focus.fru.after=(100,1.6,100)", StringComparison.Ordinal)
+        && recorder.Complete("post-placement-visual-candidate") == report;
+});
+
+Test(586, "placement reset cancels pending FRU focus before scene counters can be reused", () =>
+{
+    var placement = new TitleBackgroundCharaSelectPlacementRuntimeState();
+    placement.FruFocus.Arm(1, 1, new CharaSelectActorIdentityKey(1, 0, 0, 10));
+    placement.Reset();
+    var focus = new FFXIVClientStructs.FFXIV.Common.Math.Vector3(0, 1.6f, 0);
+    return !placement.FruFocus.Pending
+        && !placement.FruFocus.TrySynchronize(ref focus, new Vector3(100, 0, 100), new Vector3(100, 0, 100))
+        && focus.X == 0 && focus.Z == 0;
+});
+
+Test(587, "login wait backdrop requires the exact observed dialog as its sole owner", () =>
+{
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ObserveDialog(42);
+    return state.CanSuppress(42, true, 1, 0, [0, 42, 0, 0])
+        && !state.CanSuppress(43, true, 1, 0, [42])
+        && !state.CanSuppress(42, false, 1, 0, [42])
+        && !state.CanSuppress(42, true, 1, 0, [43])
+        && !state.CanSuppress(42, true, 1, 0, [0, 0, 0, 0]);
+});
+
+Test(588, "login wait backdrop preserves overlapping dialog and system filters", () =>
+{
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ObserveDialog(42);
+    return !state.CanSuppress(42, true, 2, 0, [42, 43])
+        && !state.CanSuppress(42, true, 1, 0, [42, 43])
+        && !state.CanSuppress(42, true, 1, 1, [42])
+        && !state.CanSuppress(42, true, 0, 0, [42])
+        && !state.CanSuppress(42, true, -1, 0, [42])
+        && !state.CanSuppress(42, true, 1, -1, [42])
+        && !state.CanSuppress(42, true, 1, 0, [42, 42]);
+});
+
+Test(589, "login wait dialog finalization prevents addon ID reuse from hiding another modal", () =>
+{
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ObserveDialog(42);
+    state.ForgetDialog(43);
+    if (!state.CanSuppress(42, true, 1, 0, [42]))
+        return false;
+    state.ForgetDialog(42);
+    return !state.CanSuppress(42, true, 1, 0, [42]);
+});
+
+Test(590, "login wait backdrop forgets old dialogs and rejects invalid addon IDs", () =>
+{
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ObserveDialog(42);
+    state.ObserveDialog(43);
+    if (state.CanSuppress(42, true, 1, 0, [42]) || !state.CanSuppress(43, true, 1, 0, [43]))
+        return false;
+    state.Reset();
+    if (state.CanSuppress(43, true, 1, 0, [43]))
+        return false;
+    foreach (var id in new uint[] { 0, 65536, uint.MaxValue })
+    {
+        state.ObserveDialog(id);
+        if (state.DialogAddonId != 0 || state.CanSuppress(id, true, 1, 0, [id]))
+            return false;
+    }
+    return true;
+});
+
+Test(591, "login wait evidence freezes without native reads and resets for the next run", () =>
+{
+    var recorder = new TitleBackgroundColdStartDiagnosticRuntimeState();
+    recorder.RecordLoginWaitBackdrop(true);
+    recorder.Arm(default, default, ColdStartArmMode.Startup);
+    recorder.RecordLoginWaitBackdrop(false);
+    recorder.RecordLoginWaitBackdrop(true);
+    var report = recorder.Complete("test");
+    recorder.RecordLoginWaitBackdrop(true);
+    if (!report.Contains("loginWait.dialogObserved=True", StringComparison.Ordinal)
+        || !report.Contains("loginWait.backdropSuppressedDraws=1", StringComparison.Ordinal)
+        || recorder.Complete("test") != report)
+        return false;
+    recorder.Arm(default, default, ColdStartArmMode.Startup);
+    var next = recorder.Complete("test");
+    return next.Contains("loginWait.dialogObserved=False", StringComparison.Ordinal)
+        && next.Contains("loginWait.backdropSuppressedDraws=0", StringComparison.Ordinal);
+});
+
+Test(592, "login confirmation is recognized before the queue hook and transitions to queue safely", () =>
+{
+    var prompt = TitleBackgroundLoginConfirmationPrompt.Create(new Lumina.Text.ReadOnly.ReadOnlySeString(
+        Convert.FromHexString("E3808C022903EA0203E3808DE381A7E383ADE382B0E382A4E383B3E38197E381BEE38199E3808202100103E38288E3828DE38197E38184E381A7E38199E3818BEFBC9F")));
+    if (prompt == null)
+        return false;
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ConfirmationPrompts.Add(prompt);
+    if (!state.TryObserveConfirmation(42, "SelectYesno", "「Test Character」でログインします。\nよろしいですか？")
+        || state.Kind != TitleBackgroundLoginDialogKind.Confirmation
+        || !state.CanSuppress(42, true, 1, 0, [42]))
+        return false;
+    state.MarkSuppressed();
+    state.ForgetDialog(42);
+    if (state.SuppressionObserved || state.CanSuppress(42, true, 1, 0, [42]))
+        return false;
+    state.ObserveDialog(43);
+    return state.Kind == TitleBackgroundLoginDialogKind.Queue
+        && state.CanSuppress(43, true, 1, 0, [43])
+        && !state.CanSuppress(42, true, 1, 0, [42]);
+});
+
+Test(593, "login confirmation matching rejects unrelated modal prompts and empty names", () =>
+{
+    var state = new TitleBackgroundLoginWaitBackdropState();
+    state.ConfirmationPrompts.Add(new("Log in with ", "?"));
+    return !state.TryObserveConfirmation(42, "SelectOk", "Log in with Test Character?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Delete Test Character?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Log in with ?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Log in with  ?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Log in with Test\nCharacter?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Prefix Log in with Test Character?")
+        && !state.TryObserveConfirmation(42, "SelectYesno", "Log in with Test Character? Suffix")
+        && !state.TryObserveConfirmation(65536, "SelectYesno", "Log in with Test Character?")
+        && state.DialogAddonId == 0
+        && state.TryObserveConfirmation(42, "SelectYesno", "Log in with Test Character?");
+});
+
+Test(594, "localized login template supports linebreak and style payloads but fails closed on unknown macros", () =>
+{
+    var plain = Encoding.UTF8.GetBytes("Log in with ");
+    byte[] name = [2, 0x29, 3, 0xea, 2, 3];
+    byte[] linebreak = [2, 0x10, 1, 3];
+    byte[] color = [2, 0x48, 4, 0xf2, 1, 0xfa, 3];
+    var template = TitleBackgroundLoginConfirmationPrompt.Create(new Lumina.Text.ReadOnly.ReadOnlySeString(
+        plain.Concat(name).Concat(linebreak).Concat(color).Concat(Encoding.UTF8.GetBytes("Visit.")).ToArray()));
+    return template != null && template.Matches("Log in with Test Character\r\nVisit.")
+        && !template.Matches("Log in with Test Character\nOther.")
+        && TitleBackgroundLoginConfirmationPrompt.Create(new Lumina.Text.ReadOnly.ReadOnlySeString(plain)) == null
+        && TitleBackgroundLoginConfirmationPrompt.Create(new Lumina.Text.ReadOnly.ReadOnlySeString(
+            plain.Concat(name).Concat(name).ToArray())) == null
+        && TitleBackgroundLoginConfirmationPrompt.Create(new Lumina.Text.ReadOnly.ReadOnlySeString(
+            plain.Concat(name).Concat(new byte[] { 2, 0x20, 2, 2, 3 }).ToArray())) == null;
+});
+
+Test(595, "login confirmation evidence remains distinct from queue and resets on a new run", () =>
+{
+    var recorder = new TitleBackgroundColdStartDiagnosticRuntimeState();
+    recorder.Arm(default, default, ColdStartArmMode.Startup);
+    recorder.RecordLoginWaitBackdrop(true, TitleBackgroundLoginDialogKind.Confirmation);
+    recorder.RecordLoginWaitBackdrop(false, TitleBackgroundLoginDialogKind.Queue);
+    var report = recorder.Complete("test");
+    recorder.RecordLoginWaitBackdrop(true, TitleBackgroundLoginDialogKind.Confirmation);
+    if (!report.Contains("loginConfirm.dialogObserved=True", StringComparison.Ordinal)
+        || !report.Contains("loginConfirm.backdropSuppressedDraws=1", StringComparison.Ordinal)
+        || !report.Contains("loginWait.backdropSuppressedDraws=0", StringComparison.Ordinal)
+        || recorder.Complete("test") != report)
+        return false;
+    recorder.Arm(default, default, ColdStartArmMode.Startup);
+    var next = recorder.Complete("test");
+    return next.Contains("loginConfirm.dialogObserved=False", StringComparison.Ordinal)
+        && next.Contains("loginConfirm.backdropSuppressedDraws=0", StringComparison.Ordinal);
+});
+
     }
 }

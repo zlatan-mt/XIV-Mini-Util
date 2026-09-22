@@ -38,7 +38,7 @@ try {
         $env:DALAMUD_HOME = $DalamudHome
     }
 
-    & dotnet build $project -c Release
+    & dotnet build $project -c Release -p:DevPluginOutputDir=
     if ($LASTEXITCODE -ne 0) {
         throw "Release build failed with exit code $LASTEXITCODE"
     }
@@ -58,3 +58,7 @@ foreach ($artifact in @($manifestPath, $latestZipPath)) {
 Write-Host "Release package verified:"
 Write-Host "  $latestZipPath"
 Write-Host "  $manifestPath"
+
+$distributionZipPath = Join-Path $root 'XivMiniUtil.zip'
+Copy-Item -LiteralPath $latestZipPath -Destination $distributionZipPath
+Write-Host "  $distributionZipPath"

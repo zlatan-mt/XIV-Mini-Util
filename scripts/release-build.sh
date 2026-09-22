@@ -31,15 +31,12 @@ DOTNET_CLI_TELEMETRY_OPTOUT=1 \
 "$DOTNET_BIN" build "$PROJECT" -c "$BUILD_CONFIG" -p:DevPluginOutputDir=
 
 ZIP_PATH="$ROOT_DIR/XivMiniUtil.zip"
-DLL_PATH="$ROOT_DIR/projects/XIV-Mini-Util/bin/Release/XivMiniUtil.dll"
-JSON_PATH="$ROOT_DIR/projects/XIV-Mini-Util/bin/Release/XivMiniUtil.json"
+PACKAGE_PATH="$ROOT_DIR/projects/XIV-Mini-Util/bin/Release/XivMiniUtil/latest.zip"
 
-if [[ ! -f "$DLL_PATH" || ! -f "$JSON_PATH" ]]; then
-  echo "Build outputs not found. Expected:" >&2
-  echo "  $DLL_PATH" >&2
-  echo "  $JSON_PATH" >&2
+if [[ ! -f "$PACKAGE_PATH" ]]; then
+  echo "Release package not found: $PACKAGE_PATH" >&2
   exit 1
 fi
 
-zip -j "$ZIP_PATH" "$DLL_PATH" "$JSON_PATH"
+cp "$PACKAGE_PATH" "$ZIP_PATH"
 echo "Created: $ZIP_PATH"

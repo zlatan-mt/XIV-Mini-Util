@@ -554,6 +554,44 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
 
     public string Diagnosis { get; private set; } = "not-completed";
     public string PendingClipboardText { get; set; } = string.Empty;
+    private string _fruFocusEvidence = "focus.fru.status=not-observed";
+    private bool _loginWaitObserved;
+    private long _loginWaitSuppressedDraws;
+    private bool _loginConfirmationObserved;
+    private long _loginConfirmationSuppressedDraws;
+
+    public void RecordLoginWaitBackdrop(bool suppressed, TitleBackgroundLoginDialogKind kind = TitleBackgroundLoginDialogKind.Queue)
+    {
+        if (!Active)
+            return;
+        if (kind == TitleBackgroundLoginDialogKind.Confirmation)
+        {
+            _loginConfirmationObserved = true;
+            if (suppressed)
+                _loginConfirmationSuppressedDraws++;
+            return;
+        }
+        _loginWaitObserved = true;
+        if (suppressed)
+            _loginWaitSuppressedDraws++;
+    }
+
+    public void RecordFruFocusEvidence(TitleBackgroundFruFocusState focus)
+    {
+        if (!Active)
+            return;
+
+        static string V(Vector3? value) => value.HasValue
+            ? FormattableString.Invariant($"({value.Value.X:0.####},{value.Value.Y:0.####},{value.Value.Z:0.####})")
+            : "none";
+        _fruFocusEvidence = $"focus.fru.status={focus.Status}\n"
+            + $"focus.fru.sceneGeneration={focus.SceneGeneration}\n"
+            + $"focus.fru.placementApplyCount={focus.PlacementApplyCount}\n"
+            + $"focus.fru.attempts={focus.Attempts}\n"
+            + $"focus.fru.drawPosition={V(focus.DrawPosition)}\n"
+            + $"focus.fru.before={V(focus.FocusBefore)}\n"
+            + $"focus.fru.after={V(focus.FocusAfter)}";
+    }
 
     public void RecordStartupSnapshot(in TitleBackgroundColdStartOwnerSnapshot startupBefore)
     {
@@ -579,6 +617,10 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
         Completed = false;
         Diagnosis = "collecting";
         PendingClipboardText = string.Empty;
+        _loginWaitObserved = false;
+        _loginWaitSuppressedDraws = 0;
+        _loginConfirmationObserved = false;
+        _loginConfirmationSuppressedDraws = 0;
     }
 
     public void RecordScene(
@@ -1028,6 +1070,12 @@ internal sealed class TitleBackgroundColdStartDiagnosticRuntimeState
             $"coldStart.armMode={ArmMode}",
             $"coldStart.startupArmStatus={StartupArmStatus}",
             $"coldStart.startupArmReason={StartupArmReason}",
+            _fruFocusEvidence,
+            $"loginWait.dialogObserved={B(_loginWaitObserved)}",
+            $"loginWait.backdropSuppressedDraws={_loginWaitSuppressedDraws}",
+            $"loginConfirm.dialogObserved={B(_loginConfirmationObserved)}",
+            $"loginConfirm.backdropSuppressedDraws={_loginConfirmationSuppressedDraws}",
+            "loginWait.evidenceNote=draw-skip-only;visual-result-not-measured",
             $"startup.before.candidate={N(Before.CandidateId)}",
             $"startup.before.overrideEnabled={B(Before.OverrideEnabled)}",
             $"startup.before.v2Enabled={B(Before.V2Enabled)}",

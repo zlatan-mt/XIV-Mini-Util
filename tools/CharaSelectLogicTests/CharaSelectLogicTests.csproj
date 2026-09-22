@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\projects\XIV-Mini-Util\XivMiniUtil.csproj" />
+    <ProjectReference Include="..\..\projects\XIV-Mini-Util\XivMiniUtil.csproj" AdditionalProperties="DevPluginOutputDir=" />
     <Reference Include="Dalamud">
       <HintPath>$(APPDATA)\XIVLauncher\addon\Hooks\dev\Dalamud.dll</HintPath>
       <Private>true</Private>

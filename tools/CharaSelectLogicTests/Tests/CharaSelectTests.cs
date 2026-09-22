@@ -678,5 +678,50 @@ Test(432, "delayed emote does not play when selected emote no longer matches the
         scheduledEmoteId: 48);
 });
 
+Test(433, "emote cleanup never calls native setters through a cached actor after disposal", () =>
+{
+    return CachedActorWriteIsBlocked("ResetEmoteMode", null);
+});
+
+Test(434, "ordinary emote replay never calls native setters through a cached actor after disposal", () =>
+{
+    return CachedActorWriteIsBlocked("PlayEmote", new object[] { 48u });
+});
+
+Test(435, "cached emote entry must match both current content and actor address", () =>
+{
+    var actor = new CharaSelectResolvedActorContext((nint)0x2000,
+        new CharaSelectActorIdentityKey(1, 0, 0, 10), 0,
+        CharaSelectIdentityResolveSource.CurrentCharacterMapping,
+        true, true, true, true, true, true, true, true, true);
+    return actor.MatchesEntry(1, 0x2000)
+        && !actor.MatchesEntry(2, 0x2000)
+        && !actor.MatchesEntry(1, 0x3000)
+        && !(actor with { MappingHit = false }).MatchesEntry(1, 0x2000);
+});
+
+    }
+
+    private static unsafe bool CachedActorWriteIsBlocked(string methodName, object[]? arguments)
+    {
+        var service = (CharaSelectService)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(
+            typeof(CharaSelectService));
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        FFXIVClientStructs.FFXIV.Client.Game.Character.Character character = default;
+        typeof(CharaSelectService).GetField("_currentEntry", flags)!.SetValue(service,
+            new CharaSelectCharacterState(&character, 1, 1238, 1, 42));
+        typeof(CharaSelectService).GetField("_disposed", flags)!.SetValue(service, true);
+        typeof(CharaSelectService).GetField("_configuration", flags)!.SetValue(service,
+            new Configuration { CharaSelectEmoteEnabled = true });
+        try
+        {
+            var result = typeof(CharaSelectService).GetMethod(methodName, flags)!.Invoke(service, arguments);
+            return methodName == "ResetEmoteMode" || result is false;
+        }
+        catch (System.Reflection.TargetInvocationException)
+        {
+            // Native entrypoints are intentionally uninitialized: reaching one is the regression.
+            return false;
+        }
     }
 }

@@ -2,11 +2,11 @@
   {
     "Author": "zlatan-mt",
     "Name": "XIV Mini Util",
-    "Punchline": "Materia精製と分解を手早く支援します。",
-    "Description": "マテリア精製とアイテム分解、NPC販売場所検索を支援するミニユーティリティです。",
+    "Punchline": "キャラ選択の背景変更と日々の操作を支援します。",
+    "Description": "キャラ選択画面の背景変更、マテリア操作・分解、販売場所・価格検索、日課と潜水艦の管理を支援します。",
     "InternalName": "XivMiniUtil",
-    "AssemblyVersion": "0.4.3.0",
-    "TestingAssemblyVersion": "0.4.3.0",
+    "AssemblyVersion": "0.4.4.0",
+    "TestingAssemblyVersion": "0.4.4.0",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
     "TestingDalamudApiLevel": 15,
@@ -14,7 +14,8 @@
       "utility",
       "materia",
       "desynth",
-      "shop"
+      "shop",
+      "character-select"
     ],
     "IsHide": false,
     "IsTestingExclusive": false,
@@ -22,11 +23,11 @@
     "RepoUrl": "https://github.com/zlatan-mt/XIV-Mini-Util",
     "IconUrl": "https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/images/icon.png",
     "ImageUrls": [],
-    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.3/XivMiniUtil.zip",
-    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.3/XivMiniUtil.zip",
-    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.3/XivMiniUtil.zip",
-    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.3/XivMiniUtil.zip",
-    "Changelog": "0.4.3: 「FRU クリア後ステージ」背景の固定時刻を 15:17 ET から 13:00 ET (DayTimeSeconds=46800) へ調整。Clear Skies / 配置 / カメラ / 静的アンカー / 抑止の挙動は変更なし。VFX への書き込みは引き続き 0 件。",
-    "LastUpdate": 1788516323
+    "DownloadLink": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.4/XivMiniUtil.zip",
+    "DownloadLinkInstall": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.4/XivMiniUtil.zip",
+    "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.4/XivMiniUtil.zip",
+    "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.4/XivMiniUtil.zip",
+    "Changelog": "0.4.4: 背景変更中のログイン確認・混雑待ちで、背景が暗くなる表示を改善。キャラ選択画面の保存エモート再生対象の確認と、FRU背景での配置後のカメラ焦点を調整。",
+    "LastUpdate": 1790055801
   }
 ]

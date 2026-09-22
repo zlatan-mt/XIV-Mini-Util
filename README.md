@@ -6,7 +6,7 @@
 
 FFXIV用のDalamudプラグインです。
 
-マテリア精製・装着マテリア回収と分解の操作支援、NPC販売場所の検索、外部マーケット最安値確認、日課チェックリスト、シャキ通知、キャラ選択画面の保存エモート再生を提供します。
+キャラ選択画面の背景変更と保存エモート再生、マテリア精製・装着マテリア回収と分解の操作支援、NPC販売場所の検索、外部マーケット最安値確認、日課チェックリスト、シャキ通知、潜水艦の帰投サマリーを提供します。
 
 ## 機能
 
@@ -23,21 +23,20 @@ FFXIV用のDalamudプラグインです。
 
 ## インストール（カスタムプラグイン）
 
-現在の配布版は次の通りです。
+Stable / Testing ともに Dalamud API 15 向けです。公開済みのバージョンと変更点は [Releases](https://github.com/zlatan-mt/XIV-Mini-Util/releases/latest) で確認できます。
 
-- Stable: `0.4.0` / Dalamud API 15
-- Testing: `0.4.0` / Dalamud API 15
+1. Dalamudの設定で「Custom Plugin Repositories」に次のURLを追加して保存します。
 
-`0.3.0 / API14` は過去リリースとして残しています。
+   ```text
+   https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/pluginmaster.json
+   ```
 
-1. `pluginmaster.json` をRawで公開します。  
-   例: `https://raw.githubusercontent.com/zlatan-mt/XIV-Mini-Util/main/pluginmaster.json`
+2. プラグインインストーラーの一覧を更新し、`XIV Mini Util` をインストールします。
+3. ゲーム内で `/xmu` を入力すると設定や各機能を利用できます。更新もプラグインインストーラーから行います。
 
-2. Dalamud の「Custom Plugin Repositories」にURLを追加します。
+開発用の `XIV Mini Util (Dev)` を利用していた場合は、同時に有効にしないでください。通常版とDev版は設定の保存先が別です。設定を引き継ぐ場合のバックアップと切り替え手順は [配布手順](docs/release/custom-plugin-distribution.md#dev版から通常版への切り替え) を参照してください。
 
-3. `XivMiniUtil.zip` をGitHub Releasesに添付して配布します。
-
-配布手順の詳細は `docs/release/custom-plugin-distribution.md` を参照してください。
+配布する側の作業は [カスタムプラグイン配布手順](docs/release/custom-plugin-distribution.md) にまとめています。
 
 ## 使い方（基本）
 
@@ -92,7 +91,7 @@ FFXIV用のDalamudプラグインです。
 ## 開発者向け（必要な場合のみ）
 
 ```powershell
-dotnet build projects/XIV-Mini-Util/XivMiniUtil.csproj -c Release
+dotnet build projects/XIV-Mini-Util/XivMiniUtil.csproj -c Release -p:DevPluginOutputDir=
 ```
 
 現在のソースツリーはStable API15版のビルド用です。旧Stable API14版を再生成する場合は、`v0.3.0` タグなどAPI14設定が残るソースからビルドします。

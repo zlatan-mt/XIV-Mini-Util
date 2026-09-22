@@ -94,6 +94,9 @@ internal readonly record struct CharaSelectResolvedActorContext(
         && IdentityConsistent
         && IdentityKey.Valid;
 
+    public bool MatchesEntry(ulong contentId, nint characterAddress)
+        => Valid && ContentId == contentId && CharacterAddress == characterAddress;
+
     public static CharaSelectResolvedActorContext Unresolved(
         int normalizedIndex = -1,
         bool currentCharacterAvailable = false,
