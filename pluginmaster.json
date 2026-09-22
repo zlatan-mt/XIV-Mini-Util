@@ -28,6 +28,6 @@
     "DownloadLinkUpdate": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.4/XivMiniUtil.zip",
     "DownloadLinkTesting": "https://github.com/zlatan-mt/XIV-Mini-Util/releases/download/v0.4.4/XivMiniUtil.zip",
     "Changelog": "0.4.4: 背景変更中のログイン確認・混雑待ちで、背景が暗くなる表示を改善。キャラ選択画面の保存エモート再生対象の確認と、FRU背景での配置後のカメラ焦点を調整。",
-    "LastUpdate": 1790054933
+    "LastUpdate": 1790055801
   }
 ]
