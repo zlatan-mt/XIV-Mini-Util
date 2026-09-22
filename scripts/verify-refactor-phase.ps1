@@ -30,7 +30,7 @@ function Invoke-Step {
 Push-Location $root
 try {
     Invoke-Step 'CharaSelect logic tests' {
-        dotnet run --project $logicTests
+        dotnet run --project $logicTests -p:DevPluginOutputDir=
     }
 
     Invoke-Step 'Debug build' {
